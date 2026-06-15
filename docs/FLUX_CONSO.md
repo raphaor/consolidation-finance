@@ -115,17 +115,17 @@ Les **automatismes de consolidation** (conversion, méthodes, variations de pér
 | Code | Libellé | Taux conversion | Écart → | Généré par | MVP |
 |---|---|---|---|---|---|
 | **F00** | Ouverture | clôture N-1 | F80 | Report d'ouverture (à-nouveau de F99 N-1) | MVP |
-| **F01** | Entrée de consolidation | *(à définir)* | *(à définir)* | Variation de périmètre — entrée | MVP |
+| **F01** | Entrée de consolidation | clôture N-1 | F80 | Variation de périmètre — entrée | MVP |
 | **F07** | Fusion à l'ouverture | *(à préciser)* | *(à préciser)* | Extourne F00 (`F07 = −F00`) | post-MVP |
 | **F70** | Fusion en cours d'exercice | *(à préciser)* | *(à préciser)* | Extourne F99 (`F70 = −F99`) | post-MVP |
 | **F20** | Variation de bilan | moyen | F81 | Saisie source / agrégation | MVP |
 | **F80** | Écart de conversion (ouverture → clôture) | clôture N (terminal) | — | Conversion (écart de F00) | MVP |
 | **F81** | Conversion taux moyen → clôture | clôture N (terminal) | — | Conversion (écart de F20) | MVP |
 | **F95** | Variation de taux d'intérêt | *(à définir)* | *(à définir)* | Règles de consolidation (éditeur) | post-MVP |
-| **F98** | Sortie de périmètre | *(à définir)* | *(à définir)* | Variation de périmètre — sortie | MVP |
+| **F98** | Sortie de périmètre | clôture N (terminal) | — | Variation de périmètre — sortie | MVP |
 | **F99** | Clôture | clôture N | — (0) | Reconstruction par identité | MVP |
 
-> Cases « à définir » : taux et écart des flux de périmètre (F01/F98) — F01 suit la logique ouverture (clôture N-1 ?), F98 suit la logique clôture (clôture N ?). À confirmer. Mécanique de reclassification détaillée §9.
+> Taux de conversion des flux de périmètre confirmés (2026-06-16) : **F01 = clôture N-1** (logique ouverture, écart → F80) ; **F98 = clôture N** (logique clôture, terminal — pas d'écart). Mécanique de reclassification détaillée §9.
 
 ## 7. Logique de numérotation
 
