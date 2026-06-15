@@ -42,7 +42,9 @@ Proposition technique (à confirmer couche par couche). Le moteur de consolidati
 
 Un seul binaire (prototype), trois responsabilités séparées en crates pour la maintenabilité.
 
-**Pipeline d'élaboration** : le moteur applique la consolidation en **4 niveaux successifs** — **corporate** (agrégation des saisies) → **reclassifié** (reclassifications de périmètre, en devise fonctionnelle) → **converti** (conversion multi-devises) → **consolidé** (application des méthodes + règles). Détail dans [`FLUX_CONSO.md`](./FLUX_CONSO.md).
+**Stockage** : les données consolidées sont persistées à **3 niveaux** (corporate → converti → consolidé), chacun matérialisant l'état des données après une phase d'élaboration.
+
+**Traitement** : le moteur calcule ces niveaux en **4 étapes** — agrégation → reclassification (périmètre, en devise fonctionnelle) → conversion (multi-devises, F80/F81) → consolidation (méthodes + règles). La reclassification est une étape de calcul intermédiaire dont le résultat est stocké au niveau *converti*. Détail dans [`FLUX_CONSO.md`](./FLUX_CONSO.md).
 
 ## 3. Stockage — DÉCIDÉ
 

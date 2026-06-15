@@ -1,7 +1,7 @@
 # Analyse : ordre des reclassifications vs conversion (Q26)
 
 > **Conclusion** : reclassification de périmètre **AVANT** conversion.
-> Pipeline : `Corporate → Reclassification → Conversion → Consolidé` (4 niveaux au lieu de 3).
+> Étape de traitement : `Agrégation → Reclassification → Conversion → Consolidation` (4 étapes pour 3 niveaux de stockage).
 
 Simulation : [`simulations/consolidation_sim.py`](../simulations/consolidation_sim.py)
 
@@ -43,11 +43,11 @@ Mais l'approche A est structurellement supérieure sur trois points.
 
 ## Décision
 
-Le pipeline devient **4 niveaux** :
+La reclassification se fait **avant** la conversion dans le pipeline de traitement. Mais les **niveaux de stockage restent à 3** — la reclassification est une étape de calcul intermédiaire dont le résultat atterrit au niveau *converti*.
 
-| Niveau | Rôle | Traitements |
-|---|---|---|
-| **1. Corporate** | Agrège les données saisies (par entité, en devise fonctionnelle) | Agrégation des écritures source |
-| **2. Reclassifié** | Reclassifications de périmètre (en devise fonctionnelle) | Entrées (F00→F01), sorties (collapse→F98), fusions (F07/F70 post-MVP) |
-| **3. Converti** | Conversion multi-devises | F80/F81 générés sur les flux reclassifiés |
-| **4. Consolidé** | Mécanismes de consolidation | Méthodes (globale / proportionnelle / équivalence) ; éditeur de règles (post-MVP) |
+| Concept | Détail |
+|---|---|
+| **Niveaux de stockage (3)** | Corporate → Converti → Consolidé (inchangés) |
+| **Étapes de traitement (4)** | A. Agrégation → B. Reclassification → C. Conversion → D. Consolidation |
+
+L'étape B produit un état intermédiaire en devise fonctionnelle qui n'est pas persisté séparément — il est consommé par l'étape C. Le niveau *converti* stocke le résultat combiné de B + C.
