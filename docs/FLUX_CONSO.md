@@ -10,15 +10,16 @@ La consolidation est **par les flux** : chaque traitement de consolidation agit 
 
 La consolidation distingue deux concepts :
 
-- **Niveaux de stockage** (3) : où les données vivent dans la base. Chaque ligne consolidée existe à ces 3 niveaux, qui matérialisent l'état des données après chaque phase d'élaboration.
-- **Étapes de traitement** (4) : l'ordre dans lequel le moteur calcule ces niveaux. Les reclassifications de périmètre sont une étape de traitement dont le résultat est stocké au niveau *converti*, pas un niveau de stockage séparé.
+- **Niveaux de stockage** (4) : où les données vivent dans la base. Chaque ligne consolidée existe à ces 4 niveaux, qui matérialisent l'état des données après chaque phase d'élaboration.
+- **Étapes de traitement** (4) : l'ordre dans lequel le moteur calcule ces niveaux. Chaque étape produit un niveau de stockage.
 
-### Niveaux de stockage (3)
+### Niveaux de stockage (4)
 
 | Niveau | Devise | Contenu | Flux présents |
 |---|---|---|---|
 | **Corporate** | Fonctionnelle | Données saisies agrégées par entité, brutes | F00, F20 (flux sociaux d'origine) |
-| **Converti** | Présentation | Données reclassées + converties | F00, F01, F20, F80, F81, F98 (flux reclassifiés + écarts) |
+| **Reclassifié** | Fonctionnelle | Données après reclassifications de périmètre | F00, F01, F20, F98 (flux reclassifiés, toujours en devise fonctionnelle) |
+| **Converti** | Présentation | Données converties + écarts générés | F00, F01, F20, F80, F81, F98 (+ écarts de conversion) |
 | **Consolidé** | Présentation | Données après application des méthodes | Tous flux, à l'échelle `% d'intégration` / redirections de comptes |
 
 ### Étapes de traitement (4)
@@ -26,8 +27,8 @@ La consolidation distingue deux concepts :
 | Étape | Opération | Entrée | Sortie stockée à |
 |---|---|---|---|
 | **A. Agrégation** | Cumul des écritures source par entité | CSV / saisie | Niveau Corporate |
-| **B. Reclassification** | Reclassifications de périmètre en devise fonctionnelle : entrées (F00→F01), sorties (collapse→F98), fusions (F07/F70 post-MVP) | Corporate | *(intermédiaire — non stocké séparément)* |
-| **C. Conversion** | Conversion multi-devises : application des taux + génération des écarts F80/F81 | Résultat de B | Niveau Converti |
+| **B. Reclassification** | Reclassifications de périmètre en devise fonctionnelle : entrées (F00→F01), sorties (collapse→F98), fusions (F07/F70 post-MVP) | Corporate | Niveau Reclassifié |
+| **C. Conversion** | Conversion multi-devises : application des taux + génération des écarts F80/F81 | Reclassifié | Niveau Converti |
 | **D. Consolidation** | Application des méthodes (globale / proportionnelle / équivalence) ; éditeur de règles (post-MVP) | Converti | Niveau Consolidé |
 
 ### Correspondance stockage ↔ traitement
@@ -39,23 +40,26 @@ Stockage          Traitement
                      │
                      ▼ A. Agrégation
 ┌─────────────┐
-│  Corporate  │ ◄── stocke le résultat de A
+│  Corporate  │ ◄── stocke le résultat de A (devise fonctionnelle)
 └──────┬──────┘
        │
        ▼ B. Reclassification (F00→F01, collapse→F98)
-       │   ◄── intermédiaire, non stocké séparément
+┌──────────────┐
+│ Reclassifié  │ ◄── stocke le résultat de B (devise fonctionnelle)
+└──────┬───────┘
+       │
        ▼ C. Conversion (F80/F81)
 ┌─────────────┐
-│  Converti   │ ◄── stocke le résultat de B + C
+│  Converti   │ ◄── stocke le résultat de C (devise de présentation)
 └──────┬──────┘
        │
        ▼ D. Consolidation (méthodes + règles)
 ┌─────────────┐
-│ Consolidé   │ ◄── stocke le résultat de D
+│ Consolidé   │ ◄── stocke le résultat de D (devise de présentation)
 └─────────────┘
 ```
 
-> **Note** : l'étape B (reclassification) produit un état intermédiaire en devise fonctionnelle mais celui-ci n'est **pas persisté séparément** — il est consommé immédiatement par l'étape C (conversion). Le niveau *converti* stocke le résultat combiné des deux étapes.
+> Le niveau *reclassifié* est persisté car utile : audit intermédiaire en devise fonctionnelle, re-conversion avec d'autres taux sans recalculer la reclassification, debugging des écritures de périmètre.
 
 - L'**éditeur de règles** (post-MVP) interviendra surtout sur les niveaux **converti** et **consolidé** (ex. élimination interco classique au niveau *converti*). À reprendre plus tard ([Q24](./QUESTIONS_OUVERTES.md)).
 

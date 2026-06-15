@@ -43,11 +43,9 @@ Mais l'approche A est structurellement supérieure sur trois points.
 
 ## Décision
 
-La reclassification se fait **avant** la conversion dans le pipeline de traitement. Mais les **niveaux de stockage restent à 3** — la reclassification est une étape de calcul intermédiaire dont le résultat atterrit au niveau *converti*.
+La reclassification se fait **avant** la conversion dans le pipeline de traitement. **4 niveaux de stockage** (corporate → reclassifié → converti → consolidé), chacun persisté. Le niveau *reclassifié* (devise fonctionnelle, après périmètre) est conservé car utile pour l'audit et la re-conversion avec d'autres taux.
 
 | Concept | Détail |
 |---|---|
-| **Niveaux de stockage (3)** | Corporate → Converti → Consolidé (inchangés) |
-| **Étapes de traitement (4)** | A. Agrégation → B. Reclassification → C. Conversion → D. Consolidation |
-
-L'étape B produit un état intermédiaire en devise fonctionnelle qui n'est pas persisté séparément — il est consommé par l'étape C. Le niveau *converti* stocke le résultat combiné de B + C.
+| **Niveaux de stockage (4)** | Corporate → Reclassifié → Converti → Consolidé (tous persistés) |
+| **Étapes de traitement (4)** | A. Agrégation → B. Reclassification → C. Conversion → D. Consolidation (1:1 avec les niveaux) |

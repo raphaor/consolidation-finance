@@ -42,9 +42,9 @@ Proposition technique (à confirmer couche par couche). Le moteur de consolidati
 
 Un seul binaire (prototype), trois responsabilités séparées en crates pour la maintenabilité.
 
-**Stockage** : les données consolidées sont persistées à **3 niveaux** (corporate → converti → consolidé), chacun matérialisant l'état des données après une phase d'élaboration.
+**Stockage** : les données consolidées sont persistées à **4 niveaux** (corporate → reclassifié → converti → consolidé), chacun matérialisant l'état des données après une phase d'élaboration. Le niveau *reclassifié* (devise fonctionnelle, après reclassifications de périmètre) est persisté car utile pour l'audit et la re-conversion.
 
-**Traitement** : le moteur calcule ces niveaux en **4 étapes** — agrégation → reclassification (périmètre, en devise fonctionnelle) → conversion (multi-devises, F80/F81) → consolidation (méthodes + règles). La reclassification est une étape de calcul intermédiaire dont le résultat est stocké au niveau *converti*. Détail dans [`FLUX_CONSO.md`](./FLUX_CONSO.md).
+**Traitement** : le moteur enchaîne **4 étapes** en 1:1 avec les niveaux de stockage — agrégation → reclassification (périmètre, devise fonctionnelle) → conversion (multi-devises, F80/F81) → consolidation (méthodes + règles). Détail dans [`FLUX_CONSO.md`](./FLUX_CONSO.md).
 
 ## 3. Stockage — DÉCIDÉ
 
