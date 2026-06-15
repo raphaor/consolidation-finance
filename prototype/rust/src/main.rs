@@ -3,16 +3,22 @@
 //!
 //! Miroir de `prototype/python/run.py`.
 //!
-//! Enchaîne : création du schéma → seed des données → pipeline 4 étapes →
+//! Enchaîne : création du schéma → chargement CSV → pipeline 4 étapes →
 //! validation → restitution.
+//!
+//! # Arguments CLI
+//!
+//! - `--db <path>`    : chemin du fichier DuckDB (défaut : `conso.duckdb`).
+//! - `--csv-dir <dir>`: répertoire contenant les CSV (défaut : `data`).
 //!
 //! Valide que la stack Rust + DuckDB compile et s'exécute sur ARM64 (Raspberry Pi).
 
 use conso_engine::{
     create_schema,
+    load_all,
     pipeline::run_pipeline,
     report::{bilan_par_flux, compare_levels, print_level_counts, print_validation},
-    seed_all, ConvertParams,
+    ConvertParams,
 };
 use duckdb::Connection;
 
@@ -25,11 +31,26 @@ fn main() {
     println!("║{}║", centered);
     println!("╚{}╝", "═".repeat(86));
 
-    // DuckDB en mémoire : base éphémère, idéale pour un prototype.
-    let con = match Connection::open_in_memory() {
+    // --- Parsing manuel des arguments (pas de clap pour un prototype) ---
+    let args: Vec<String> = std::env::args().collect();
+    let db_path = args
+        .iter()
+        .position(|a| a == "--db")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "conso.duckdb".to_string());
+    let csv_dir = args
+        .iter()
+        .position(|a| a == "--csv-dir")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "data".to_string());
+
+    // DuckDB en fichier : base persistante, supprimable d'un run sur l'autre.
+    let con = match Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("\n✗ ERREUR : impossible d'ouvrir DuckDB in-memory : {e}");
+            eprintln!("\n✗ ERREUR : impossible d'ouvrir DuckDB ({db_path}) : {e}");
             std::process::exit(1);
         }
     };
@@ -59,10 +80,10 @@ fn main() {
         }
     }
 
-    // 2. Chargement des données de test
-    println!("\n▶ Chargement des données de test (seed)…");
-    if let Err(e) = seed_all(&con) {
-        eprintln!("\n✗ ERREUR seed : {e}");
+    // 2. Chargement des données depuis CSV
+    println!("\n▶ Chargement des données depuis CSV ({csv_dir})…");
+    if let Err(e) = load_all(&con, std::path::Path::new(&csv_dir)) {
+        eprintln!("\n✗ ERREUR chargement CSV : {e}");
         std::process::exit(1);
     }
     let n_stg: i64 = con

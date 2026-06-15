@@ -1,0 +1,4 @@
+entity,scenario,period,methode,pct_interet,pct_integration,entree,sortie
+M,REEL,2024,globale,1.00,1.00,false,false
+A,REEL,2024,globale,1.00,1.00,true,false
+B,REEL,2024,globale,1.00,1.00,false,true
