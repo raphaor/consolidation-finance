@@ -1,0 +1,5 @@
+code,libelle,classe,capitaux_propres,compte_parent
+100_Capital,Capital,equity,True,
+200_Immobilisations,Immobilisations,bilan,False,
+300_Stocks,Stocks,bilan,False,
+400_Resultat,Résultat,resultat,False,

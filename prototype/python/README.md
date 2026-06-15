@@ -28,18 +28,24 @@ futur `crate engine` en Rust.
 ```
 conso/
 ├── schema.py    # DDL : dimensions, satellites, table de faits
-├── seed.py      # Données de test (groupe multi-devise M / A / B)
+├── seed.py      # Données de test en dur (compatibilité) — miroir de data/
+├── loader.py    # Import CSV via read_csv_auto (chemin par défaut)
 ├── pipeline.py  # Les 4 étapes A→B→C→D (SQL déclaratif)
 ├── validate.py  # Identité F99 = F00+F01+F20+F80+F81+F98
 └── report.py    # Bilan par flux + comparaison des niveaux
-run.py           # Point d'entrée
+data/            # Fichiers CSV source (master data, satellites, liasses)
+run.py           # Point d'entrée (argparse : --csv-dir, --db)
 ```
 
 ## Exécution
 
 ```bash
 /home/raph/cf-clone/.venv/bin/python run.py
+# Options : --csv-dir <répertoire>  (défaut : data/)  --db <fichier.duckdb>  (défaut : conso.duckdb)
 ```
+
+La base est persistée dans `conso.duckdb` (supprimer le fichier pour repartir
+de zéro). Les données sont chargées depuis `data/*.csv` par `read_csv_auto`.
 
 ## Scénario de test
 

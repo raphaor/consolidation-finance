@@ -1,0 +1,3 @@
+# Base DuckDB persistée (générée par run.py --db)
+*.duckdb
+*.duckdb.wal

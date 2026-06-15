@@ -7,4 +7,4 @@ chaque étape est une fonction isolée qui lit un niveau de stockage et produit
 le suivant via du SQL déclaratif.
 """
 
-__all__ = ["schema", "seed", "pipeline", "validate", "report"]
+__all__ = ["schema", "seed", "loader", "pipeline", "validate", "report"]

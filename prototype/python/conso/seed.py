@@ -10,6 +10,12 @@ Groupe de test :
 
 Période traitée : Entry_period = Period = '2024' ; exercice précédent '2023'.
 Devise de présentation : EUR.
+
+Note : ce module conserve les données codées en dur pour la compatibilité et
+les tests, mais le chemin par défaut est désormais l'import CSV
+(:func:`conso.loader.load_all`) depuis le répertoire ``data/``. Les valeurs
+ci-dessous sont le miroir exact des fichiers ``data/*.csv`` ; toute évolution
+doit être répercutée des deux côtés.
 """
 
 from __future__ import annotations
