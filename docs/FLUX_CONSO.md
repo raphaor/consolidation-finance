@@ -12,11 +12,12 @@ La consolidation s'élabore en **3 niveaux successifs**, chacun stocké. Ces niv
 
 | Niveau | Rôle | Traitements |
 |---|---|---|
-| **1. Corporate** | Agrège les données saisies (par entité, en devise fonctionnelle) | Agrégation des écritures sources |
-| **2. Converti** | Application des règles de conversion | Conversion multi-devises (F80/F81) ; reclassifications de périmètre/fusion (F01/F07/F70/F98) |
-| **3. Consolidé** | Application des mécanismes de consolidation | Méthodes (globale / proportionnelle / équivalence) ; éditeur de règles (interco, participations, minoritaires…) |
+| **1. Corporate** | Agrège les données saisies (par entité, en devise fonctionnelle) | Agrégation des écritures source |
+| **2. Reclassifié** | Reclassifications de périmètre (en devise fonctionnelle) | Entrées (F00→F01), sorties (collapse→F98), fusions (F07/F70 post-MVP) |
+| **3. Converti** | Application des règles de conversion | Conversion multi-devises (F80/F81) sur les flux reclassifiés |
+| **4. Consolidé** | Application des mécanismes de consolidation | Méthodes (globale / proportionnelle / équivalence) ; éditeur de règles (interco, participations, minoritaires…) |
 
-- Les reclassifications de périmètre (F01/F07/F70/F98) s'appliquent **avant ou juste après la conversion**, mais leur **résultat est stocké au niveau converti**. Position exacte à préciser ([Q26](./QUESTIONS_OUVERTES.md)).
+- Les reclassifications de périmètre (F01/F07/F70/F98) s'appliquent **avant la conversion** (décision Q26, simulation dans [`ANALYSE_RECLASSIFICATION_CONVERSION.md`](./ANALYSE_RECLASSIFICATION_CONVERSION.md)). Le pipeline a donc **4 niveaux** : corporate → reclassifié → converti → consolidé.
 - L'**éditeur de règles** (post-MVP) interviendra surtout sur les niveaux **converti** et **consolidé** (ex. élimination interco classique au niveau *converti*). À reprendre plus tard ([Q24](./QUESTIONS_OUVERTES.md)).
 
 ---
