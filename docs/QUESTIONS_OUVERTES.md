@@ -1,0 +1,73 @@
+# Questions ouvertes
+
+Registre des décisions à prendre pour avancer sur le prototype / POC.
+L'`EXPRESSION_DE_BESOIN.md` reste la source fonctionnelle ; ce fichier trace ce qui reste flou et les arbitrages rendus.
+
+## Légende
+
+- **Priorité** : `BLOC` (empêche d'écrire le POC) · `TÔT` (à trancher avant la 1ʳᵉ version) · `POST` (après le POC) · `HORS` (explicitement hors périmètre prototype).
+- **Statut** : `OUVERTE` · `EN RÉFLEXION` · `TRANCHÉE` (alors remplir *Décision* et dater).
+
+---
+
+## Blocantes (à traiter en premier)
+
+| ID | Question | Contexte | Priorité | Statut | Décision |
+|---|---|---|---|---|---|
+| Q1 | Quel **périmètre du MVP** livrer en premier ? (sous-ensemble d'opérations, de scénarios, d'entités) | EDB *Prochaines étapes* | BLOC | TRANCHÉE | **MVP = réel seul** + traitements **natifs** (agrégation, conversion multi-devises, méthodes globale/proportionnelle/équivalence, variations de périmètre) + restitutions (table filtrable, bilan par flux, compte de résultat) + CRUD master data complet + import CSV. Volumétrie large, perf = critère. Éditeur de règles, multi-scénarios, fusions/IFRS5 = post-MVP. Voir EDB *MVP / POC*. |
+| Q2 | Quelles **restitutions** le POC doit-il produire exactement ? (lignes filtrables ? bilan ? tous ?) | EDB §5 | BLOC | TRANCHÉE | **3 sorties POC** : (1) table filtrable ; (2) bilan par flux (comptes en lignes, flux en colonnes) ; (3) compte de résultat (flux ouverture + clôture). TFT / annexe / dashboards reportés post-POC. Voir EDB §5. |
+| Q3 | **Volumétrie cible** : nb d'entités, nb de comptes, nb de lignes, nb de périodes conservées ? | EDB §6 | BLOC | TRANCHÉE | **Large** : 50+ entités, milliers de comptes, millions de lignes. La performance est un critère de validation du POC → test sur gros volumes (fait monter [Q12] en priorité). |
+| Q4 | **Source et saisie des taux de change** : qui les fournit, sous quel format, à quelle fréquence (clôture / moyenne pondérée) ? | EDB §3.3 — opé B « conversion multi-devises » | BLOC | TRANCHÉE | **Taux clôture + taux moyen (moyenne simple sur la période)**, stockés par `Currency × Period`. Application : clôture → bilan, moyen → résultat. **Saisie : CRUD + import CSV** (pas de fetch auto au POC). Voir [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §4. |
+| Q5 | Comment est **représenté le périmètre de consolidation** (mère / filiales, méthode par entité, % d'intérêt, entrées/sorties datées) ? | EDB §3.2 | BLOC | TRANCHÉE | Table *Périmètre* `Entity × Scenario × Period` : `méthode`, `%_intérêt`, `%_intégration`, `entrée_sortie_mid_exercice`, `fusion` (absorbante/absorbée). Variations calculées par comparaison scope N vs. consolidation d'ouverture (N-1). Voir [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §4. |
+
+## À trancher tôt (avant la 1ʳᵉ version du POC)
+
+| ID | Question | Contexte | Priorité | Statut | Décision |
+|---|---|---|---|---|---|
+| Q6 | **Mode de consolidation** pour le POC : `complète` seule, ou `à la marge` aussi ? | EDB §3.5 | TÔT | TRANCHÉE | **Complète seule** (recalcul total à chaque soumission). `À la marge` reporté post-MVP. |
+| Q7 | Les écritures C (retraitements, interco, variations de capital, répartition résultats) : dans le MVP ou reportées ? | EDB §3.4 | TÔT | TRANCHÉE | **Reportées** : construites via l'**éditeur de règles de consolidation** (module post-MVP, [Q24]). Le MVP ne contient que les traitements **natifs** (agrégation, conversion multi-devises, méthodes de conso, variations de périmètre). Dichotomie B/C abandonnée au profit de **natif vs éditeur de règles**. |
+| Q8 | Le **workflow de validation** (brouillon / soumis) est-il nécessaire au POC, ou toutes les liasses sont-elles considérées validées ? | EDB §3.5 | TÔT | TRANCHÉE | **Aucun workflow au MVP** : toute liasse/écriture est immédiatement intégrée à la conso. Workflow reporté en évolution. |
+| Q9 | **Granularité de clôture par défaut** pour le POC : mensuel, trimestriel, annuel ? (et prévisionnel multi-années : oui/non ?) | EDB §3.5 | TÔT | TRANCHÉE | **Annuel seul** au MVP. Mensuel/trimestriel = post-MVP (le moteur les gère déjà via `Period`, c'est surtout des données). Prévisionnel multi-années lié au scénario budget → post-MVP. |
+| Q10 | Comment les **opérations interco** sont-elles détectées ? (via le champ `Partner*` ? règle de matching ?) | EDB §3.4 / §4 — champ `Partner*` présent mais sémantique implicite | TÔT | OUVERTE | — |
+| Q11 | **Types de consolidation couverts au POC** : réel seul, ou réel + budget + prévision ? | EDB §3.1 | TÔT | TRANCHÉE | **Réel seul** au MVP. Budget / prévision / multi-scénarios en post-MVP. |
+| Q20 | `Entry_period` : **dimension distincte** ou sous-type de `Period` (type « exercice ») ? Éviter la redondance. | [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §3 | TÔT | TRANCHÉE | **Une seule table `Period`** ; `Entry_period` et `Period` sont deux rôles (clés étrangères) vers elle, `Entry_period` contraint au type « exercice ». |
+| Q21 | `Share` : participe à la table *Périmètre*, ou pointe vers une table **Participations** dédiée ? Risque de duplication des % / méthodes. | [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §3-§4 | TÔT | TRANCHÉE | **Pas de table Participations séparée.** `Entity`, `Partner`, `Share` = 3 rôles sur une liste centrale d'entités (groupe + tiers liés). Détail des participations (%, méthode, dates, fusion) porté par le *Périmètre*. |
+| Q22 | `Partner` : référence **directement une `Entity`** (quand c'est une entité du groupe) ou via une **table de tiers** séparée ? | [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §3 | TÔT | TRANCHÉE | **Référence la liste centrale d'entités** (rôle `Partner` sur la même master data). |
+| Q23 | **Portée de l'interface master data** dans le MVP : quelles dimensions/tables satellites ont un écran de gestion dès le POC ? | [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §2 | TÔT | TRANCHÉE | **Écran CRUD complet pour chaque dimension et chaque table satellite.** |
+
+## Élaboration (mécanismes à détailler avant implémentation)
+
+Pas des décisions de scope, mais des **deep-dives de conception** nécessaires pour coder correctement le moteur. À traiter avant / pendant la conception technique.
+
+| ID | Sujet | Contexte | Statut | Détail |
+|---|---|---|---|---|
+| Q25 | **Conversion multi-devises × flux** : mécanique des flux de conversion **F80** (écart ouverture→clôture) et **F81** (taux moyen → clôture). Taux appliqués, formule de l'écart, imputation. | [`FLUX_CONSO.md`](./FLUX_CONSO.md) · [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §3-§4 | OUVERTE | Cadre posé : la conversion s'enregistre comme des flux (F80/F81). Taxonomie des flux définie dans `FLUX_CONSO.md`. Mécanique précise à détailler. |
+| Q26 | **Élaboration de la consolidation** : mécanismes détaillés au fil de l'eau. | EDB §3.4 | OUVERTE | **Cadre posé** : pipeline en **3 niveaux** (corporate → converti → consolidé), voir [`FLUX_CONSO.md`](./FLUX_CONSO.md). **Capturé** : modèle des flux + écarts F80/F81 ; variations de périmètre F01/F98 ; fusion F07/F70 ; application des méthodes (globale 100%, proportionnelle au % d'intégration, équivalence via capitaux propres flagués + comptes 261E/880E) ; minoritaires = `% intégration − % intérêt` (règles). **Nouveaux besoins** : flag `capitaux_propres` sur `Account`, page de paramètres du groupe. **Reste à préciser** : position exacte des reclassifications de périmètre (avant/après conversion) ; niveau d'application des règles (interco etc.). |
+
+## Reportables (post-prototype)
+
+| ID | Question | Contexte | Priorité | Statut | Décision |
+|---|---|---|---|---|---|
+| Q12 | **Performance** : temps cible entre données reçues et reporting disponible ? | EDB §6 | TÔT | TRANCHÉE | **Obligation de moyens, pas de cible chiffrée.** Rust confirmé + **stockage à bien dimensionner** (guidance à venir). La performance est un objectif de conception qui oriente les choix techniques, notamment la base de données. |
+| Q13 | **Audit / traçabilité** : format de la référence d'audit (`Audit_id`) et chaîne de traçabilité des écritures auto ? | EDB §6 | POST | OUVERTE | — |
+| Q14 | **Évolutivité** : critères concrets (ajouter entité / référentiel / module sans refonte) ? | EDB §6 | POST | OUVERTE | — |
+| Q24 | **Éditeur de règles de consolidation** : modèle de composition des écritures automatiques (déclencheur, conditions, contrepassation, imputation). Démarre par éliminations interco + participations. | EDB §3.4 | POST | OUVERTE | — |
+| Q27 | **Mode de fusion** : privilégier F07 (à l'ouverture, `= −F00`) ou F70 (en cours d'exercice, `= −F99`), ou garder les deux ? | [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9 | POST | OUVERTE | — |
+
+## Hors périmètre prototype (à ne pas traiter maintenant)
+
+| ID | Sujet | Rappel |
+|---|---|---|
+| Q15 | **Sécurité** | EDB §6 : « Ignoré initialement ». À revoir après POC. |
+| Q16 | **Licence** | EDB §7 : privé pour l'instant. |
+| Q17 | **Mapping de comptes** | EDB §3.3 : saisie directe dans le plan groupe, mapping en option d'évolution. |
+| Q18 | **Formats d'échange autres que CSV** | EDB §4 : évolutif. |
+| Q19 | **Exports hors web** | EDB §5 : extension future. |
+
+---
+
+## Comment utiliser ce fichier
+
+1. Répondre d'abord aux **BLOC** (Q1–Q5) : sans elles, le POC ne peut pas démarrer.
+2. À chaque réponse : passer le **Statut** à `TRANCHÉE`, remplir **Décision** (idéalement datée et justifiée), puis reporter la décision dans `EXPRESSION_DE_BESOIN.md`.
+3. Ne pas supprimer les lignes **TRANCHÉES** : elles servent d'historique des arbitrages.
