@@ -1,0 +1,6 @@
+# Target — artefacts de compilation Rust
+/target/
+
+# Sauvegarde DuckDB (si on bascule sur une DB fichier)
+*.duckdb
+*.duckdb.wal

@@ -1,0 +1,26 @@
+[package]
+name = "conso-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Moteur de consolidation financière par les flux (portage Rust du prototype Python)"
+publish = false
+
+[lib]
+name = "conso_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "conso-engine"
+path = "src/main.rs"
+
+[dependencies]
+# DuckDB embarqué — feature "bundled" pour compiler DuckDB en C++ depuis les
+# sources (pas de dépendance système). La compilation est lourde (compile tout
+# le moteur C++ de DuckDB) mais garantit un binaire autonome sur ARM64.
+duckdb = { version = "1.1", features = ["bundled"] }
+
+[profile.release]
+# Optimisations pour le calcul analytique (GROUP BY / JOIN volumineux).
+opt-level = 3
+lto = "thin"
+codegen-units = 1
