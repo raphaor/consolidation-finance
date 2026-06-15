@@ -7,61 +7,60 @@
 
 ## 1. Vision
 
-**Une phrase.** À quoi sert l'outil, pour qui, quelle douleur il résout.
-
-*Exemple : « Un outil de consolidation multi-entités, rapide et lisible, qui passe de l'ERP au reporting consolidé en quelques clics, sans tableurs. »*
+** Un outil de consolidation multi-entités, multi devises, rapide, utilisant la méthode de consolidation par les flux.**
 
 ---
 
 ## 2. Contexte & problème
 
-- Comment la consolidation est-elle faite **aujourd'hui** ? (Excel, SAP, Sage, autre…)
-- Qu'est-ce qui coince ? (temps, erreurs, manuel, pas de piste d'audit, etc.)
-- Pourquoi maintenant ? (croissance, nouvelles filiales, contrainte réglementaire…)
+Les solutions de consolidation actuelle sont soit professionelles eet nécessitent un gros budget, soit doivent largement s'appuyer sur excel. On veut ici créer un outil facilement déployable, rapide et facile à maintenir.
 
 ---
 
 ## 3. Périmètre fonctionnel — questions structurantes
 
 ### 3.1 Type de consolidation
-- [ ] **Légale** (référentiel imposé : IFRS / French GAAP / US GAAP…)
-- [ ] **Budgétaire / prévisionnelle**
-- [ ] **De gestion** (KPI internes, non réglementaire)
-- [ ] Multi-scénarios (réel vs budget vs prévious)
+- [x] **Légale** (référentiel imposé : IFRS / French GAAP / US GAAP…)
+- [x] **Budgétaire / prévisionnelle**
+- [x] **De gestion** (KPI internes, non réglementaire)
+- [x] Multi-scénarios (réel vs budget vs prévious)
 
 ### 3.2 Structure du groupe
-- Combien d'entités à consolider ? Fourchette acceptable.
-- Hiérarchie simple (holding + filles) ou complexe (multi-niveaux, holdings intermédiaires) ?
-- Intérêts minoritaires ? Co-entreprises ? Mises en équivalence ?
-- Périmètre variable (entrées/sorties de périmètre dans l'année) ?
+- La structure du group est donné par une périmètre de consolidation (scope)
+- Il contient la mère et les différentes entités, avec leurs méthodes de consolidation spécifiques
+- Le calcul des intérêts minoritaires sera fait. Les méthodes sont globale, proportionnelles, équivalence, et traitements spéfiaux tels que IFRS 5 (Held for sale, discountinued operations)
+- Gestion des entrées, sorties, fusions, en cours d'exercice ou en début de période
 
 ### 3.3 Référentiels & plans de compte
-- Un référentiel cible unique ou plusieurs (IFRS + local) ?
-- Mapping entre plans de compte source (par entité) et le référentiel consolidé.
-- Méthode de conversion : réintégrations / retraites homogènes ou spécifiques par entité ?
+- Référentiel de comptes customisable.
+- Dans cette version, on estime que l'entité saisie une liasse dans le plan de compte du groupe, pas de mapping [option d'évolution]
+- Méthode de conversion : sur le principe de taux moyens appliqué sur la période
 
 ### 3.4 Opérations de consolidation
-- [ ] Cumul des comptes
-- [ ] Élimination des opérations inter-compagnies (ventes, créances/dettes, marges en stock, dividendes)
-- [ ] Conversion multi-devises (méthode clôture / moyennes pondérées)
-- [ ] Retraitements (homogénéisation, amortissement survaleurs, écarts d'acquisition)
-- [ ] Répartition des résultats (minoritaires / groupe)
-- [ ] Variations de capital & de périmètre
+- [B] Cumul des comptes
+- [B] Conversion multi-devises (méthode clôture / moyennes pondérées)
+- [B] Variations de périmètre
+- [C] Variations de capital
+- [C] Répartition des résultats (minoritaires / groupe)
+- [C] Retraitements (homogénéisation, amortissement survaleurs, écarts d'acquisition)
+- [C] Élimination des opérations inter-compagnies (ventes, créances/dettes, marges en stock, dividendes)
+Les opérations notées B (basic) seront traitées nativement par l'outil
+Les opérations notées C (custom) devront être des écritures automatiques qui seront paramétrisées par l'utilisateur [section à prévoir]
 
 ### 3.5 Process & workflow
-- Qui saisit ? Qui valide ? (DAF, comptables, chefs de filiale…)
-- Calendrier : clôture mensuelle / trimestrielle / annuelle ?
-- Jeu d'écritures : datas reçues à quelle date butoir dans le mois ?
-- Validation par étapes (status : brouillon / soumis / validé / publié) ?
+- Saisie par chargement de fichier [à retravaillé plus tard]
+- Calendrier : possibilité de clôture mensuelle / trimestrielle / annuelle / prévisionnelles multi-year
+- Jeu d'écritures : possiblité de passer des écritures manuelles par dessus l'import des liasses
+- Validation par étapes : status des liasses brouillon / soumis ; les écritures suivent également ces status [possibilité d'évolution postérieure]
+- Deux façon de consolider, soit complete, soit à la marge lorsqu'une nouvelle liasse ou écriture est soumise
 
 ---
 
 ## 4. Sources de données
 
-- Liste des ERP / systèmes actuels (SAP, Sage, Cegid, EBP, fichier Excel maison…)
-- Format d'échange attendu : CSV / XLSX / API / connecteur direct ?
-- Un seul format ou un par entité ?
-- Volumétrie : combien de lignes d'écritures par clôture ?
+- Format d'échange attendu : CSV [pour le prototype, sera un point à faire évoluer postérieurement]
+- Champs des données en entrée: Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Audit_id, Partner*, Share*, Analysis*, Amount (les champs optionnels sont suivi de l'asterix *)
+
 
 ---
 
@@ -73,8 +72,9 @@
   - [ ] Tableau de flux de trésorerie
   - [ ] Annexe / notes
   - [ ] Tableaux de bord analytiques
-- Format : PDF, Excel, web interactive, export API ?
-- Niveaux de détail par audience (Codir / DAF / filiale / auditeurs).
+  Ces sorties seront revues plus tard, initialement:
+  - Restitutions montrant toutes les lignes de la base, filtrable selon tous les champs
+- Format : web interactive [autres formats pour extention future]
 
 ---
 
@@ -84,56 +84,21 @@
 |---|---|
 | **Performance** | Temps cible entre données reçues et reporting dispo ? |
 | **Volumétrie** | Nb d'entités, de comptes, de lignes, d'années conservées ? |
-| **Sécurité** | Qui voit quoi ? (par entité, par périmètre) RBAC ? |
-| **Audit / traçabilité** | Chaque chiffre doit pouvoir être tracé jusqu'à sa source ? |
-| **Disponibilité** | Saas cloud, on-premise, hybride ? |
-| **Multi-utilisateurs** | Combien en simultané ? Rôles distincts ? |
-| **Conformité** | RGPD, souveraineté des données, archivage légal ? |
-| **Évolutivité**| Ajouter une filiale / un référentiel / un module doit être possible sans refonte ? |
+| **Sécurité** | Ignoré initialement ; à completer une fois le prototy pfait
+| **Audit / traçabilité** | Chaque opération doit être traçée: la saisie initiale dans la liasse et les écriture, manuelle ou automatiques sont traçées par une référence, à détailler. |
+| **Évolutivité**| Ajouter une filiale / un référentiel / un module doit être possible sans refonte |
 
 ---
 
 ## 7. Contraintes & préférences techniques
 
-- Stack souhaitée ou à éviter ? (ex : Python, TS, Go…)
-- Hébergement : cloud public / privé / on-prem ?
-- Préférence pour l'open source vs licence propriétaire ?
-- Budget cible (dev initial, TCO annuel) ?
-- Délai / jalon business impératif (clôture annuelle 2026 ?) ?
+- Stack souhaitée: moteur de consolidation en Rust, accessible via navigateur. Le reste est à proposer par le développeur
+- Hébergement : local, accessible via une page internet
+- Licence : pour le moment purement privé ; à revoir si le programme doit être rendu public
 
 ---
 
-## 8. Acteurs & governance
-
-| Rôle | Qui | Intérêt |
-|---|---|---|
-| Sponsor | … | Décide / finance |
-| DAF | … | Utilise au quotidien |
-| Experts métier | … | Valident les règles de consolidation |
-| Utilisateurs filiales | … | Saisissent / valident leurs données |
-| IT / DevOps | … | Déploient / maintiennent |
-| Auditeurs externes | … | Vérifient |
-
----
-
-## 9. Critères de réussite (KPI)
-
-- Temps de clôture passé de X jours à Y.
-- Taux d'erreur manuelle réduit de X %.
-- Adoption : % d'entités saisissant dans l'outil vs Excel.
-- Toutes les entités consolidées en 1 clic ?
-
----
-
-## 10. Hypothèses, risques & points ouverts
-
-- **Hypothèses** : …
-- **Risques** : qualité des données sources, adhésion des filiales, complexité des règles métier…
-- **Points ouverts** : tout ce qui n'est pas encore tranché.
-
----
-
-## 11. Glossaire (court)
+## 8. Glossaire (court)
 
 - **Consolidation** : agrégation des comptes des entités d'un groupe en comptes uniques.
 - **Périmètre de consolidation** : ensemble des entités incluses.
@@ -145,7 +110,5 @@
 
 ## Prochaines étapes
 
-- [ ] Compléter les sections 1 → 10 (réponses précises)
 - [ ] Prioriser : MVP = quel sous-ensemble livrable en premier ?
-- [ ] Décider : build vs buy vs open source à adapter
 - [ ] Définir un prototype / POC mesurable
