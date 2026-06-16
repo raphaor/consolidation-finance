@@ -55,6 +55,21 @@ export interface Period {
   statut: string;
 }
 
+export interface Entity {
+  code: string;
+  libelle: string;
+  devise_fonctionnelle: string;
+  entite_parent: string | null;
+  statut: string;
+}
+
+export interface ReportFilters {
+  scenario?: string;
+  entity?: string;
+  entry_period?: string;
+  period?: string;
+}
+
 // Catalogue des flux attendus en colonnes du bilan par flux
 // (voir docs/FLUX_CONSO.md).
 export const FLOW_COLUMNS = [

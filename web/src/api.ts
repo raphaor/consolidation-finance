@@ -1,13 +1,14 @@
 // Client API minimaliste — toutes les routes sont servies via le proxy Vite
 // `/api` -> http://localhost:3000 (voir vite.config.ts).
 //
-// Filtres optionnels (backend à implémenter) :
-//   GET /api/bilan?level=...&scenario=REEL&period=2024
-//   GET /api/compte-resultat?level=...&scenario=REEL&period=2024
-//   GET /api/entries?level=...&scenario=REEL&period=2024&limit=...&offset=...
-// `scenario` filtre sur e.scenario. `period` filtre sur entry_period
-// (exercice clôturé — le seed pose entry_period = period = '2024').
-// Si omis, pas de filtre.
+// Filtres optionnels (4, tous des strings, absents/vides = pas de filtre) :
+//   GET /api/bilan?level=...&scenario=...&entity=...&entry_period=...&period=...
+//   GET /api/compte-resultat?level=...&scenario=...&entity=...&entry_period=...&period=...
+//   GET /api/entries?level=...&scenario=...&entity=...&entry_period=...&period=...&limit=...&offset=...
+// - `scenario` -> scénario (REEL…)
+// - `entity` -> entité juridique (M, A, B…)
+// - `entry_period` -> exercice clôturé (2024)
+// - `period` -> période impactée par l'écriture (peut différer de entry_period)
 
 import type {
   BilanRow,
@@ -16,9 +17,20 @@ import type {
   LevelCount,
   MasterTable,
   PipelineCounts,
+  ReportFilters,
 } from './types';
 
 const BASE = '/api';
+
+function buildQueryString(params: object): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === '') continue;
+    search.set(key, String(value));
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { signal });
@@ -84,43 +96,12 @@ async function postForm<T>(path: string, form: FormData): Promise<T> {
 export const api = {
   health: (signal?: AbortSignal) => getJson<HealthStatus>('/health', signal),
   levels: () => getJson<LevelCount[]>('/levels'),
-  bilan: (level?: string, filters: { scenario?: string; period?: string } = {}) => {
-    const search = new URLSearchParams();
-    if (level) search.set('level', level);
-    if (filters.scenario) search.set('scenario', filters.scenario);
-    if (filters.period) search.set('period', filters.period);
-    const qs = search.toString();
-    return getJson<BilanRow[]>(`/bilan${qs ? `?${qs}` : ''}`);
-  },
-  compteResultat: (
-    level?: string,
-    filters: { scenario?: string; period?: string } = {},
-  ) => {
-    const search = new URLSearchParams();
-    if (level) search.set('level', level);
-    if (filters.scenario) search.set('scenario', filters.scenario);
-    if (filters.period) search.set('period', filters.period);
-    const qs = search.toString();
-    return getJson<BilanRow[]>(`/compte-resultat${qs ? `?${qs}` : ''}`);
-  },
-  entries: (
-    params: {
-      level?: string;
-      limit?: number;
-      offset?: number;
-      scenario?: string;
-      period?: string;
-    } = {},
-  ) => {
-    const search = new URLSearchParams();
-    if (params.level) search.set('level', params.level);
-    if (params.limit !== undefined) search.set('limit', String(params.limit));
-    if (params.offset !== undefined) search.set('offset', String(params.offset));
-    if (params.scenario) search.set('scenario', params.scenario);
-    if (params.period) search.set('period', params.period);
-    const qs = search.toString();
-    return getJson<Entry[]>(`/entries${qs ? `?${qs}` : ''}`);
-  },
+  bilan: (level: string, filters?: ReportFilters) =>
+    getJson<BilanRow[]>(`/bilan${buildQueryString({ level, ...filters })}`),
+  compteResultat: (level: string, filters?: ReportFilters) =>
+    getJson<BilanRow[]>(`/compte-resultat${buildQueryString({ level, ...filters })}`),
+  entries: (params: { level: string; limit?: number; offset?: number } & ReportFilters) =>
+    getJson<Entry[]>(`/entries${buildQueryString(params)}`),
   run: () => postJson<PipelineCounts>('/run'),
   reset: () => postJson<{ status: string; entries: number }>('/reset'),
   masterData: {

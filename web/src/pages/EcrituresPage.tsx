@@ -29,12 +29,13 @@ type EntryLevel = (typeof ENTRY_LEVELS)[number];
 export function EcrituresPage() {
   const [level, setLevel] = useState<EntryLevel>('consolidated');
   const [scenario, setScenario] = useState('');
+  const [entity, setEntity] = useState('');
+  const [entryPeriod, setEntryPeriod] = useState('');
   const [period, setPeriod] = useState('');
   const [data, setData] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
-  const [entityFilter, setEntityFilter] = useState<string>('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -44,28 +45,23 @@ export function EcrituresPage() {
         level,
         limit: FETCH_LIMIT,
         offset: 0,
-        scenario,
-        period,
+        scenario: scenario || undefined,
+        entity: entity || undefined,
+        entry_period: entryPeriod || undefined,
+        period: period || undefined,
       });
       setData(rows);
-      setEntityFilter('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'erreur');
       setData([]);
     } finally {
       setLoading(false);
     }
-  }, [level, scenario, period]);
+  }, [level, scenario, entity, entryPeriod, period]);
 
   useEffect(() => {
     void load();
   }, [load]);
-
-  const entityOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const row of data) set.add(row.entity);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [data]);
 
   const columns = useMemo<ColumnDef<Entry>[]>(
     () => [
@@ -86,13 +82,8 @@ export function EcrituresPage() {
     [],
   );
 
-  const filteredData = useMemo(() => {
-    if (!entityFilter) return data;
-    return data.filter((row) => row.entity === entityFilter);
-  }, [data, entityFilter]);
-
   const table = useReactTable({
-    data: filteredData,
+    data,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -118,8 +109,12 @@ export function EcrituresPage() {
         <div className="page__actions">
           <Filters
             scenario={scenario}
+            entity={entity}
+            entryPeriod={entryPeriod}
             period={period}
             onScenarioChange={setScenario}
+            onEntityChange={setEntity}
+            onEntryPeriodChange={setEntryPeriod}
             onPeriodChange={setPeriod}
             disabled={loading}
           />
@@ -133,21 +128,6 @@ export function EcrituresPage() {
               {ENTRY_LEVELS.map((lvl) => (
                 <option key={lvl} value={lvl}>
                   {lvl}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Entité</span>
-            <select
-              value={entityFilter}
-              onChange={(e) => setEntityFilter(e.target.value)}
-              disabled={loading}
-            >
-              <option value="">Toutes</option>
-              {entityOptions.map((entity) => (
-                <option key={entity} value={entity}>
-                  {entity}
                 </option>
               ))}
             </select>
@@ -171,7 +151,7 @@ export function EcrituresPage() {
       </div>
 
       <div className="page__meta">
-        {rowCount} écriture(s) — {formatInt(filteredData.length)} chargées sur ce
+        {rowCount} écriture(s) — {formatInt(data.length)} chargées sur ce
         niveau (limit {FETCH_LIMIT}).
       </div>
 

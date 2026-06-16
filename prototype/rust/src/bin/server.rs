@@ -116,6 +116,10 @@ struct BilanQuery {
     #[serde(default)]
     scenario: Option<String>,
     #[serde(default)]
+    entity: Option<String>,
+    #[serde(default)]
+    entry_period: Option<String>,
+    #[serde(default)]
     period: Option<String>,
 }
 
@@ -130,6 +134,10 @@ struct EntriesQuery {
     #[serde(default)]
     scenario: Option<String>,
     #[serde(default)]
+    entity: Option<String>,
+    #[serde(default)]
+    entry_period: Option<String>,
+    #[serde(default)]
     period: Option<String>,
 }
 
@@ -142,17 +150,31 @@ fn default_limit() -> i64 {
 }
 
 /// Construit le fragment SQL et les paramètres pour les filtres optionnels
-/// `scenario` et `period` (ce dernier filtre sur `entry_period`, exercice clôturé).
-/// Renvoie une chaîne préfixée par " AND ..." prête à concaténer après un WHERE existant.
-fn build_filters(scenario: &Option<String>, entry_period: &Option<String>) -> (String, Vec<DbValue>) {
+/// `scenario`, `entity`, `entry_period` (exercice clôturé) et `period`
+/// (période impactée par l'écriture). Renvoie une chaîne préfixée par " AND ..."
+/// prête à concaténer après un WHERE existant.
+fn build_filters(
+    scenario: &Option<String>,
+    entity: &Option<String>,
+    entry_period: &Option<String>,
+    period: &Option<String>,
+) -> (String, Vec<DbValue>) {
     let mut sql = String::new();
     let mut params = Vec::new();
     if let Some(s) = scenario {
         sql.push_str(" AND scenario = ?");
         params.push(DbValue::Text(s.clone()));
     }
-    if let Some(p) = entry_period {
+    if let Some(e) = entity {
+        sql.push_str(" AND entity = ?");
+        params.push(DbValue::Text(e.clone()));
+    }
+    if let Some(ep) = entry_period {
         sql.push_str(" AND entry_period = ?");
+        params.push(DbValue::Text(ep.clone()));
+    }
+    if let Some(p) = period {
+        sql.push_str(" AND period = ?");
         params.push(DbValue::Text(p.clone()));
     }
     (sql, params)
@@ -216,7 +238,7 @@ async fn get_bilan(
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (fsql, fparams) = build_filters(&q.scenario, &q.period);
+        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period);
         let sql = format!(
             "SELECT e.account, e.flow, SUM(e.amount) AS amount
              FROM fact_entry e
@@ -256,7 +278,7 @@ async fn get_compte_resultat(
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (fsql, fparams) = build_filters(&q.scenario, &q.period);
+        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period);
         let sql = format!(
             "SELECT e.account, e.flow, SUM(e.amount) AS amount
              FROM fact_entry e
@@ -317,7 +339,7 @@ async fn get_entries(
 ) -> Result<Json<Vec<EntryRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (fsql, fparams) = build_filters(&q.scenario, &q.period);
+        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period);
         let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
             let where_stg = if fsql.is_empty() {
                 String::new()

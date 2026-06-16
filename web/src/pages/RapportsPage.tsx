@@ -1,41 +1,19 @@
-// Page « Compte de résultat » : table pivot comptes de résultat (lignes) x flux (colonnes).
-// Variante du BilanPage restreinte aux comptes de classe « résultat »
-// (le filtrage par classe se fait côté serveur via /api/compte-resultat).
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Filters } from '../components/Filters';
-import type { BilanRow, FlowCode, Level } from '../types';
+import type { BilanRow, Level, ReportFilters } from '../types';
 import { FLOW_COLUMNS, LEVELS } from '../types';
+import { Filters } from '../components/Filters';
+import { buildPivot } from '../utils/pivot';
 import { formatAmount } from '../utils/format';
 
-type Pivot = Map<string, Record<FlowCode, number>>;
+type ReportType = 'bilan' | 'cr';
 
-function buildPivot(rows: BilanRow[]) {
-  const pivot: Pivot = new Map();
-  const totals = Object.fromEntries(
-    FLOW_COLUMNS.map((f) => [f, 0]),
-  ) as Record<FlowCode, number>;
-
-  for (const row of rows) {
-    if (!FLOW_COLUMNS.includes(row.flow as FlowCode)) continue;
-    const flow = row.flow as FlowCode;
-    let line = pivot.get(row.account);
-    if (!line) {
-      line = Object.fromEntries(FLOW_COLUMNS.map((f) => [f, 0])) as Record<FlowCode, number>;
-      pivot.set(row.account, line);
-    }
-    line[flow] += row.amount;
-    totals[flow] += row.amount;
-  }
-
-  const accounts = Array.from(pivot.keys()).sort((a, b) => a.localeCompare(b));
-  return { pivot, accounts, totals };
-}
-
-export function CompteResultatPage() {
+export function RapportsPage() {
+  const [reportType, setReportType] = useState<ReportType>('bilan');
   const [level, setLevel] = useState<Level>('consolidated');
   const [scenario, setScenario] = useState('');
+  const [entity, setEntity] = useState('');
+  const [entryPeriod, setEntryPeriod] = useState('');
   const [period, setPeriod] = useState('');
   const [rows, setRows] = useState<BilanRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,7 +23,16 @@ export function CompteResultatPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.compteResultat(level, { scenario, period });
+      const filters: ReportFilters = {
+        scenario: scenario || undefined,
+        entity: entity || undefined,
+        entry_period: entryPeriod || undefined,
+        period: period || undefined,
+      };
+      const data =
+        reportType === 'bilan'
+          ? await api.bilan(level, filters)
+          : await api.compteResultat(level, filters);
       setRows(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'erreur');
@@ -53,7 +40,7 @@ export function CompteResultatPage() {
     } finally {
       setLoading(false);
     }
-  }, [level, scenario, period]);
+  }, [reportType, level, scenario, entity, entryPeriod, period]);
 
   useEffect(() => {
     void load();
@@ -64,12 +51,27 @@ export function CompteResultatPage() {
   return (
     <section className="page">
       <div className="page__header">
-        <h1 className="page__title">Compte de résultat</h1>
+        <h1 className="page__title">Rapports</h1>
         <div className="page__actions">
+          <label className="field">
+            <span>Rapport</span>
+            <select
+              value={reportType}
+              onChange={(e) => setReportType(e.target.value as ReportType)}
+              disabled={loading}
+            >
+              <option value="bilan">Bilan</option>
+              <option value="cr">Compte de résultat</option>
+            </select>
+          </label>
           <Filters
             scenario={scenario}
+            entity={entity}
+            entryPeriod={entryPeriod}
             period={period}
             onScenarioChange={setScenario}
+            onEntityChange={setEntity}
+            onEntryPeriodChange={setEntryPeriod}
             onPeriodChange={setPeriod}
             disabled={loading}
           />
@@ -112,7 +114,7 @@ export function CompteResultatPage() {
             {accounts.length === 0 && !loading && (
               <tr>
                 <td className="grid__empty" colSpan={FLOW_COLUMNS.length + 2}>
-                  Aucun compte de résultat pour ce niveau.
+                  Aucune donnée pour cette sélection.
                 </td>
               </tr>
             )}
