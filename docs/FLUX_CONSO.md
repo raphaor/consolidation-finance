@@ -171,11 +171,16 @@ La méthode de l'entité (issue du *Périmètre*) détermine comment ses flux so
 
 - **Intégration globale** : agrégation des flux à **100%**.
 - **Intégration proportionnelle** : agrégation des flux au **`% d'intégration`** (la globale en est le cas particulier `% = 100%`). Pas de flux minoritaire : la part non détenue n'est pas consolidée.
-- **Mise en équivalence** : les flux hors capitaux propres ne sont **pas agrégés**.
-  - Les **comptes de capitaux propres** (identifiés par un flag sur le compte) sont consolidés au `% d'intégration`.
-  - **Contrepartie** postée sur un **compte d'actif paramétrable** (ex. `261E`).
-  - Le **P&L est condensé** sur un **compte paramétrable** (ex. `880E`), au `% d'intégration`.
-  - Comptes paramétrables renseignés via une **page de paramètres** du groupe.
+
+### Mise en équivalence (natif — **post-MVP**)
+
+> **Reportée au post-MVP** (décision 2026-06-16, [Q26](./QUESTIONS_OUVERTES.md)). La spec ci-dessous est conservée pour la mise en œuvre future.
+
+La mise en équivalence : les flux hors capitaux propres ne sont **pas agrégés**.
+- Les **comptes de capitaux propres** (identifiés par un flag sur le compte) sont consolidés au **`% d'intégration`**.
+- **Contrepartie** postée sur un **compte d'actif paramétrable** (ex. `261E`).
+- Le **P&L est condensé** sur un **compte paramétrable** (ex. `880E`), au `% d'intégration`.
+- Comptes paramétrables renseignés via une **page de paramètres** du groupe.
 
 ### Intérêts minoritaires (règles — post-MVP)
 Calculés par les règles de consolidation, comme la **différence `% d'intégration − % d'intérêt`** (les deux taux sont portés par la table *Périmètre*). S'applique sous globale, proportionnelle et équivalence.

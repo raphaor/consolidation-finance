@@ -46,10 +46,11 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 **Traitements natifs — MVP**
 - Agrégation / cumul des comptes
 - Conversion multi-devises (taux clôture → bilan, taux moyen → résultat)
-- Gestion des méthodes de consolidation : intégration **globale**, **proportionnelle**, mise en **équivalence** (application native — le calcul des **intérêts minoritaires** est lui traité par les règles, post-MVP)
+- Gestion des méthodes de consolidation : intégration **globale**, **proportionnelle** (application native — la mise en **équivalence** et le calcul des **intérêts minoritaires** sont reportés en post-MVP, voir [Q26](./docs/QUESTIONS_OUVERTES.md) et l'éditeur de règles [Q24](./docs/QUESTIONS_OUVERTES.md))
 - Variations de périmètre : entrées / sorties (par comparaison au scope de la consolidation d'ouverture)
 
 **Traitements natifs — extensions post-MVP**
+- **Mise en équivalence** (capitaux propres au `% d'intégration`, contrepartie sur compte d'actif paramétrable, P&L condensé) — voir [`docs/FLUX_CONSO.md`](./docs/FLUX_CONSO.md) §9
 - Fusions, entrées / sorties en cours d'exercice
 - IFRS 5 (held-for-sale / discontinued operations)
 
@@ -118,7 +119,7 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 
 **Dans le MVP**
 - Scénario : **réel seul**.
-- Traitements **natifs** : agrégation, conversion multi-devises (clôture → bilan, moyen → résultat), méthodes de conso (globale, proportionnelle + minoritaires, équivalence), variations de périmètre (entrées/sorties).
+- Traitements **natifs** : agrégation, conversion multi-devises (clôture → bilan, moyen → résultat), méthodes de conso (globale, proportionnelle), variations de périmètre (entrées/sorties). Mise en équivalence et intérêts minoritaires reportés (post-MVP).
 - Restitutions : table filtrable, **bilan par flux**, **compte de résultat** (§5).
 - Master data : **CRUD complet** pour chaque dimension et table satellite + import CSV (liasses + taux) (§3.4, [`docs/MODELE_DONNEES.md`](./docs/MODELE_DONNEES.md)).
 - Volumétrie : **large** (50+ entités, millions de lignes) — la performance est un critère de validation.
