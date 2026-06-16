@@ -15,15 +15,18 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
-import type { Entry, Level } from '../types';
+import type { Entry } from '../types';
 import { LEVELS } from '../types';
 import { formatAmount, formatInt } from '../utils/format';
 
 const PAGE_SIZE = 100;
 const FETCH_LIMIT = 10_000;
 
+const ENTRY_LEVELS = ['raw', ...LEVELS] as const;
+type EntryLevel = (typeof ENTRY_LEVELS)[number];
+
 export function EcrituresPage() {
-  const [level, setLevel] = useState<Level>('consolidated');
+  const [level, setLevel] = useState<EntryLevel>('consolidated');
   const [data, setData] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,10 +111,10 @@ export function EcrituresPage() {
             <span>Niveau</span>
             <select
               value={level}
-              onChange={(e) => setLevel(e.target.value as Level)}
+              onChange={(e) => setLevel(e.target.value as EntryLevel)}
               disabled={loading}
             >
-              {LEVELS.map((lvl) => (
+              {ENTRY_LEVELS.map((lvl) => (
                 <option key={lvl} value={lvl}>
                   {lvl}
                 </option>

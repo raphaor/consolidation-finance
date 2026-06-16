@@ -88,6 +88,12 @@ export function ImportPage() {
           header="currency_source, period, taux_close, taux_moyen"
           onImport={(f) => api.importRates(f)}
         />
+        <UploadZone
+          title="Périmètre de consolidation"
+          description="Upsert dans la table perimeter (clé : entity + scenario + period). Les colonnes entree/sortie acceptent true/false."
+          header="entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie"
+          onImport={(f) => api.importPerimeter(f)}
+        />
       </div>
     </section>
   );

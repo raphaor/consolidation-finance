@@ -248,48 +248,72 @@ async fn get_compte_resultat(
     Ok(Json(rows))
 }
 
+fn map_entry_row(row: &duckdb::Row) -> duckdb::Result<EntryRow> {
+    Ok(EntryRow {
+        id: row.get(0)?,
+        scenario: row.get(1)?,
+        entity: row.get(2)?,
+        entry_period: row.get(3)?,
+        period: row.get(4)?,
+        account: row.get(5)?,
+        flow: row.get(6)?,
+        currency: row.get(7)?,
+        partner: row.get(8)?,
+        share: row.get(9)?,
+        analysis: row.get(10)?,
+        audit_id: row.get(11)?,
+        level: row.get(12)?,
+        amount: row.get(13)?,
+    })
+}
+
 /// GET /api/entries?level=consolidated&limit=100&offset=0 — écritures paginées.
+///
+/// Niveau spécial `raw` : lit la saisie brute (`stg_entry`) avant pipeline,
+/// avec un id synthétique (ROW_NUMBER) pour la cohérence de pagination côté UI.
 async fn get_entries(
     Query(q): Query<EntriesQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<EntryRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let mut stmt = con
-            .prepare(
+        let (sql, bind_level): (&str, Option<&str>) = if q.level == "raw" {
+            (
+                "SELECT * FROM (
+                    SELECT ROW_NUMBER() OVER (ORDER BY entity, scenario, period, account, flow, audit_id) AS id,
+                           scenario, entity, entry_period, period, account, flow,
+                           currency, partner, share, analysis, audit_id,
+                           'raw' AS level, amount
+                    FROM stg_entry
+                ) ORDER BY id
+                LIMIT ? OFFSET ?",
+                None,
+            )
+        } else {
+            (
                 "SELECT id, scenario, entity, entry_period, period, account, flow,
-                       currency, partner, share, analysis, audit_id, level, amount
+                        currency, partner, share, analysis, audit_id, level, amount
                  FROM fact_entry
                  WHERE level = ?
                  ORDER BY id
                  LIMIT ? OFFSET ?",
+                Some(q.level.as_str()),
             )
-            .map_err(db_err)?;
+        };
+        let mut stmt = con.prepare(sql).map_err(db_err)?;
         // Cast explicite en BIGINT : DuckDB est parfois tatillon sur les
         // paramètres bindés dans LIMIT/OFFSET.
-        let iter = stmt
-            .query_map(
-                duckdb::params![q.level.as_str(), q.limit as i64, q.offset as i64],
-                |row| {
-                    Ok(EntryRow {
-                        id: row.get(0)?,
-                        scenario: row.get(1)?,
-                        entity: row.get(2)?,
-                        entry_period: row.get(3)?,
-                        period: row.get(4)?,
-                        account: row.get(5)?,
-                        flow: row.get(6)?,
-                        currency: row.get(7)?,
-                        partner: row.get(8)?,
-                        share: row.get(9)?,
-                        analysis: row.get(10)?,
-                        audit_id: row.get(11)?,
-                        level: row.get(12)?,
-                        amount: row.get(13)?,
-                    })
-                },
-            )
-            .map_err(db_err)?;
+        let iter = match bind_level {
+            Some(lvl) => stmt
+                .query_map(
+                    duckdb::params![lvl, q.limit as i64, q.offset as i64],
+                    map_entry_row,
+                )
+                .map_err(db_err)?,
+            None => stmt
+                .query_map(duckdb::params![q.limit as i64, q.offset as i64], map_entry_row)
+                .map_err(db_err)?,
+        };
         let mut out = Vec::new();
         for r in iter {
             out.push(r.map_err(db_err)?);

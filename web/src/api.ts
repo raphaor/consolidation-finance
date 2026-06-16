@@ -115,4 +115,9 @@ export const api = {
     form.append('file', file);
     return postForm<{ imported: number }>('/import/rates', form);
   },
+  importPerimeter: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return postForm<{ imported: number }>('/import/perimeter', form);
+  },
 };

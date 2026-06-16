@@ -174,8 +174,64 @@ async fn import_rates(
     Ok(Json(json!({ "imported": imported })))
 }
 
+async fn import_perimeter(
+    State(state): State<Arc<AppState>>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let bytes = extract_file_bytes(multipart).await?;
+    if bytes.is_empty() {
+        return Err(AppError::bad_request("fichier vide"));
+    }
+    let (header_line, _) = split_first_line(&bytes)?;
+    let header = parse_header_line(&header_line);
+    require_columns(
+        &header,
+        &[
+            "entity",
+            "scenario",
+            "period",
+            "methode",
+            "pct_interet",
+            "pct_integration",
+            "entree",
+            "sortie",
+        ],
+    )?;
+
+    let tmp = unique_tmp_path("csv");
+    std::fs::write(&tmp, &bytes).map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
+    let path = escape_csv_path(&tmp.display().to_string());
+    let sql = format!(
+        "INSERT INTO sat_perimeter \
+         (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie) \
+         SELECT entity, scenario, period, methode, pct_interet, pct_integration, \
+                CAST(entree AS BOOLEAN), CAST(sortie AS BOOLEAN) \
+         FROM read_csv_auto('{path}', header=true) \
+         ON CONFLICT(entity, scenario, period) DO UPDATE SET \
+            methode = excluded.methode, \
+            pct_interet = excluded.pct_interet, \
+            pct_integration = excluded.pct_integration, \
+            entree = excluded.entree, \
+            sortie = excluded.sortie"
+    );
+
+    let imported = {
+        let con = lock_con(&state)?;
+        match con.execute(&sql, []) {
+            Ok(n) => n,
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(AppError::bad_request(format!("lecture CSV impossible : {e}")));
+            }
+        }
+    };
+    let _ = std::fs::remove_file(&tmp);
+    Ok(Json(json!({ "imported": imported })))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/import/entries", post(import_entries))
         .route("/api/import/rates", post(import_rates))
+        .route("/api/import/perimeter", post(import_perimeter))
 }
