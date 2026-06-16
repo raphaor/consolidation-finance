@@ -34,11 +34,14 @@
 //!
 //! **Identité fondamentale** : `F99 = F00 + F01 + F20 + F80 + F81 + F98`
 
+pub mod import;
 pub mod loader;
+pub mod masterdata;
 pub mod pipeline;
 pub mod report;
 pub mod schema;
 pub mod seed;
+pub mod state;
 pub mod validate;
 
 // Ré-exports pour faciliter l'usage depuis le binaire.
@@ -46,3 +49,4 @@ pub use loader::load_all;
 pub use pipeline::{run_pipeline, ConvertParams};
 pub use schema::create_schema;
 pub use seed::seed_all;
+pub use state::AppState;

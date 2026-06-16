@@ -17,17 +17,21 @@ path = "src/main.rs"
 name = "conso-server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "conso-bench"
+path = "src/bin/bench.rs"
+
 [dependencies]
 # DuckDB embarqué — feature "bundled" pour compiler DuckDB en C++ depuis les
 # sources (pas de dépendance système). La compilation est lourde (compile tout
 # le moteur C++ de DuckDB) mais garantit un binaire autonome sur ARM64.
 duckdb = { version = "1.1", features = ["bundled"] }
 # Serveur web (binaire conso-server) — expose le moteur via une API REST JSON.
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 
 [profile.release]
 # Optimisations pour le calcul analytique (GROUP BY / JOIN volumineux).

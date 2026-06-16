@@ -22,6 +22,7 @@ pub mod convert;
 pub mod reclassify;
 
 use duckdb::Connection;
+use std::time::Instant;
 
 /// Comptage des lignes par niveau de stockage après le pipeline.
 pub type LevelCounts = [usize; 4];
@@ -62,6 +63,82 @@ pub fn run_pipeline(
     let converted = convert::step_c(con, params)?;
     let consolidated = consolidate::step_d(con)?;
     Ok([corporate, reclassified, converted, consolidated])
+}
+
+/// Temps d'exécution mesuré pour une étape du pipeline.
+#[derive(Debug, Clone)]
+pub struct StepTiming {
+    /// Niveau de stockage produit (`corporate`, `reclassified`, …).
+    pub level: &'static str,
+    /// Nombre de lignes produites à ce niveau.
+    pub rows: usize,
+    /// Durée de l'étape, en millisecondes.
+    pub ms: f64,
+}
+
+/// Rapport d'exécution du pipeline avec timings par étape.
+#[derive(Debug, Clone)]
+pub struct PipelineReport {
+    /// Une entrée par étape, dans l'ordre A→B→C→D.
+    pub steps: [StepTiming; 4],
+    /// Durée totale A→D (wall-clock), en millisecondes.
+    pub total_ms: f64,
+}
+
+impl PipelineReport {
+    /// Nombre de lignes par niveau `[corporate, reclassified, converted, consolidated]`.
+    pub fn counts(&self) -> LevelCounts {
+        [
+            self.steps[0].rows,
+            self.steps[1].rows,
+            self.steps[2].rows,
+            self.steps[3].rows,
+        ]
+    }
+
+    /// Durée totale en secondes.
+    pub fn total_sec(&self) -> f64 {
+        self.total_ms / 1000.0
+    }
+}
+
+/// Variante de [`run_pipeline`] instrumentée : mêmes effets, renvoie en plus
+/// la durée (wall-clock) de chaque étape.
+///
+/// Pensée pour le benchmark gros volumes — ne change rien à la logique.
+pub fn run_pipeline_timed(
+    con: &Connection,
+    params: &ConvertParams,
+) -> duckdb::Result<PipelineReport> {
+    let wall = Instant::now();
+
+    let t = Instant::now();
+    let corporate = aggregate::step_a(con)?;
+    let ms_a = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let reclassified = reclassify::step_b(con)?;
+    let ms_b = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let converted = convert::step_c(con, params)?;
+    let ms_c = t.elapsed().as_secs_f64() * 1000.0;
+
+    let t = Instant::now();
+    let consolidated = consolidate::step_d(con)?;
+    let ms_d = t.elapsed().as_secs_f64() * 1000.0;
+
+    let total_ms = wall.elapsed().as_secs_f64() * 1000.0;
+
+    Ok(PipelineReport {
+        steps: [
+            StepTiming { level: "corporate", rows: corporate, ms: ms_a },
+            StepTiming { level: "reclassified", rows: reclassified, ms: ms_b },
+            StepTiming { level: "converted", rows: converted, ms: ms_c },
+            StepTiming { level: "consolidated", rows: consolidated, ms: ms_d },
+        ],
+        total_ms,
+    })
 }
 
 /// Compte les lignes d'un niveau de stockage donné.

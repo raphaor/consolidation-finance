@@ -236,6 +236,16 @@
   color: var(--danger);
 }
 
+.alert--success {
+  background: rgba(26, 159, 90, 0.1);
+  border-color: #9fd8ba;
+  color: var(--ok);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
 /* ---------- Tables ---------- */
 
 .table-wrap {
@@ -447,4 +457,107 @@
   .page__header {
     align-items: stretch;
   }
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ---------- Master data : formulaire modal ---------- */
+
+.modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(27, 39, 51, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  overflow-y: auto;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 580px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.modal__header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.modal__body {
+  padding: 16px 18px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------- Import ---------- */
+
+.upload-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+}
+
+.upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.upload__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.upload__desc {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.upload__form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.upload__header {
+  display: block;
+  padding: 8px 10px;
+  background: var(--header-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
 }

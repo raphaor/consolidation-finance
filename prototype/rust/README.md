@@ -65,6 +65,66 @@ cargo build --release
 cargo run --release
 ```
 
+## Tests de non-régression
+
+Les tests d'intégration (`tests/pipeline.rs`) vérifient sur le jeu de seed
+(groupe M/A/B) que le pipeline est cohérent. Chaque test ouvre une DuckDB **en
+mémoire** (isolation totale). Ils contrôlent :
+
+- les comptes produits par niveau (`corporate=16`, `reclassified=14`,
+  `converted=19`, `consolidated=19`) ;
+- les montants F99 attendus au niveau consolidated (`100_Capital=18 980.00`,
+  `200_Immobilisations=27 116.00`, `300_Stocks=3 000.00`,
+  `400_Resultat=9 774.00`) ;
+- l'identité de reconstruction via `validate` ;
+- la présence/absence des écarts F80/F81 selon la devise (absents en devise
+  fonctionnelle, présents en devise de présentation pour les entités non-EUR) ;
+- la reproductibilité (second run après `DELETE FROM fact_entry`).
+
+```bash
+cargo test --release
+```
+
+## Benchmark de performance (gros volumes)
+
+Le binaire `conso-bench` génère un jeu réaliste (60 entités, 200 comptes,
+5 devises, ~10 % entrantes / sortantes) puis mesure chaque étape du pipeline
+sur une DuckDB **fichier** (le cas réel). La génération se fait en SQL natif
+(`range()` DuckDB), donc rien n'est matérialisé en Rust.
+
+```bash
+# petit run de validation (100k lignes)
+cargo run --release --bin conso-bench -- --rows 100000
+
+# run cible (1M+ lignes)
+cargo run --release --bin conso-bench -- --rows 1000000
+```
+
+Options : `--rows <N>` (défaut 1 000 000), `--db <path>`
+(défaut `$TEMP/conso_bench.duckdb`). Exemple de sortie attendue :
+
+```
+▶ stg_entry généré : 1000000 lignes en 1613 ms (620 k lignes/s généré)
+
+═══════════════════════════════════════════════════════════════
+  RAPPORT DE PERFORMANCE
+═══════════════════════════════════════════════════════════════
+  Étape (niveau)          Lignes    Durée (ms)   Débit (k/s)
+  ──────────────────────────────────────────────────────────
+  corporate                24000          93.8           256
+  reclassified             22800          70.1           325
+  converted                39600          93.9           422
+  consolidated             39600         114.3           347
+  ──────────────────────────────────────────────────────────
+  TOTAL                  1000000         372.1          2688
+
+  Temps total pipeline : 0.372 s
+  Débit global         : 2688 k lignes stg/s  (2687806 lignes/s)
+
+  Verdict F99 : ✓ OK — identité F99 + invariants tenus
+═══════════════════════════════════════════════════════════════
+```
+
 ## État du portage
 
 | Module        | État       | Notes                                             |
