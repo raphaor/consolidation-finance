@@ -49,3 +49,23 @@ Ne pas inventer de règles de consolidation : tout traitement non listé comme *
 - Statut du document de besoins : *ébauche à retravailler*. Avant de coder, vérifier [`docs/QUESTIONS_OUVERTES.md`](./docs/QUESTIONS_OUVERTES.md) : toute question `BLOC` ou `TÔT` non tranchée doit être soumise à l'utilisateur avant implémentation.
 - Style de commit observé : `docs: <sujet court>` — garder ce format préfixé.
 - Priorité actuelle : **prototype / POC mesurable**, pas système complet. Volumétrie cible = **large** (50+ entités, millions de lignes) — la performance est un critère de validation. Éviter toute architecture spéculative (sécurité, multi-format) tant que non listée comme objectif immédiat.
+
+## Exécution et tests (anti-blocage — LIRE AVANT DE LANCER UN PROCESSUS)
+
+Le tool bash attend la fin de la commande **et la fermeture des pipes stdout/stderr** pour rendre la main. Le timeout ne tue **que le shell parent**, pas les enfants — et surtout ne ferme pas les pipes. Conséquence : tout process qui garde stdout ouvert (serveur, dev server, `tail -f`…) lancé en avant-plan **bloque indéfiniment** (30 min, 1 h…) jusqu'à interruption manuelle. Le timeout de 2 min est **inopérant** dans ce cas.
+
+**Règles strictes :**
+
+1. **Commandes qui terminent** (`cargo build`, `cargo test`, `cargo run --bin conso-bench -- --rows N`, `npm run build`) → avant-plan normal avec `timeout` explicite. Elles rendent la main.
+2. **Processus longs / serveurs** (`conso-server.exe`, `npm run dev`) → **TOUJOURS** en arrière-plan via `Start-Process -PassThru -WindowStyle Hidden -RedirectStandardOutput <fichier> -RedirectStandardError <fichier>`. Stocker le PID, poller la santé (`Invoke-RestMethod` dans une boucle `for` courte), tester via `Invoke-RestMethod`/`Invoke-WebRequest`, puis nettoyer avec `Stop-Process -Id $pid -Force`.
+3. **Workers / subagents** : **interdiction absolue de lancer le serveur**. Un worker n'a pas le réflexe du cleanup et reste collé. Il ne fait que `cargo build` + `cargo test` (+ éventuellement `npm run build`). Les tests runtime HTTP sont dévolus à l'utilisateur principal (qui maîtrise le pattern `Start-Process`).
+
+Snippet de référence (PowerShell) :
+```powershell
+$env:CONSO_CSV_DIR = "data"
+$srv = Start-Process -FilePath ".\target\release\conso-server.exe" -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\opencode\conso-server.log"
+$srv.Id | Set-Content "$env:TEMP\opencode\conso-server.pid"
+for ($i=0; $i -lt 30; $i++) { Start-Sleep -Milliseconds 500; try { Invoke-RestMethod "http://localhost:3000/api/health" -ErrorAction Stop | Out-Null; break } catch {} }
+# ... tests via Invoke-RestMethod (rendent la main immédiatement) ...
+Get-Content "$env:TEMP\opencode\conso-server.pid" | ForEach-Object { try { Stop-Process -Id $_ -Force } catch {} }
+```
