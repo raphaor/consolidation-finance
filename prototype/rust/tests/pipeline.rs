@@ -132,10 +132,30 @@ const TOL: f64 = 0.01;
 #[test]
 fn pipeline_produit_les_bons_comptes_par_niveau() {
     let con = setup();
-    assert_eq!(level_count(&con, "corporate"), 16, "niveau corporate");
-    assert_eq!(level_count(&con, "reclassified"), 14, "niveau reclassified");
-    assert_eq!(level_count(&con, "converted"), 19, "niveau converted");
-    assert_eq!(level_count(&con, "consolidated"), 19, "niveau consolidated");
+    // Comptages justifiés par le seed enrichi (cf. src/seed.rs) :
+    //   - Comptes de P&L 6xx/7xx (5 comptes) saisies en F20 sur M, A, B
+    //     → +15 écritures brutes, agrégées en 15 lignes corporate.
+    //
+    //   - corporate = 16 (avant enrichissement) + 15 (P&L) = 31.
+    //
+    //   - reclassified (B) : M copie, A (entrante) F00→F01, B (sortante)
+    //     collapse F98. = 14 (avant) + 5 (M P&L F20) + 5 (A P&L F20)
+    //     + 5 (B P&L F98) = 29. Puis on materialise F99 (= somme des autres
+    //     flux) pour chaque (entity, account) : M a 9 comptes, A en a 8,
+    //     B en a 8 → 25 lignes F99. Total reclassified = 29 + 25 = 54.
+    //
+    //   - converted (C) : F99 est exclu de la conversion (terminal) → on
+    //     convertit les 29 lignes reclassifiées et on génère des écarts F80/F81
+    //     pour A (USD) sur F01 et F20 : 3 écarts F80 (100/200/400 de A) +
+    //     7 écarts F81 (200/400/700/705/600/610/640 de A). Total = 29 + 10 = 39.
+    //
+    //   - consolidated (D) : F99 exclu de la consolidation → on copie les 39
+    //     lignes converted (M,A,B sont toutes en `globale`, pct=1.0), puis on
+    //     materialise F99 consolidated (25 lignes). Total = 39 + 25 = 64.
+    assert_eq!(level_count(&con, "corporate"), 31, "niveau corporate");
+    assert_eq!(level_count(&con, "reclassified"), 54, "niveau reclassified");
+    assert_eq!(level_count(&con, "converted"), 39, "niveau converted");
+    assert_eq!(level_count(&con, "consolidated"), 64, "niveau consolidated");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { Filters } from '../components/Filters';
 import type { BilanRow, FlowCode, Level } from '../types';
 import { FLOW_COLUMNS, LEVELS } from '../types';
 import { formatAmount } from '../utils/format';
@@ -34,6 +35,8 @@ function buildPivot(rows: BilanRow[]) {
 
 export function CompteResultatPage() {
   const [level, setLevel] = useState<Level>('consolidated');
+  const [scenario, setScenario] = useState('');
+  const [period, setPeriod] = useState('');
   const [rows, setRows] = useState<BilanRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export function CompteResultatPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.compteResultat(level);
+      const data = await api.compteResultat(level, { scenario, period });
       setRows(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'erreur');
@@ -50,7 +53,7 @@ export function CompteResultatPage() {
     } finally {
       setLoading(false);
     }
-  }, [level]);
+  }, [level, scenario, period]);
 
   useEffect(() => {
     void load();
@@ -63,6 +66,13 @@ export function CompteResultatPage() {
       <div className="page__header">
         <h1 className="page__title">Compte de résultat</h1>
         <div className="page__actions">
+          <Filters
+            scenario={scenario}
+            period={period}
+            onScenarioChange={setScenario}
+            onPeriodChange={setPeriod}
+            disabled={loading}
+          />
           <label className="field">
             <span>Niveau</span>
             <select

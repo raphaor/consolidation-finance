@@ -39,6 +39,22 @@ export interface HealthStatus {
   status: string;
 }
 
+export interface Scenario {
+  code: string;
+  libelle: string;
+  type: string;
+  statut: string;
+}
+
+export interface Period {
+  code: string;
+  libelle: string;
+  type: string;
+  date_debut: string;
+  date_fin: string;
+  statut: string;
+}
+
 // Catalogue des flux attendus en colonnes du bilan par flux
 // (voir docs/FLUX_CONSO.md).
 export const FLOW_COLUMNS = [

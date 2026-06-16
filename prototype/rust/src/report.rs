@@ -5,8 +5,10 @@
 //! Toutes les restitutions sont calculées par requête SQL (format long) puis
 //! mises en forme en Rust, pour rester lisibles et faciles à maintenir.
 
-use crate::validate::{validate_consolidated, validate_functional, CheckResult, COMPONENT_FLOWS};
+use crate::money::Money;
+use crate::validate::{validate_consolidated, validate_functional, CheckResult};
 use duckdb::Connection;
+use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 
 /// Ordre d'affichage des flux.
@@ -17,8 +19,8 @@ pub const FLOW_ORDER: &[&str] = &["F00", "F01", "F20", "F80", "F81", "F98", "F99
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Formate un montant : 2 décimales, séparateur de milliers ; `-` si nul.
-fn fmt_amount(x: f64) -> String {
-    if x.abs() < 0.005 {
+fn fmt_amount(x: Decimal) -> String {
+    if x.is_zero() {
         return "-".to_string();
     }
     // Rust n'a pas de séparateur de milliers natif dans format!().
@@ -49,7 +51,7 @@ fn fmt_amount(x: f64) -> String {
 }
 
 /// Charge une grille (account, flow) → montant pour un niveau donné.
-fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, String), f64>> {
+fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, String), Decimal>> {
     let mut stmt = con.prepare(
         "SELECT account, flow, SUM(amount) AS amount
          FROM fact_entry
@@ -57,10 +59,11 @@ fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, 
          GROUP BY account, flow",
     )?;
     let rows = stmt.query_map([level], |row| {
+        let m: Money = row.get(2)?;
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
-            row.get::<_, f64>(2)?,
+            m.into_decimal(),
         ))
     })?;
     let mut grid = BTreeMap::new();
@@ -72,13 +75,13 @@ fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  1. Bilan par flux (comptes × flux, F99 reconstruit)
+//  1. Bilan par flux (comptes × flux, F99 stocké + colonne F99 affichée)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Affiche le bilan par flux : comptes en lignes × flux en colonnes.
 ///
-/// La colonne F99 est RECONSTRUITE comme la somme des flux constitutifs
-/// (F00+F01+F20+F80+F81+F98), conformément à l'identité de reconstruction.
+/// La colonne F99 affichée est le F99 **stocké** en base (matérialisé par le
+/// pipeline), conformément à l'identité de reconstruction.
 pub fn bilan_par_flux(con: &Connection, level: &str) -> duckdb::Result<()> {
     let grid = load_grid(con, level)?;
     let accounts: std::collections::BTreeSet<String> =
@@ -103,18 +106,12 @@ pub fn bilan_par_flux(con: &Connection, level: &str) -> duckdb::Result<()> {
     println!("  {}", "─".repeat(22 + col_w * FLOW_ORDER.len()));
 
     for acc in accounts {
-        // F99 reconstruit = somme des flux constitutifs présents à ce niveau
-        let f99: f64 = COMPONENT_FLOWS
-            .iter()
-            .map(|f| grid.get(&(acc.clone(), f.to_string())).copied().unwrap_or(0.0))
-            .sum();
         print!("  {:<22}", acc);
         for fl in FLOW_ORDER {
-            let val = if *fl == "F99" {
-                f99
-            } else {
-                grid.get(&(acc.clone(), fl.to_string())).copied().unwrap_or(0.0)
-            };
+            let val = grid
+                .get(&(acc.clone(), fl.to_string()))
+                .copied()
+                .unwrap_or(Decimal::ZERO);
             print!("{:>width$}", fmt_amount(val), width = col_w);
         }
         println!();
@@ -161,26 +158,22 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
         )?;
         let account_str = account.to_string();
         let rows = stmt.query_map([&lvl, account_str.as_str()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            let m: Money = row.get(1)?;
+            Ok((row.get::<_, String>(0)?, m.into_decimal()))
         })?;
-        let mut grid: BTreeMap<String, f64> = BTreeMap::new();
+        let mut grid: BTreeMap<String, Decimal> = BTreeMap::new();
         for r in rows {
             let (flow, amount) = r?;
             grid.insert(flow, amount);
         }
 
-        let f99: f64 = COMPONENT_FLOWS
-            .iter()
-            .map(|f| grid.get(&f.to_string()).copied().unwrap_or(0.0))
-            .sum();
         let label = level_desc.iter().find(|(l, _)| *l == lvl).unwrap().1;
         print!("  {:<28}", label);
         for fl in FLOW_ORDER {
-            let val = if *fl == "F99" {
-                f99
-            } else {
-                grid.get(&fl.to_string()).copied().unwrap_or(0.0)
-            };
+            let val = grid
+                .get(&fl.to_string())
+                .copied()
+                .unwrap_or(Decimal::ZERO);
             print!("{:>width$}", fmt_amount(val), width = col_w);
         }
         println!();

@@ -13,7 +13,10 @@
 //! Période traitée : `Entry_period = Period = "2024"` ; exercice précédent `"2023"`.
 //! Devise de présentation : EUR.
 
+use crate::money::Money;
 use duckdb::{Connection, params};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Master data
@@ -36,11 +39,20 @@ const PERIODS: &[(&str, &str, &str, &str, &str, &str)] = &[
 ];
 
 /// Plan de compte : (code, libelle, classe, capitaux_propres, compte_parent).
+///
+/// `400_Resultat` est rangé en `bilan` : c'est le « résultat de l'exercice »,
+/// solde net reporté au passif, pas un compte de P&L. Les comptes 6xx/7xx sont
+/// les véritables comptes de produits et charges (classe `resultat`).
 const ACCOUNTS: &[(&str, &str, &str, bool, Option<&str>)] = &[
-    ("100_Capital",         "Capital",         "equity",   true,  None),
-    ("200_Immobilisations", "Immobilisations", "bilan",    false, None),
-    ("300_Stocks",          "Stocks",          "bilan",    false, None),
-    ("400_Resultat",        "Résultat",        "resultat", false, None),
+    ("100_Capital",         "Capital",                "equity",   true,  None),
+    ("200_Immobilisations", "Immobilisations",        "bilan",    false, None),
+    ("300_Stocks",          "Stocks",                 "bilan",    false, None),
+    ("400_Resultat",        "Résultat de l'exercice", "bilan",    false, None),
+    ("600_Achats",          "Achats",                 "resultat", false, None),
+    ("610_Charges",         "Autres charges",         "resultat", false, None),
+    ("640_Dotations",       "Dotations aux amort.",   "resultat", false, None),
+    ("700_Produits",        "Ventes",                 "resultat", false, None),
+    ("705_Prestations",     "Prestations de services","resultat", false, None),
 ];
 
 /// Catalogue des flux — cf. docs/FLUX_CONSO.md §6.
@@ -68,21 +80,21 @@ const CURRENCIES: &[(&str, &str, i32)] = &[
 
 /// Périmètre de consolidation.
 /// (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie).
-const PERIMETER: &[(&str, &str, &str, &str, f64, f64, bool, bool)] = &[
-    ("M", "REEL", "2024", "globale", 1.00, 1.00, false, false),
-    ("A", "REEL", "2024", "globale", 1.00, 1.00, true,  false), // ENTRE en N
-    ("B", "REEL", "2024", "globale", 1.00, 1.00, false, true),  // SORT en N
+const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] = &[
+    (("M", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), false, false)),
+    (("A", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), true,  false)), // ENTRE en N
+    (("B", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), false, true)),  // SORT en N
 ];
 
 /// Taux de change vers EUR.
 ///   - period '2023' : taux clôture N-1 (utilisé par close_n1)
 ///   - period '2024' : taux clôture N (close_n / terminal) et taux moyen (avg)
 /// (currency_source, period, taux_close, taux_moyen).
-const RATES: &[(&str, &str, Option<f64>, Option<f64>)] = &[
-    ("USD", "2023", Some(0.92), None),
-    ("USD", "2024", Some(0.90), Some(0.95)), // close_n = 0.90, avg = 0.95
-    ("GBP", "2023", Some(1.15), None),
-    ("GBP", "2024", Some(1.12), Some(1.18)), // close_n = 1.12, avg = 1.18
+const RATES: &[((&str, &str), (Option<Decimal>, Option<Decimal>))] = &[
+    (("USD", "2023"), (Some(dec!(0.92)), None)),
+    (("USD", "2024"), (Some(dec!(0.90)), Some(dec!(0.95)))), // close_n = 0.90, avg = 0.95
+    (("GBP", "2023"), (Some(dec!(1.15)), None)),
+    (("GBP", "2024"), (Some(dec!(1.12)), Some(dec!(1.18)))), // close_n = 1.12, avg = 1.18
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,6 +102,9 @@ const RATES: &[(&str, &str, Option<f64>, Option<f64>)] = &[
 // ─────────────────────────────────────────────────────────────────────────────
 //  Note : pour démontrer l'agrégation (étape A), le F20 du résultat de M
 //         est volontairement éclaté en deux lignes (500 + 300 = 800).
+//  Note : les comptes de P&L (6xx/7xx) n'ont que du F20 (flux de période,
+//         pas d'ouverture). Les comptes de bilan ont F00 (ouverture N) et
+//         du F20 (mouvements de l'exercice).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Ligne de saisie brute :
@@ -98,31 +113,49 @@ const RATES: &[(&str, &str, Option<f64>, Option<f64>)] = &[
 type RawRow = (&'static str, &'static str, &'static str, &'static str,
                &'static str, &'static str, &'static str,
                Option<&'static str>, Option<&'static str>, Option<&'static str>,
-               &'static str, f64);
+               &'static str, Decimal);
 
 const RAW: &[RawRow] = &[
     // ── Mère M (EUR) — périmètre continu ──
-    ("REEL", "M", "2024", "2024", "100_Capital",         "F00", "EUR", None, None, None, "S-M-001", 10000.0),
-    ("REEL", "M", "2024", "2024", "400_Resultat",        "F00", "EUR", None, None, None, "S-M-002",  5000.0),
-    ("REEL", "M", "2024", "2024", "400_Resultat",        "F20", "EUR", None, None, None, "S-M-003",   500.0),
-    ("REEL", "M", "2024", "2024", "400_Resultat",        "F20", "EUR", None, None, None, "S-M-004",   300.0),
-    ("REEL", "M", "2024", "2024", "200_Immobilisations", "F00", "EUR", None, None, None, "S-M-005", 12000.0),
-    ("REEL", "M", "2024", "2024", "200_Immobilisations", "F20", "EUR", None, None, None, "S-M-006",   500.0),
-    ("REEL", "M", "2024", "2024", "300_Stocks",          "F00", "EUR", None, None, None, "S-M-007",  3000.0),
+    ("REEL", "M", "2024", "2024", "100_Capital",         "F00", "EUR", None, None, None, "S-M-001", dec!(10000)),
+    ("REEL", "M", "2024", "2024", "400_Resultat",        "F00", "EUR", None, None, None, "S-M-002", dec!(5000)),
+    ("REEL", "M", "2024", "2024", "400_Resultat",        "F20", "EUR", None, None, None, "S-M-003", dec!(500)),
+    ("REEL", "M", "2024", "2024", "400_Resultat",        "F20", "EUR", None, None, None, "S-M-004", dec!(300)),
+    ("REEL", "M", "2024", "2024", "200_Immobilisations", "F00", "EUR", None, None, None, "S-M-005", dec!(12000)),
+    ("REEL", "M", "2024", "2024", "200_Immobilisations", "F20", "EUR", None, None, None, "S-M-006", dec!(500)),
+    ("REEL", "M", "2024", "2024", "300_Stocks",          "F00", "EUR", None, None, None, "S-M-007", dec!(3000)),
+    // Comptes de P&L (classe « resultat ») — F20 uniquement
+    ("REEL", "M", "2024", "2024", "700_Produits",        "F20", "EUR", None, None, None, "S-M-010", dec!(2000)),
+    ("REEL", "M", "2024", "2024", "705_Prestations",     "F20", "EUR", None, None, None, "S-M-011", dec!(1000)),
+    ("REEL", "M", "2024", "2024", "600_Achats",          "F20", "EUR", None, None, None, "S-M-012", dec!(800)),
+    ("REEL", "M", "2024", "2024", "610_Charges",         "F20", "EUR", None, None, None, "S-M-013", dec!(500)),
+    ("REEL", "M", "2024", "2024", "640_Dotations",       "F20", "EUR", None, None, None, "S-M-014", dec!(200)),
 
     // ── Filiale A (USD) — ENTRE en N ──
-    ("REEL", "A", "2024", "2024", "100_Capital",         "F00", "USD", None, None, None, "S-A-001",  5000.0),
-    ("REEL", "A", "2024", "2024", "400_Resultat",        "F00", "USD", None, None, None, "S-A-002",  2000.0),
-    ("REEL", "A", "2024", "2024", "400_Resultat",        "F20", "USD", None, None, None, "S-A-003",   300.0),
-    ("REEL", "A", "2024", "2024", "200_Immobilisations", "F00", "USD", None, None, None, "S-A-004",  8000.0),
-    ("REEL", "A", "2024", "2024", "200_Immobilisations", "F20", "USD", None, None, None, "S-A-005",   400.0),
+    ("REEL", "A", "2024", "2024", "100_Capital",         "F00", "USD", None, None, None, "S-A-001", dec!(5000)),
+    ("REEL", "A", "2024", "2024", "400_Resultat",        "F00", "USD", None, None, None, "S-A-002", dec!(2000)),
+    ("REEL", "A", "2024", "2024", "400_Resultat",        "F20", "USD", None, None, None, "S-A-003", dec!(300)),
+    ("REEL", "A", "2024", "2024", "200_Immobilisations", "F00", "USD", None, None, None, "S-A-004", dec!(8000)),
+    ("REEL", "A", "2024", "2024", "200_Immobilisations", "F20", "USD", None, None, None, "S-A-005", dec!(400)),
+    // Comptes de P&L — F20 uniquement
+    ("REEL", "A", "2024", "2024", "700_Produits",        "F20", "USD", None, None, None, "S-A-010", dec!(1000)),
+    ("REEL", "A", "2024", "2024", "705_Prestations",     "F20", "USD", None, None, None, "S-A-011", dec!(500)),
+    ("REEL", "A", "2024", "2024", "600_Achats",          "F20", "USD", None, None, None, "S-A-012", dec!(400)),
+    ("REEL", "A", "2024", "2024", "610_Charges",         "F20", "USD", None, None, None, "S-A-013", dec!(200)),
+    ("REEL", "A", "2024", "2024", "640_Dotations",       "F20", "USD", None, None, None, "S-A-014", dec!(100)),
 
     // ── Filiale B (GBP) — SORT en N ──
-    ("REEL", "B", "2024", "2024", "100_Capital",         "F00", "GBP", None, None, None, "S-B-001",  4000.0),
-    ("REEL", "B", "2024", "2024", "400_Resultat",        "F00", "GBP", None, None, None, "S-B-002",  1500.0),
-    ("REEL", "B", "2024", "2024", "400_Resultat",        "F20", "GBP", None, None, None, "S-B-003",   200.0),
-    ("REEL", "B", "2024", "2024", "200_Immobilisations", "F00", "GBP", None, None, None, "S-B-004",  6000.0),
-    ("REEL", "B", "2024", "2024", "200_Immobilisations", "F20", "GBP", None, None, None, "S-B-005",   300.0),
+    ("REEL", "B", "2024", "2024", "100_Capital",         "F00", "GBP", None, None, None, "S-B-001", dec!(4000)),
+    ("REEL", "B", "2024", "2024", "400_Resultat",        "F00", "GBP", None, None, None, "S-B-002", dec!(1500)),
+    ("REEL", "B", "2024", "2024", "400_Resultat",        "F20", "GBP", None, None, None, "S-B-003", dec!(200)),
+    ("REEL", "B", "2024", "2024", "200_Immobilisations", "F00", "GBP", None, None, None, "S-B-004", dec!(6000)),
+    ("REEL", "B", "2024", "2024", "200_Immobilisations", "F20", "GBP", None, None, None, "S-B-005", dec!(300)),
+    // Comptes de P&L — F20 uniquement
+    ("REEL", "B", "2024", "2024", "700_Produits",        "F20", "GBP", None, None, None, "S-B-010", dec!(800)),
+    ("REEL", "B", "2024", "2024", "705_Prestations",     "F20", "GBP", None, None, None, "S-B-011", dec!(400)),
+    ("REEL", "B", "2024", "2024", "600_Achats",          "F20", "GBP", None, None, None, "S-B-012", dec!(300)),
+    ("REEL", "B", "2024", "2024", "610_Charges",         "F20", "GBP", None, None, None, "S-B-013", dec!(200)),
+    ("REEL", "B", "2024", "2024", "640_Dotations",       "F20", "GBP", None, None, None, "S-B-014", dec!(100)),
 ];
 
 /// Insère toutes les données de test : master data, satellites et saisie brute.
@@ -168,17 +201,22 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
 
     // --- Tables satellites ---
-    for p in PERIMETER {
+    for (k, v) in PERIMETER {
         con.execute(
             "INSERT INTO sat_perimeter VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            params![p.0, p.1, p.2, p.3, p.4, p.5, p.6, p.7],
+            params![k.0, k.1, k.2, k.3, Money(v.0), Money(v.1), v.2, v.3],
         )?;
     }
-    for r in RATES {
+    for (k, v) in RATES {
         con.execute(
             "INSERT INTO sat_exchange_rate (currency_source, period, taux_close, taux_moyen) \
              VALUES (?, ?, ?, ?)",
-            params![r.0, r.1, r.2, r.3],
+            params![
+                k.0,
+                k.1,
+                v.0.map(Money),
+                v.1.map(Money),
+            ],
         )?;
     }
 
@@ -186,8 +224,10 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     for row in RAW {
         con.execute(
             "INSERT INTO stg_entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![row.0, row.1, row.2, row.3, row.4, row.5, row.6,
-                    row.7, row.8, row.9, row.10, row.11],
+            params![
+                row.0, row.1, row.2, row.3, row.4, row.5, row.6,
+                row.7, row.8, row.9, row.10, Money(row.11),
+            ],
         )?;
     }
 

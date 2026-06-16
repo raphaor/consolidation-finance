@@ -1,11 +1,15 @@
 //! Étape D — Consolidation (→ niveau `consolidated`).
 //!
-//! Miroir de `conso/pipeline.py::step_d_consolidate`.
+//! Miroir de `conso/python/pipeline.py::step_d_consolidate`.
 //!
 //! Application des méthodes de consolidation (natif MVP) :
 //!   - globale         : copie à 100 % (`pct_integration = 1.0`)
 //!   - proportionnelle : `amount × pct_integration`
 //!   - équivalence     : EXCLUE du MVP (non traitée)
+//!
+//! **NB** : F99 est exclu de la consolidation (solde reconstruit, jamais
+//! consolidé). Il est materialisé séparément à ce niveau par
+//! [`super::materialize_f99`].
 
 use super::count_level;
 use duckdb::Connection;
@@ -24,6 +28,7 @@ JOIN sat_perimeter p
  AND p.scenario = f.scenario
  AND p.period = f.entry_period
 WHERE f.level = 'converted'
+  AND f.flow <> 'F99'  -- F99 = solde reconstruit, jamais consolidé
   AND p.methode IN ('globale', 'proportionnelle');  -- équivalence hors MVP";
 
 /// Exécute l'étape D : applique la méthode d'intégration de chaque entité.

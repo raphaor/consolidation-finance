@@ -19,6 +19,7 @@
 pub mod aggregate;
 pub mod consolidate;
 pub mod convert;
+pub mod materialize_f99;
 pub mod reclassify;
 
 use duckdb::Connection;
@@ -54,14 +55,26 @@ impl Default for ConvertParams {
 ///
 /// Ordre des éléments de `LevelCounts` :
 /// `[corporate, reclassified, converted, consolidated]`.
+///
+/// Après les étapes B et D, on materialise le flux de clôture F99 (= somme des
+/// autres flux) afin que le validateur [`crate::validate`] puisse comparer le
+/// F99 stocké à la somme des flux constitutifs.
 pub fn run_pipeline(
     con: &Connection,
     params: &ConvertParams,
 ) -> duckdb::Result<LevelCounts> {
     let corporate = aggregate::step_a(con)?;
-    let reclassified = reclassify::step_b(con)?;
+    let reclassified = {
+        let n = reclassify::step_b(con)?;
+        materialize_f99::materialize_f99(con, "reclassified")?;
+        n + count_f99(con, "reclassified")?
+    };
     let converted = convert::step_c(con, params)?;
-    let consolidated = consolidate::step_d(con)?;
+    let consolidated = {
+        let n = consolidate::step_d(con)?;
+        materialize_f99::materialize_f99(con, "consolidated")?;
+        n + count_f99(con, "consolidated")?
+    };
     Ok([corporate, reclassified, converted, consolidated])
 }
 
@@ -117,7 +130,11 @@ pub fn run_pipeline_timed(
     let ms_a = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
-    let reclassified = reclassify::step_b(con)?;
+    let reclassified = {
+        let n = reclassify::step_b(con)?;
+        materialize_f99::materialize_f99(con, "reclassified")?;
+        n + count_f99(con, "reclassified")?
+    };
     let ms_b = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
@@ -125,7 +142,11 @@ pub fn run_pipeline_timed(
     let ms_c = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
-    let consolidated = consolidate::step_d(con)?;
+    let consolidated = {
+        let n = consolidate::step_d(con)?;
+        materialize_f99::materialize_f99(con, "consolidated")?;
+        n + count_f99(con, "consolidated")?
+    };
     let ms_d = t.elapsed().as_secs_f64() * 1000.0;
 
     let total_ms = wall.elapsed().as_secs_f64() * 1000.0;
@@ -145,6 +166,16 @@ pub fn run_pipeline_timed(
 fn count_level(con: &Connection, level: &str) -> duckdb::Result<usize> {
     let n: i64 = con.query_row(
         "SELECT COUNT(*) FROM fact_entry WHERE level = ?",
+        [level],
+        |row| row.get(0),
+    )?;
+    Ok(n as usize)
+}
+
+/// Nombre de lignes F99 materialisées à un niveau donné.
+fn count_f99(con: &Connection, level: &str) -> duckdb::Result<usize> {
+    let n: i64 = con.query_row(
+        "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND flow = 'F99'",
         [level],
         |row| row.get(0),
     )?;

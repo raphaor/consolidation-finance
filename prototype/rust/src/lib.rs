@@ -37,6 +37,7 @@
 pub mod import;
 pub mod loader;
 pub mod masterdata;
+pub mod money;
 pub mod pipeline;
 pub mod report;
 pub mod schema;

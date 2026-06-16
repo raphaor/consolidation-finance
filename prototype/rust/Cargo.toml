@@ -26,6 +26,10 @@ path = "src/bin/bench.rs"
 # sources (pas de dépendance système). La compilation est lourde (compile tout
 # le moteur C++ de DuckDB) mais garantit un binaire autonome sur ARM64.
 duckdb = { version = "1.1", features = ["bundled"] }
+# Arithmétique décimale exacte pour les montants (pas de f64 en finance).
+# `serde-float` : sérialisation JSON en nombre (le frontend TS attend `number`).
+# `macros` : macro `dec!(10000)` pour les constantes du seed.
+rust_decimal = { version = "1", features = ["serde-float", "macros"] }
 # Serveur web (binaire conso-server) — expose le moteur via une API REST JSON.
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }

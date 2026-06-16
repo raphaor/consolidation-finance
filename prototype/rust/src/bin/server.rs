@@ -24,14 +24,17 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use duckdb::params_from_iter;
+use duckdb::types::Value as DbValue;
 use duckdb::Connection;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
-    create_schema, import, load_all, masterdata, run_pipeline, ConvertParams,
+    create_schema, import, load_all, masterdata, money::Money, run_pipeline, ConvertParams,
 };
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 
@@ -54,11 +57,14 @@ struct LevelCount {
 }
 
 /// Ligne `/api/bilan` : montant agrégé par (compte, flux) au niveau demandé.
+///
+/// `amount` est sérialisé en **nombre** JSON (feature `serde-float` de
+/// `rust_decimal`) — le frontend TS attend `amount: 9774.0`, pas une chaîne.
 #[derive(Serialize)]
 struct BilanRow {
     account: String,
     flow: String,
-    amount: f64,
+    amount: Decimal,
 }
 
 /// Ligne `/api/entries` : écriture individuelle de la table `fact_entry`.
@@ -80,7 +86,7 @@ struct EntryRow {
     analysis: Option<String>,
     audit_id: Option<String>,
     level: String,
-    amount: f64,
+    amount: Decimal,
 }
 
 /// Réponse `/api/run` : nombre de lignes produites à chaque étape du pipeline.
@@ -107,6 +113,10 @@ struct ResetResult {
 struct BilanQuery {
     #[serde(default = "default_level")]
     level: String,
+    #[serde(default)]
+    scenario: Option<String>,
+    #[serde(default)]
+    period: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +127,10 @@ struct EntriesQuery {
     limit: i64,
     #[serde(default)]
     offset: i64,
+    #[serde(default)]
+    scenario: Option<String>,
+    #[serde(default)]
+    period: Option<String>,
 }
 
 fn default_level() -> String {
@@ -125,6 +139,23 @@ fn default_level() -> String {
 
 fn default_limit() -> i64 {
     100
+}
+
+/// Construit le fragment SQL et les paramètres pour les filtres optionnels
+/// `scenario` et `period` (ce dernier filtre sur `entry_period`, exercice clôturé).
+/// Renvoie une chaîne préfixée par " AND ..." prête à concaténer après un WHERE existant.
+fn build_filters(scenario: &Option<String>, entry_period: &Option<String>) -> (String, Vec<DbValue>) {
+    let mut sql = String::new();
+    let mut params = Vec::new();
+    if let Some(s) = scenario {
+        sql.push_str(" AND scenario = ?");
+        params.push(DbValue::Text(s.clone()));
+    }
+    if let Some(p) = entry_period {
+        sql.push_str(" AND entry_period = ?");
+        params.push(DbValue::Text(p.clone()));
+    }
+    (sql, params)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,29 +206,35 @@ async fn get_levels(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Level
 
 /// GET /api/bilan?level=consolidated — bilan par flux.
 ///
-/// Exécute la même requête SQL que `report::bilan_par_flux` (format long) mais
-/// renvoie du JSON au lieu d'imprimer un tableau.
+/// Le « bilan » au sens large (actif + passif + capitaux propres) regroupe les
+/// comptes de classe `bilan` ou `equity`. Les comptes de `resultat` (P&L :
+/// classes 6/7) sont exclus — ils sont exposés via `/api/compte-resultat`.
+/// On join `dim_account` pour filtrer sur la classe.
 async fn get_bilan(
     Query(q): Query<BilanQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let mut stmt = con
-            .prepare(
-                "SELECT account, flow, SUM(amount) AS amount
-                 FROM fact_entry
-                 WHERE level = ?
-                 GROUP BY account, flow
-                 ORDER BY account, flow",
-            )
-            .map_err(db_err)?;
+        let (fsql, fparams) = build_filters(&q.scenario, &q.period);
+        let sql = format!(
+            "SELECT e.account, e.flow, SUM(e.amount) AS amount
+             FROM fact_entry e
+             JOIN dim_account a ON a.code = e.account
+             WHERE e.level = ? AND a.classe IN ('bilan', 'equity') {fsql}
+             GROUP BY e.account, e.flow
+             ORDER BY e.account, e.flow"
+        );
+        let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
+        params.extend(fparams);
+        let mut stmt = con.prepare(&sql).map_err(db_err)?;
         let iter = stmt
-            .query_map([&q.level], |row| {
+            .query_map(params_from_iter(params), |row| {
+                let m: Money = row.get(2)?;
                 Ok(BilanRow {
                     account: row.get(0)?,
                     flow: row.get(1)?,
-                    amount: row.get(2)?,
+                    amount: m.into_decimal(),
                 })
             })
             .map_err(db_err)?;
@@ -212,30 +249,32 @@ async fn get_bilan(
 
 /// GET /api/compte-resultat?level=consolidated — compte de résultat par flux.
 ///
-/// Comme `/api/bilan` mais restreint aux comptes de classe « résultat »
-/// (jointure sur `dim_account.classe = 'resultat'`).
+/// Restreint aux comptes de classe « resultat » (P&L : produits et charges).
 async fn get_compte_resultat(
     Query(q): Query<BilanQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let mut stmt = con
-            .prepare(
-                "SELECT e.account, e.flow, SUM(e.amount) AS amount
-                 FROM fact_entry e
-                 JOIN dim_account a ON a.code = e.account
-                 WHERE e.level = ? AND a.classe = 'resultat'
-                 GROUP BY e.account, e.flow
-                 ORDER BY e.account, e.flow",
-            )
-            .map_err(db_err)?;
+        let (fsql, fparams) = build_filters(&q.scenario, &q.period);
+        let sql = format!(
+            "SELECT e.account, e.flow, SUM(e.amount) AS amount
+             FROM fact_entry e
+             JOIN dim_account a ON a.code = e.account
+             WHERE e.level = ? AND a.classe = 'resultat' {fsql}
+             GROUP BY e.account, e.flow
+             ORDER BY e.account, e.flow"
+        );
+        let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
+        params.extend(fparams);
+        let mut stmt = con.prepare(&sql).map_err(db_err)?;
         let iter = stmt
-            .query_map([&q.level], |row| {
+            .query_map(params_from_iter(params), |row| {
+                let m: Money = row.get(2)?;
                 Ok(BilanRow {
                     account: row.get(0)?,
                     flow: row.get(1)?,
-                    amount: row.get(2)?,
+                    amount: m.into_decimal(),
                 })
             })
             .map_err(db_err)?;
@@ -249,6 +288,7 @@ async fn get_compte_resultat(
 }
 
 fn map_entry_row(row: &duckdb::Row) -> duckdb::Result<EntryRow> {
+    let m: Money = row.get(13)?;
     Ok(EntryRow {
         id: row.get(0)?,
         scenario: row.get(1)?,
@@ -263,7 +303,7 @@ fn map_entry_row(row: &duckdb::Row) -> duckdb::Result<EntryRow> {
         analysis: row.get(10)?,
         audit_id: row.get(11)?,
         level: row.get(12)?,
-        amount: row.get(13)?,
+        amount: m.into_decimal(),
     })
 }
 
@@ -277,43 +317,46 @@ async fn get_entries(
 ) -> Result<Json<Vec<EntryRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (sql, bind_level): (&str, Option<&str>) = if q.level == "raw" {
-            (
+        let (fsql, fparams) = build_filters(&q.scenario, &q.period);
+        let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
+            let where_stg = if fsql.is_empty() {
+                String::new()
+            } else {
+                format!("WHERE {}", fsql.trim_start_matches(" AND "))
+            };
+            let sql = format!(
                 "SELECT * FROM (
                     SELECT ROW_NUMBER() OVER (ORDER BY entity, scenario, period, account, flow, audit_id) AS id,
                            scenario, entity, entry_period, period, account, flow,
                            currency, partner, share, analysis, audit_id,
                            'raw' AS level, amount
-                    FROM stg_entry
+                    FROM stg_entry {where_stg}
                 ) ORDER BY id
-                LIMIT ? OFFSET ?",
-                None,
-            )
+                LIMIT ? OFFSET ?"
+            );
+            let mut params = fparams;
+            params.push(DbValue::BigInt(q.limit));
+            params.push(DbValue::BigInt(q.offset));
+            (sql, params)
         } else {
-            (
+            let sql = format!(
                 "SELECT id, scenario, entity, entry_period, period, account, flow,
                         currency, partner, share, analysis, audit_id, level, amount
                  FROM fact_entry
-                 WHERE level = ?
+                 WHERE level = ? {fsql}
                  ORDER BY id
-                 LIMIT ? OFFSET ?",
-                Some(q.level.as_str()),
-            )
+                 LIMIT ? OFFSET ?"
+            );
+            let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
+            params.extend(fparams);
+            params.push(DbValue::BigInt(q.limit));
+            params.push(DbValue::BigInt(q.offset));
+            (sql, params)
         };
-        let mut stmt = con.prepare(sql).map_err(db_err)?;
-        // Cast explicite en BIGINT : DuckDB est parfois tatillon sur les
-        // paramètres bindés dans LIMIT/OFFSET.
-        let iter = match bind_level {
-            Some(lvl) => stmt
-                .query_map(
-                    duckdb::params![lvl, q.limit as i64, q.offset as i64],
-                    map_entry_row,
-                )
-                .map_err(db_err)?,
-            None => stmt
-                .query_map(duckdb::params![q.limit as i64, q.offset as i64], map_entry_row)
-                .map_err(db_err)?,
-        };
+        let mut stmt = con.prepare(&sql).map_err(db_err)?;
+        let iter = stmt
+            .query_map(params_from_iter(params), map_entry_row)
+            .map_err(db_err)?;
         let mut out = Vec::new();
         for r in iter {
             out.push(r.map_err(db_err)?);

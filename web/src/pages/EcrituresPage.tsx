@@ -15,6 +15,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
+import { Filters } from '../components/Filters';
 import type { Entry } from '../types';
 import { LEVELS } from '../types';
 import { formatAmount, formatInt } from '../utils/format';
@@ -27,6 +28,8 @@ type EntryLevel = (typeof ENTRY_LEVELS)[number];
 
 export function EcrituresPage() {
   const [level, setLevel] = useState<EntryLevel>('consolidated');
+  const [scenario, setScenario] = useState('');
+  const [period, setPeriod] = useState('');
   const [data, setData] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +40,13 @@ export function EcrituresPage() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await api.entries({ level, limit: FETCH_LIMIT, offset: 0 });
+      const rows = await api.entries({
+        level,
+        limit: FETCH_LIMIT,
+        offset: 0,
+        scenario,
+        period,
+      });
       setData(rows);
       setEntityFilter('');
     } catch (err) {
@@ -46,7 +55,7 @@ export function EcrituresPage() {
     } finally {
       setLoading(false);
     }
-  }, [level]);
+  }, [level, scenario, period]);
 
   useEffect(() => {
     void load();
@@ -107,6 +116,13 @@ export function EcrituresPage() {
       <div className="page__header">
         <h1 className="page__title">Écritures</h1>
         <div className="page__actions">
+          <Filters
+            scenario={scenario}
+            period={period}
+            onScenarioChange={setScenario}
+            onPeriodChange={setPeriod}
+            disabled={loading}
+          />
           <label className="field">
             <span>Niveau</span>
             <select

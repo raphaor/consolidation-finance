@@ -13,6 +13,11 @@
 //!   4. lignes en devise de présentation : copie directe, aucun écart
 //!
 //! Le niveau *converted* est exprimé en devise de présentation.
+//!
+//! **NB** : F99 (flux de clôture) est EXCLU de la conversion : c'est un solde
+//! reconstruit, materialisé séparément à chaque niveau où l'on valide
+//! l'identité (cf. [`super::materialize_f99`]). Le convertir puis le
+//! re-materialiser au niveau consolidé créerait un doublon.
 
 use super::{count_level, ConvertParams};
 use duckdb::params;
@@ -52,10 +57,11 @@ WITH conv AS (
            ON r_n1.currency_source = f.currency
           AND r_n1.period = ?
     WHERE f.level = 'reclassified'
+      AND f.flow <> 'F99'  -- F99 = solde reconstruit, jamais converti
 )
 INSERT INTO fact_entry
     (scenario, entity, entry_period, period, account, flow, currency, level, amount)
--- Montants convertis (tous flux, exprimés en devise de présentation)
+-- Montants convertis (tous flux constitutifs, exprimés en devise de présentation)
 SELECT scenario, entity, entry_period, period, account, flow,
        ? AS currency,
        'converted' AS level,
