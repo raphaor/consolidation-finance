@@ -109,10 +109,10 @@ fn main() {
     // 4. Restitutions
     let _ = print_level_counts(&con);
     let _ = bilan_par_flux(&con, "consolidated");
-    let _ = compare_levels(&con, "400");
-    let _ = compare_levels(&con, "100");
+    let _ = compare_levels(&con, "12");
+    let _ = compare_levels(&con, "101");
 
-    // 5. Validation des identités F99 = F00 + F01 + F20 + F80 + F81 + F98
+    // 5. Validation des identités de reconstruction des clôtures (flux_de_report)
     let ok = match print_validation(&con) {
         Ok(v) => v,
         Err(e) => {

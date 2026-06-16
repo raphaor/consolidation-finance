@@ -14,10 +14,11 @@
 //!
 //! Le niveau *converted* est exprimé en devise de présentation.
 //!
-//! **NB** : F99 (flux de clôture) est EXCLU de la conversion : c'est un solde
-//! reconstruit, materialisé séparément à chaque niveau où l'on valide
-//! l'identité (cf. [`super::materialize_f99`]). Le convertir puis le
-//! re-materialiser au niveau consolidé créerait un doublon.
+//! Tous les flux sont convertis, **clôtures (F99) comprises** : une clôture est
+//! convertie à son taux (F99 → `close_n`), sans écart (`flux_ecart` NULL). La
+//! clôture convertie (portée) est ensuite écrasée par `materialize_closures`
+//! au niveau converted, qui la reconstruit depuis les constituants convertis +
+//! écarts (même valeur, mais autoritaire).
 
 use super::{count_level, ConvertParams};
 use duckdb::params;
@@ -57,7 +58,6 @@ WITH conv AS (
            ON r_n1.currency_source = f.currency
           AND r_n1.period = ?
     WHERE f.level = 'reclassified'
-      AND f.flow <> 'F99'  -- F99 = solde reconstruit, jamais converti
 )
 INSERT INTO fact_entry
     (scenario, entity, entry_period, period, account, flow, currency, level, amount)

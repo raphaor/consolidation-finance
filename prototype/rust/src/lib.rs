@@ -32,7 +32,11 @@
 //! | F98  | Sortie périmètre       | terminal    | —          |
 //! | F99  | Clôture                | close_n     | —          |
 //!
-//! **Identité fondamentale** : `F99 = F00 + F01 + F20 + F80 + F81 + F98`
+//! **Reconstruction des clôtures** : un flux auto-référentiel
+//! (`flux_de_report(C) = C`) est une clôture reconstruite comme
+//! `C = Σ(X | flux_de_report(X) = C et X ≠ C)` (cf. `pipeline::materialize_closures`).
+//! Aujourd'hui seule F99 est une clôture ; la logique est générique et pilotée
+//! par `dim_flow.flux_de_report`.
 
 pub mod import;
 pub mod loader;

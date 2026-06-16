@@ -2,7 +2,7 @@
 
 Annexe de [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) (dimension `Flow`).
 
-La consolidation est **par les flux** : chaque traitement de consolidation agit sur des **flux de variation** et génère des écritures taguées avec un code de flux. Le code de flux explicite l'origine de chaque montant → **traçabilité totale**. Le flux de clôture (F99) n'est jamais saisi : c'est un solde **reconstruit** par identité.
+La consolidation est **par les flux** : chaque traitement de consolidation agit sur des **flux de variation** et génère des écritures taguées avec un code de flux. Le code de flux explicite l'origine de chaque montant → **traçabilité totale**. Le flux de clôture (F99) est un solde **reconstruit** par identité : il transite par toutes les étapes comme n'importe quel flux (et peut même être saisi en mode formulaire bilan), mais `materialize_closures` le reconstruit/l'écrase de façon autoritaire à chaque niveau de stockage.
 
 ---
 
@@ -17,17 +17,19 @@ La consolidation distingue deux concepts :
 
 | Niveau | Devise | Contenu | Flux présents |
 |---|---|---|---|
-| **Corporate** | Fonctionnelle | Données saisies agrégées par entité, brutes | F00, F20 (flux sociaux d'origine) |
-| **Reclassifié** | Fonctionnelle | Données après reclassifications de périmètre | F00, F01, F20, F98 (flux reclassifiés, toujours en devise fonctionnelle) |
-| **Converti** | Présentation | Données converties + écarts générés | F00, F01, F20, F80, F81, F98 (+ écarts de conversion) |
-| **Consolidé** | Présentation | Données après application des méthodes | Tous flux, à l'échelle `% d'intégration` / redirections de comptes |
+| **Corporate** | Fonctionnelle | Données saisies agrégées par entité, brutes | Flux saisis (F00, F20 en mode écriture ; + F99 en mode bilan) |
+| **Reclassifié** | Fonctionnelle | Données après reclassifications de périmètre + clôture reconstruite | F00, F01, F20, F98, **F99** (reconstruit) |
+| **Converti** | Présentation | Données converties + écarts générés + clôture reconstruite | F00, F01, F20, F80, F81, F98, **F99** (reconstruit) |
+| **Consolidé** | Présentation | Données après application des méthodes + clôture reconstruite | Tous flux, à l'échelle `% d'intégration` / redirections de comptes (F99 reconstruit) |
+
+> Les clôtures (F99) **transitent par toutes les étapes** comme n'importe quel flux (agrégrées, reclassifiées, converties à leur taux, consolidées avec `% d'intégration`), puis `materialize_closures` les **reconstruit/écrase** à chaque niveau de stockage (reclassified, converted, consolidated) depuis les constituants de ce niveau. Aucune étape ne filtre les clôtures ; le miroir de sortie F98 cible lui les **constituants** seuls (une clôture étant leur somme, la refléter double-compterait).
 
 ### Étapes de traitement (4)
 
 | Étape | Opération | Entrée | Sortie stockée à |
 |---|---|---|---|
 | **A. Agrégation** | Cumul des écritures source par entité | CSV / saisie | Niveau Corporate |
-| **B. Reclassification** | Reclassifications de périmètre en devise fonctionnelle : entrées (F00→F01), sorties (collapse→F98), fusions (F07/F70 post-MVP) | Corporate | Niveau Reclassifié |
+| **B. Reclassification** | Reclassifications de périmètre en devise fonctionnelle : entrées (F00→F01), sorties (passthrough + miroir −F98), fusions (F07/F70 post-MVP) | Corporate | Niveau Reclassifié |
 | **C. Conversion** | Conversion multi-devises : application des taux + génération des écarts F80/F81 | Reclassifié | Niveau Converti |
 | **D. Consolidation** | Application des méthodes (globale / proportionnelle / équivalence) ; éditeur de règles (post-MVP) | Converti | Niveau Consolidé |
 
@@ -43,7 +45,7 @@ Stockage          Traitement
 │  Corporate  │ ◄── stocke le résultat de A (devise fonctionnelle)
 └──────┬──────┘
        │
-       ▼ B. Reclassification (F00→F01, collapse→F98)
+       ▼ B. Reclassification (F00→F01, passthrough + miroir −F98)
 ┌──────────────┐
 │ Reclassifié  │ ◄── stocke le résultat de B (devise fonctionnelle)
 └──────┬───────┘
@@ -96,9 +98,18 @@ Tous les flux sont saisis en **devise fonctionnelle** et convertis via leur `tau
 
 **Symétrique** : tient à l'identique en devise fonctionnelle et en devise de présentation.
 
-- `F99 = Σ(tous les autres flux)` — via `flux_de_report`.
+- Pour chaque clôture C — flux **auto-référentiel** : `flux_de_report(C) = C` :
+  `C = Σ(flux X | flux_de_report(X) = C et X ≠ C)`. Aujourd'hui seule F99 est auto-référentielle (`flux_de_report(F99) = F99`) ; la logique est générique et pilotée par `dim_flow.flux_de_report` (un autre flux peut être déclaré clôture en s'auto-référençant).
 - En devise fonctionnelle : les écarts (F80/F81) y sont à 0 → `F99 = F00 + Σ variations`.
 - En devise de présentation : les écarts y valent l'écart calculé → `F99_conv = F00_conv + Σ variations_conv + Σ écarts`.
+
+### Sémantique d'écrasement (valeur autoritaire)
+
+La reconstruction est **autoritaire** : pour un grain dimensionnel donné, elle remplace toute valeur de clôture pré-existante (implémentée en `DELETE` ciblé + `INSERT` dans `materialize_closures`). Une saisie résiduelle sur un flux de clôture est donc écrasée — pas additionnée. En revanche, une clôture sur un grain sans composante (autre compte, autre code `Nature` à venir) est **préservée** : l'écrasement ne déborde pas sur un grain distinct.
+
+### Grain de reconstruction
+
+Grain actuel : `(scenario, entity, entry_period, period, account, currency)` — les dimensions `partner` / `share` / `analysis` sont volontairement hors grain (une clôture est un solde agrégé, pas une écriture détaillée). **À chaque ajout de dimension** (ex. `Nature`), se demander : *deux clôtures différant seulement par cette dimension sont-elles des soldes distincts ?* Si oui, la dimension entre dans le grain (à ajouter au `GROUP BY` de l'INSERT **et** à la clause de ciblage du `DELETE`, sinon l'écrasement serait trop large). Détail et marqueurs `GRAIN` dans `prototype/rust/src/pipeline/materialize_closures.rs`.
 
 ## 4. À-nouveau
 
@@ -106,7 +117,7 @@ Tous les flux sont saisis en **devise fonctionnelle** et convertis via leur `tau
 
 ## 5. Principe « consolidation par les flux »
 
-Les **automatismes de consolidation** (conversion, méthodes, variations de périmètre, et plus tard l'éditeur de règles) agissent sur les **flux de variation** (F20, F01, F07, F95, F98…), **jamais sur F99**. F99 est un solde reconstruit, pas un solde saisi.
+Les **automatismes de consolidation** (conversion, méthodes, variations de périmètre, et plus tard l'éditeur de règles) agissent sur les **flux de variation** (F20, F01, F07, F95, F98…). F99 transite par toutes les étapes comme un flux ordinaire (converti à son taux, consolidé avec `% d'intégration`), mais `materialize_closures` le **reconstruit** à chaque niveau de stockage depuis les constituants du niveau — c'est ce mécanisme, et non un filtrage, qui garantit son caractère de solde reconstruit.
 
 ---
 
@@ -149,7 +160,7 @@ Les variations de périmètre et la fusion se traduisent par des **reclassificat
 Une entité qui entre a, au niveau **social**, un montant sur F00 (ouverture). En consolidation, **ce F00 est déplacé vers F01**. Ainsi le F00 consolidé ne contient que le report du périmètre existant (= F99 consolidé N-1) ; les ouvertures des entités entrantes sont isolées en F01.
 
 ### Sortie de périmètre → F98
-Symétriquement, une entité qui sort a son **F99 social déplacé vers F98** au niveau consolidé. Le F99 consolidé exclut donc l'entité sortante ; son solde est isolé en F98.
+Une entité sortante **garde ses flux constituants** (F00, F20…) à l'identique, et chaque constituant X génère un miroir négatif **−X sur F98**. Ainsi `F98 = −Σ(constituants)` et `F99 = F00 + F20 + … + F98 = 0` par identité de reconstruction : le solde de la sortante ne fuit pas dans F99 consolidé. Le solde sortant reste lisible comme `−(F98) = +(F00+F20)`. La génération est **générique** (tous les flux non-clôture présents à corporate via `flux_de_report`, pas de liste en dur) ; F98 reporte à F99 (terminal, taux close_n → ses écarts propres sont nuls et il absorbe les écarts des constituants dans la clôture). L'identité `F99 = 0` tient symétriquement en devise fonctionnelle et en devise de présentation.
 
 ### Fusion → F07 / F70 (post-MVP)
 Entité **absorbée**. Deux modes selon le moment de la fusion ; dans les deux cas l'absorption est **saisie manuellement par l'entité absorbante** (pas d'automatisme).

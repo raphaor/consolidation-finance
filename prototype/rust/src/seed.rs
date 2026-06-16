@@ -67,9 +67,10 @@ const ACCOUNTS: &[(&str, &str, &str, &str, Option<&str>, Option<&str>)] = &[
 /// Catalogue des flux — cf. docs/FLUX_CONSO.md §6.
 /// (code, libelle, taux_conversion, flux_ecart, flux_de_report).
 ///
-/// `flux_de_report` indique dans quel flux de clôture chaque flux se reporte ;
-/// par défaut F99 (la reconstruction actuelle fait F99 = Σ des autres flux —
-/// évolution prévue via `flux_de_report`, cf. Q28).
+/// `flux_de_report` indique dans quel flux de clôture chaque flux se reporte.
+/// Un flux auto-référentiel (`flux_de_report = code`, ici F99) est une clôture
+/// reconstruite par le pipeline (cf. `pipeline::materialize_closures` et
+/// `docs/FLUX_CONSO.md §3`). Tous les autres flux reportent à F99.
 const FLOWS: &[(&str, &str, &str, Option<&str>, &str)] = &[
     ("F00", "Ouverture",               "close_n1", Some("F80"), "F99"),
     ("F01", "Entrée périmètre",        "close_n1", Some("F80"), "F99"),

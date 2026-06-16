@@ -5,7 +5,7 @@
 //! pipeline A→B→C→D puis vérifie :
 //!   - les comptes par niveau (corporate/reclassified/converted/consolidated) ;
 //!   - les montants F99 attendus par compte au niveau consolidated ;
-//!   - l'identité de reconstruction via `validate` ;
+//!   - l'identité de reconstruction des clôtures via `validate` ;
 //!   - la présence/absence des écarts F80/F81 selon la devise ;
 //!   - la reproductibilité (re-run après `DELETE FROM fact_entry`).
 //!
@@ -132,30 +132,66 @@ const TOL: f64 = 0.01;
 #[test]
 fn pipeline_produit_les_bons_comptes_par_niveau() {
     let con = setup();
-    // Comptages justifiés par le seed enrichi (cf. src/seed.rs) :
-    //   - Comptes de P&L 6xx/7xx (5 comptes) saisies en F20 sur M, A, B
-    //     → +15 écritures brutes, agrégées en 15 lignes corporate.
+    // Comptages justifiés par le seed (cf. src/seed.rs). Rappel du périmètre :
+    //   M = continu (EUR), A = entrante (USD), B = sortante (GBP) ; globale 100%.
     //
-    //   - corporate = 16 (avant enrichissement) + 15 (P&L) = 31.
+    //   - corporate (A) = 31 : M=11 (4 F00 + 7 F20), A=10, B=10 (la saisie ne
+    //     contient que F00/F20 en mode écriture).
     //
-    //   - reclassified (B) : M copie, A (entrante) F00→F01, B (sortante)
-    //     collapse F98. = 14 (avant) + 5 (M P&L F20) + 5 (A P&L F20)
-    //     + 5 (B P&L F98) = 29. Puis on materialise F99 (= somme des autres
-    //     flux) pour chaque (entity, account) : M a 9 comptes, A en a 8,
-    //     B en a 8 → 25 lignes F99. Total reclassified = 29 + 25 = 54.
+    //   - reclassified (B) : M copie (11), A entrante F00→F01 (10), B sortante
+    //     passe F00/F20 à l'identique + génère un miroir −X sur F98 par
+    //     constituant → 18 (3 F00 + 7 F20 + 8 F98 agrégés par compte).
+    //     Sous-total = 11 + 10 + 18 = 39. Puis on materialise F99 (25 lignes :
+    //     M 9 comptes, A 8, B 8 — dont 8 lignes à 0 pour la sortante).
+    //     Total reclassified = 39 + 25 = 64.
     //
-    //   - converted (C) : F99 est exclu de la conversion (terminal) → on
-    //     convertit les 29 lignes reclassifiées et on génère des écarts F80/F81
-    //     pour A (USD) sur F01 et F20 : 3 écarts F80 (100/200/400 de A) +
-    //     7 écarts F81 (200/400/700/705/600/610/640 de A). Total = 29 + 10 = 39.
+    //   - converted (C) : on convertit TOUTES les lignes reclassifiées
+    //     (clôtures F99 comprises) = 64. A (USD) ET B (GBP) génèrent des écarts
+    //     (F00→F80, F20→F81) : 3 F80 + 7 F81 chacun, soit 20 écarts. Puis
+    //     materialize(converted) écrase le F99 porté par la reconstruction
+    //     (compte net nul). Total = 64 + 20 = 84.
     //
-    //   - consolidated (D) : F99 exclu de la consolidation → on copie les 39
-    //     lignes converted (M,A,B sont toutes en `globale`, pct=1.0), puis on
-    //     materialise F99 consolidated (25 lignes). Total = 39 + 25 = 64.
+    //   - consolidated (D) : on consolide TOUTES les lignes converted
+    //     (clôtures comprises, pct appliqué), = 84, puis materialize(consolidated)
+    //     écrase le F99 porté. Total = 84.
     assert_eq!(level_count(&con, "corporate"), 31, "niveau corporate");
-    assert_eq!(level_count(&con, "reclassified"), 54, "niveau reclassified");
-    assert_eq!(level_count(&con, "converted"), 39, "niveau converted");
-    assert_eq!(level_count(&con, "consolidated"), 64, "niveau consolidated");
+    assert_eq!(level_count(&con, "reclassified"), 64, "niveau reclassified");
+    assert_eq!(level_count(&con, "converted"), 84, "niveau converted");
+    assert_eq!(level_count(&con, "consolidated"), 84, "niveau consolidated");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  1b. F99 présent au niveau converted (les clôtures transitent par la
+//      conversion, puis materialize(converted) les écrase par la reconstruction).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn f99_present_au_niveau_converted_et_identite_tient() {
+    let con = setup();
+
+    // F99 doit être présent au niveau converted (clôtures portées par l'étape C
+    // puis reconstruites autoritairement par materialize(converted)).
+    let n: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' AND flow='F99'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(n > 0, "F99 doit être présent au niveau converted");
+
+    // L'identité de reconstruction y tient (F99 converti = Σ constituants convertis).
+    let checks = conso_engine::validate::check_closures(&con, "converted")
+        .expect("check_closures converted");
+    assert!(!checks.is_empty(), "aucun contrôle renvoyé pour converted");
+    for c in &checks {
+        assert!(
+            c.ok,
+            "identité F99 en échec au niveau converted pour {} : écart = {}",
+            c.account,
+            c.ecart
+        );
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,20 +209,20 @@ fn montants_f99_consolidated_attendus() {
     let resultat = f99_consolidated(&con, "400");
 
     assert!(
-        (capital - 18_980.00).abs() < TOL,
-        "100 consolidated F99 = {capital} (attendu 18980.00)"
+        (capital - 14_500.00).abs() < TOL,
+        "100 consolidated F99 = {capital} (attendu 14500.00)"
     );
     assert!(
-        (immo - 27_116.00).abs() < TOL,
-        "200 consolidated F99 = {immo} (attendu 27116.00)"
+        (immo - 20_060.00).abs() < TOL,
+        "200 consolidated F99 = {immo} (attendu 20060.00)"
     );
     assert!(
         (stocks - 3_000.00).abs() < TOL,
         "300 consolidated F99 = {stocks} (attendu 3000.00)"
     );
     assert!(
-        (resultat - 9_774.00).abs() < TOL,
-        "400 consolidated F99 = {resultat} (attendu 9774.00)"
+        (resultat - 7_870.00).abs() < TOL,
+        "400 consolidated F99 = {resultat} (attendu 7870.00)"
     );
 }
 
@@ -211,7 +247,7 @@ fn comptes_attendus_presents_au_niveau_consolidated() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  3. Identité de reconstruction F99 (validateur du crate)
+//  3. Identité de reconstruction des clôtures (validateur du crate)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -250,8 +286,9 @@ fn validate_f99_functional_tient() {
 //     - présents en devise de présentation (converted / consolidated) ;
 //     - localisés sur les entités non-EUR (A=USD, B=GBP), absents sur M=EUR.
 //
-//     NB : B (GBP) est sortante → tous ses flux sont collapsés en F98 (terminal,
-//     sans écart). Seule A (USD, entrante) génère donc des F80/F81 ici.
+//     NB : depuis la refonte de la sortie de périmètre (miroir −F98 par flux),
+//     la sortante B garde ses flux F00/F20 à la conversion → elle génère
+//     elle aussi des F80/F81 (absorbés par F98 dans F99 = 0).
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -290,15 +327,20 @@ fn ecarts_f80_f81_localises_sur_entites_non_eur() {
     let n_a = flow_rows(&con, "consolidated", &["F80", "F81"], Some(&["A"]));
     assert!(n_a > 0, "A (USD) doit générer des écarts F80/F81");
 
-    // B (GBP, sortante) : tout est en F98 (terminal) → aucun écart.
+    // B (GBP, sortante) : ses flux F00/F20 sont convertis et génèrent des
+    // écarts F80/F81 (ensuite absorbés par F98 dans F99 = 0).
     let n_b = flow_rows(&con, "consolidated", &["F80", "F81"], Some(&["B"]));
-    assert_eq!(n_b, 0, "B (sortante, F98 terminal) ne doit générer aucun écart");
+    assert!(n_b > 0, "B (sortante) doit générer des F80/F81 sur ses constituants");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  5. Cohérence de la conversion : le montant converti d'A + son écart
 //     reconstitue le montant × taux_close_n. Vérification indépendante du
 //     validateur (qui, lui, reconstruit F99 par somme — triviale par construction).
+//
+//     NB : on filtre sur l'entité A car depuis la refonte de la sortie de
+//     périmètre, la sortante B génère elle aussi du F80 sur le compte 100
+//     (sur son F00 converti) ; un agrégat au seul compte mélangerait A et B.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -306,9 +348,9 @@ fn conversion_reconstitue_montant_au_taux_close_n() {
     let con = setup();
 
     // Pour A (USD), compte 100 (Capital), flux F01 (ex F00 entrant) :
-    //   converted(F01) + écart(F80) doit valoir fonctionnel × taux_close_n (0.90).
-    let f01_pres = flow_sum(&con, "consolidated", "100", &["F01"]);
-    let f80_pres = flow_sum(&con, "consolidated", "100", &["F80"]);
+    //   converted(F01 de A) + écart(F80 de A) doit valoir fonctionnel × taux_close_n.
+    let f01_pres = amount_for(&con, "consolidated", "A", "100", "F01");
+    let f80_pres = amount_for(&con, "consolidated", "A", "100", "F80");
 
     // Côté fonctionnel (reclassified) : F01 de A = 5000 USD.
     let f01_func: f64 = con
@@ -373,4 +415,204 @@ fn pipeline_reproductible_apres_reset() {
             after[i]
         );
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  7. Généricité de la reconstruction (Q28) — `flux_de_report` pilotant les
+//     clôtures, et sémantique d'écrasement au grain.
+//
+//     On vérifie hors seed que :
+//       (a) une clôture autre que F99 (ici F88, auto-référentielle) est
+//           reconstruite depuis les flux qui y reportent (F10) ;
+//       (b) la reconstruction est AUTORITAIRE au grain : une valeur résiduelle
+//           sur la clôture au même grain est écrasée (pas additionnée) ;
+//       (c) une valeur résiduelle sur un AUTRE grain (ici un autre compte, qui
+//           sert de proxy à une autre dimension — ex. Nature à venir) est
+//           PRÉSERVÉE (l'écrasement ne déborde pas sur un grain sans composante).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
+    use conso_engine::pipeline::materialize_closures::materialize_closures;
+
+    let con = Connection::open_in_memory().expect("open_in_memory");
+    create_schema(&con).expect("create_schema");
+
+    // dim_flow : F99 (clôture auto-réf) ← F20 ; F88 (clôture auto-réf) ← F10.
+    con.execute_batch(
+        "INSERT INTO dim_flow VALUES
+            ('F20','Variation','avg',NULL,'F99'),
+            ('F99','Clôture','close_n',NULL,'F99'),
+            ('F10','Intermédiaire','avg',NULL,'F88'),
+            ('F88','Clôture intermédiaire','close_n',NULL,'F88');",
+    )
+    .expect("seed dim_flow");
+
+    // Composantes au niveau reclassified : F20 = 50 et F10 = 30 sur le compte 100.
+    con.execute_batch(
+        "INSERT INTO fact_entry
+            (scenario, entity, entry_period, period, account, flow, currency, level, amount)
+         VALUES
+            ('REEL','M','2024','2024','100','F20','EUR','reclassified',50.00),
+            ('REEL','M','2024','2024','100','F10','EUR','reclassified',30.00);",
+    )
+    .expect("seed composantes");
+
+    materialize_closures(&con, "reclassified").expect("materialize #1");
+
+    // (a) F99 = F20 = 50 ; F88 = F10 = 30.
+    let f99: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='reclassified' AND account='100' AND flow='F99'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let f88: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='reclassified' AND account='100' AND flow='F88'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!((f99 - 50.0).abs() < TOL, "F99 devrait valoir 50 (F20), eu {f99}");
+    assert!((f88 - 30.0).abs() < TOL, "F88 devrait valoir 30 (F10), eu {f88}");
+
+    // (b)+(c) On injecte des valeurs résiduelles, puis on re-materialise.
+    //   - F99 @ compte 100 (même grain) = 999      → doit être ÉCRASÉ en 50.
+    //   - F99 @ compte 200 (grain distinct, proxy d'une autre dimension) = 777
+    //                                                  → doit être PRÉSERVÉ.
+    con.execute_batch(
+        "INSERT INTO fact_entry
+            (scenario, entity, entry_period, period, account, flow, currency, level, amount)
+         VALUES
+            ('REEL','M','2024','2024','100','F99','EUR','reclassified',999.00),
+            ('REEL','M','2024','2024','200','F99','EUR','reclassified',777.00);",
+    )
+    .expect("seed résiduel");
+
+    materialize_closures(&con, "reclassified").expect("materialize #2");
+
+    // (b) écrasement au même grain — pas d'addition (50, ni 1049, ni 999).
+    let f99_100: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='reclassified' AND account='100' AND flow='F99'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        con.query_row::<i64, _, _>(
+            "SELECT COUNT(*) FROM fact_entry \
+             WHERE level='reclassified' AND account='100' AND flow='F99'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap(),
+        1,
+        "une seule ligne F99 au grain (pas de doublon)"
+    );
+    assert!(
+        (f99_100 - 50.0).abs() < TOL,
+        "F99@100 doit être écrasé à 50 (pas additionné), eu {f99_100}"
+    );
+
+    // (c) grain distinct préservé — 777 intact (aucune composante sur le compte 200).
+    let f99_200: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='reclassified' AND account='200' AND flow='F99'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        (f99_200 - 777.0).abs() < TOL,
+        "F99@200 (grain sans composante) doit rester 777, eu {f99_200}"
+    );
+
+    // Note : lorsqu'une nouvelle dimension (ex. Nature) entrera dans le grain de
+    // clôture, ce même test démontrera la non-diversion entre codes Nature : il
+    // suffira d'ajouter la colonne et de dupliquer le cas (b)/(c) sur deux codes
+    // Nature d'un même compte. Voir la doc d'en-tête de `materialize_closures`.
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  8. Sortie de périmètre — F98 = −Σ(constituants) et F99 = 0 par identité.
+//
+//     La sortante B (GBP) ne doit pas fuir dans F99 : ses flux F00/F20 sont
+//     conservés à l'identique (donc visibles et convertis), et chaque
+//     constituant X génère un miroir −X sur F98. L'identité F99 = F00+F20+F98
+//     se referme à 0, en DEVISE FONCTIONNELLE comme en DEVISE DE PRÉSENTATION.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SOMME des montants pour (level, entity, account, flow) — zéro si absent.
+fn amount_for(con: &Connection, level: &str, entity: &str, account: &str, flow: &str) -> f64 {
+    con.query_row(
+        "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+         WHERE level=? AND entity=? AND account=? AND flow=?",
+        [level, entity, account, flow],
+        |r| r.get(0),
+    )
+    .unwrap_or_else(|e| panic!("amount_for({level},{entity},{account},{flow}) : {e}"))
+}
+
+#[test]
+fn sortie_perimetre_donne_f99_zero_et_f98_negatif() {
+    let con = setup();
+
+    // B (GBP, sortante) au niveau reclassified (devise fonctionnelle) :
+    // par compte, F98 = -(F00+F20) et F99 = 0.
+    // (compte, F00, F20, F98_attendu) — montants dérivés du seed.
+    let cases: &[(&str, f64, f64, f64)] = &[
+        ("100", 4000.0,    0.0, -4000.0),
+        ("400", 1500.0,  200.0, -1700.0),
+        ("200", 6000.0,  300.0, -6300.0),
+        ("700",    0.0,  800.0,  -800.0),
+        ("705",    0.0,  400.0,  -400.0),
+        ("600",    0.0,  300.0,  -300.0),
+        ("610",    0.0,  200.0,  -200.0),
+        ("640",    0.0,  100.0,  -100.0),
+    ];
+    for &(acc, f00, f20, f98_attendu) in cases {
+        let got_f00 = amount_for(&con, "reclassified", "B", acc, "F00");
+        let got_f20 = amount_for(&con, "reclassified", "B", acc, "F20");
+        let got_f98 = amount_for(&con, "reclassified", "B", acc, "F98");
+        let got_f99 = amount_for(&con, "reclassified", "B", acc, "F99");
+        assert!((got_f00 - f00).abs() < TOL, "B/{acc} F00 = {got_f00} (attendu {f00})");
+        assert!((got_f20 - f20).abs() < TOL, "B/{acc} F20 = {got_f20} (attendu {f20})");
+        assert!(
+            (got_f98 - f98_attendu).abs() < TOL,
+            "B/{acc} F98 = {got_f98} (attendu {f98_attendu} = −(F00+F20))"
+        );
+        assert!(
+            got_f99.abs() < TOL,
+            "B/{acc} F99 = {got_f99} (attendu 0 — la sortante ne fuit pas dans F99)"
+        );
+        // L'identité se referme : F00 + F20 + F98 = 0.
+        assert!(
+            (got_f00 + got_f20 + got_f98).abs() < TOL,
+            "B/{acc} identité F00+F20+F98 ≠ 0"
+        );
+    }
+
+    // À consolidated (devise de présentation EUR), F99 de B doit aussi être 0
+    // sur tous ses comptes : les écarts F80/F81 générés à la conversion sont
+    // absorbés par F98 (terminal, taux close_n).
+    let n_nonzero: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry \
+             WHERE level='consolidated' AND entity='B' AND flow='F99' \
+               AND ABS(amount) >= 0.01",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        n_nonzero, 0,
+        "aucun F99 non nul pour B au niveau consolidated (écarts absorbés par F98)"
+    );
 }

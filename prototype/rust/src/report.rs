@@ -189,9 +189,10 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
 fn print_check_row(r: &CheckResult) {
     let mark = if r.ok { "✓ OK" } else { "✗ ÉCHEC" };
     println!(
-        "  {:<24}{:>16}{:>18}{:>12}   {}",
+        "  {:<18}{:<8}{:>14}{:>18}{:>12}   {}",
         r.account,
-        fmt_amount(r.f99),
+        r.closure,
+        fmt_amount(r.closure_stored),
         fmt_amount(r.somme),
         fmt_amount(r.ecart),
         mark
@@ -201,16 +202,16 @@ fn print_check_row(r: &CheckResult) {
 /// Affiche le résultat des vérifications d'identité et renvoie le statut global.
 pub fn print_validation(con: &Connection) -> duckdb::Result<bool> {
     println!("\n{}", "═".repeat(88));
-    println!("  VALIDATION — Identité de reconstruction F99 = F00 + F01 + F20 + F80 + F81 + F98");
+    println!("  VALIDATION — Reconstruction des clôtures (via dim_flow.flux_de_report)");
     println!("{}", "═".repeat(88));
 
     // --- a) Côté consolidé (devise de présentation, écarts inclus) ---
     println!("\n  (a) Niveau CONSOLIDÉ (devise de présentation, écarts inclus)");
     println!(
-        "  {:<24}{:>16}{:>18}{:>12}   statut",
-        "Compte", "F99", "Σ composantes", "écart"
+        "  {:<18}{:<8}{:>14}{:>18}{:>12}   statut",
+        "Compte", "Clôt.", "Clôture", "Σ composantes", "écart"
     );
-    println!("  {}", "─".repeat(78));
+    println!("  {}", "─".repeat(86));
     let mut all_ok = true;
     for r in validate_consolidated(con)? {
         if !r.ok {
@@ -221,12 +222,11 @@ pub fn print_validation(con: &Connection) -> duckdb::Result<bool> {
 
     // --- b) Côté fonctionnel (reclassified, écarts = 0) ---
     println!("\n  (b) Niveau RECLASSIFIÉ (devise fonctionnelle, écarts = 0)");
-    println!("      identité réduite : F99 = F00 + F01 + F20 + F98");
     println!(
-        "  {:<24}{:>16}{:>18}{:>12}   statut",
-        "Compte", "F99", "Σ composantes", "écart"
+        "  {:<18}{:<8}{:>14}{:>18}{:>12}   statut",
+        "Compte", "Clôt.", "Clôture", "Σ composantes", "écart"
     );
-    println!("  {}", "─".repeat(78));
+    println!("  {}", "─".repeat(86));
     for r in validate_functional(con)? {
         if !r.ok {
             all_ok = false;

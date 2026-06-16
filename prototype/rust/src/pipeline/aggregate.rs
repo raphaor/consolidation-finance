@@ -3,9 +3,15 @@
 //! Miroir de `conso/pipeline.py::step_a_aggregate`.
 //!
 //! Cumul des écritures source par entité. Lit la saisie brute (`stg_entry`),
-//! ne conserve que les flux sociaux d'origine (F00 et F20), agrège par
-//! (scenario, entity, entry_period, period, account, flow, currency) et stocke
-//! au niveau *corporate* (en devise fonctionnelle).
+//! agrège par (scenario, entity, entry_period, period, account, flow, currency)
+//! et stocke au niveau *corporate* (en devise fonctionnelle).
+//!
+//! Aucun filtre sur les flux : la saisie (mode écriture ou formulaire bilan)
+//! est agrégée telle quelle. En mode écriture, les liasses ne contiennent que
+//! F00/F20 ; en mode bilan, le F99 (clôture) saisi sera agrégé ici puis
+//! reconstruit/écrasé plus loin par `materialize_closures` à chaque niveau de
+//! stockage. La validité des flux saisis relève du formulaire d'entrée, pas de
+//! cette étape.
 
 use super::count_level;
 use duckdb::Connection;
@@ -19,7 +25,6 @@ SELECT
     'corporate' AS level,
     SUM(amount) AS amount
 FROM stg_entry
-WHERE flow IN ('F00', 'F20')
 GROUP BY scenario, entity, entry_period, period, account, flow, currency;";
 
 /// Exécute l'étape A : agrège les écritures brutes au niveau corporate.

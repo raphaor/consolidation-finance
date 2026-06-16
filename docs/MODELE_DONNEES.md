@@ -54,7 +54,7 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 - **Conso** : cumul [B], agrégation hiérarchique pour les restitutions.
 
 ### `Flow`
-- **Rôle** : code de flux identifiant **l'origine d'un montant**. Les automatismes de conso agissent sur les **flux de variation** ; F99 (clôture) est un solde **reconstruit** par identité, jamais saisi → **cœur de la consolidation par les flux** et traçabilité totale.
+- **Rôle** : code de flux identifiant **l'origine d'un montant**. Les automatismes de conso agissent sur les **flux de variation** ; F99 (clôture) est un solde **reconstruit** par identité à chaque niveau de stockage (il transite comme un flux ordinaire, voire saisi en mode formulaire bilan, puis `materialize_closures` le reconstruit/l'écrase) → **cœur de la consolidation par les flux** et traçabilité totale.
 - **Master** : `code`, `libellé`, `taux_conversion` (type de taux), `flux_de_report` (défaut F99, pour **tous** les flux y compris les écarts), `flux_ecart_conversion` (flux d'écart associé ; null pour les écarts eux-mêmes — terminaux : taux clôture → écart propre = 0).
 - **Catalogue des valeurs + mécanique complète** : voir [`FLUX_CONSO.md`](./FLUX_CONSO.md) (F00 ouverture, F20 variation, F80/F81 écarts de conversion, F01/F98 périmètre, F99 clôture…).
 - **Conso** : alimente la restitution « Bilan par flux » ; identité `F99 = F00 + Σ variations + Σ écarts` (tient avant et après conversion).

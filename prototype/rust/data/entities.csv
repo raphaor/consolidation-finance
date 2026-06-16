@@ -1,4 +1,4 @@
 code,libelle,devise_fonctionnelle,entite_parent,statut
-M,Mère,EUR,,actif
-A,Filiale A,USD,M,actif
-B,Filiale B,GBP,M,actif
+C,Société C (mère du groupe),EUR,,actif
+D,Société D,USD,C,actif
+E,Société E,GBP,C,actif

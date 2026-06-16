@@ -1,57 +1,95 @@
-//! Vérifications d'identité de reconstruction par les flux.
+//! Vérifications d'identité de reconstruction des flux de clôture.
 //!
 //! Miroir de `prototype/python/conso/validate.py`.
 //!
-//! # Identité fondamentale (par compte, par niveau)
+//! # Identité de reconstruction (par compte, par niveau)
 //!
-//! `F99 = F00 + F01 + F20 + F80 + F81 + F98`
+//! Pour chaque clôture C — flux auto-référentiel : `flux_de_report(C) = C` :
 //!
-//! F99 n'est jamais saisi : c'est un solde RECONSTRUIT par le pipeline (cf.
-//! [`crate::pipeline::materialize_f99`]) comme la somme des autres flux, puis
-//! stocké en base. La validation compare le F99 STOCKÉ à la somme INDEPENDANTE
-//! des flux constitutifs lus à ce même niveau — ces deux quantités sont
-//! produites par des requêtes SQL distinctes, donc toute incohérence (pipeline
-//! cassé, écriture manuelle abusive sur F99, flux perdu) fait dériver l'écart.
+//! ```text
+//! C = Σ( flux X | flux_de_report(X) = C et X ≠ C )
+//! ```
 //!
-//! 1. Côté devise de présentation (consolidated) : les 6 flux constitutifs sont
-//!    présents (F00/F01/F20/F80/F81/F98).
-//! 2. Côté devise fonctionnelle (reclassified) : les écarts F80/F81 y sont à 0
-//!    et ne sont jamais générés à ce niveau — on restreint donc la somme aux
-//!    4 flux fonctionnels (F00/F01/F20/F98).
+//! Une clôture n'est jamais saisie : c'est un solde RECONSTRUIT par le pipeline
+//! (cf. [`crate::pipeline::materialize_closures`]) comme la somme des flux qui y
+//! reportent, puis stocké en base. La validation compare la clôture STOCKÉE à la
+//! somme INDEPENDANTE de ses constituants lus au même niveau — ces deux quantités
+//! sont produites par des requêtes SQL distinctes, donc toute incohérence
+//! (pipeline cassé, écriture manuelle abusive sur une clôture, flux perdu) fait
+//! dériver l'écart.
+//!
+//! **Data-driven** : ni les clôtures ni leurs constituants ne sont en dur. La
+//! carte {clôture → constituants} est lue dans `dim_flow` au début de chaque
+//! vérification. Ajouter un flux dans `dim_flow` l'intègre automatiquement.
+//!
+//! Au niveau `reclassified` (devise fonctionnelle), les écarts F80/F81 sont
+//! absents (ils n'existent qu'après conversion) et valent donc 0 dans la somme :
+//! la même identité tient aux deux niveaux sans configuration spéciale.
 
 use crate::money::Money;
 use duckdb::Connection;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
-use std::collections::BTreeMap;
-
-/// Flux constitutifs de F99 au niveau consolidated (écarts de conversion inclus).
-pub const COMPONENT_FLOWS: &[&str] = &["F00", "F01", "F20", "F80", "F81", "F98"];
-
-/// Flux constitutifs au niveau reclassified (devise fonctionnelle, écarts = 0).
-pub const FUNC_FLOWS: &[&str] = &["F00", "F01", "F20", "F98"];
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Seuil de tolérance pour l'écart : `Decimal("0.01")` (équivalent Python).
 const TOLERANCE: Decimal = dec!(0.01);
 
-/// Résultat de vérification d'identité pour un compte.
+/// Résultat de vérification d'identité pour un compte et une clôture.
 #[derive(Debug, Clone)]
 pub struct CheckResult {
     /// Code du compte vérifié.
     pub account: String,
-    /// F99 **stocké** lu depuis la base.
-    pub f99: Decimal,
-    /// Σ des flux constitutifs (calculée indépendamment de `f99`).
+    /// Code du flux de clôture vérifié (ex. `F99`).
+    pub closure: String,
+    /// Clôture **stockée** lue depuis la base.
+    pub closure_stored: Decimal,
+    /// Σ des flux constitutifs (calculée indépendamment de la clôture stockée).
     pub somme: Decimal,
-    /// `f99 - somme` (doit être ~0).
+    /// `closure_stored - somme` (doit être ~0).
     pub ecart: Decimal,
     /// `true` si `|ecart| < TOLERANCE`.
     pub ok: bool,
 }
 
-/// Charge une grille (account, flow) → montant pour un niveau donné.
+/// Carte ordonnée `{ clôture → [constituants] }` lue depuis `dim_flow`.
 ///
-/// Miroir de `report._load_grid` / `validate._check_level`.
+/// - Clôtures : flux auto-référentiels (`code = flux_de_report`).
+/// - Constituants d'une clôture C : flux X tels que `flux_de_report(X) = C` et
+///   `X ≠ C`. L'ordre est stable (trié par code) pour des rendus reproductibles.
+fn load_closure_components(con: &Connection) -> duckdb::Result<Vec<(String, Vec<String>)>> {
+    let closures: Vec<String> = {
+        let mut stmt = con.prepare(
+            "SELECT code FROM dim_flow WHERE code = flux_de_report ORDER BY code",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        v
+    };
+
+    let mut out = Vec::with_capacity(closures.len());
+    for c in &closures {
+        let comps: Vec<String> = {
+            let mut stmt = con.prepare(
+                "SELECT code FROM dim_flow \
+                 WHERE flux_de_report = ? AND code <> ? ORDER BY code",
+            )?;
+            let rows = stmt.query_map([c.clone(), c.clone()], |row| row.get::<_, String>(0))?;
+            let mut v = Vec::new();
+            for r in rows {
+                v.push(r?);
+            }
+            v
+        };
+        out.push((c.clone(), comps));
+    }
+    Ok(out)
+}
+
+/// Charge une grille (account, flow) → montant pour un niveau donné.
 fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, String), Decimal>> {
     let mut stmt = con.prepare(
         "SELECT account, flow, SUM(amount) AS amount
@@ -76,65 +114,71 @@ fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, 
     Ok(grid)
 }
 
-/// Calcule, par compte au niveau donné, l'écart entre F99 stocké et la somme
-/// des flux constitutifs.
+/// Pour chaque (compte × clôture), compare la clôture stockée à la Σ de ses
+/// constituants au niveau donné.
 ///
-/// - `f99` provient du flux `'F99'` lu en base (materialisé par le pipeline).
-/// - `somme` est la somme des flux passés en paramètre (`COMPONENT_FLOWS` au
-///   niveau consolidated, `FUNC_FLOWS` au niveau reclassified).
+/// Renvoie un `CheckResult` par couple (compte, clôture) où la clôture ou l'un de
+/// ses constituants est présent. Les couples totalement absents (0 / 0) sont
+/// ignorés pour ne pas bruiter le rendu.
 ///
-/// `ecart = f99 - somme` doit valoir 0 à la tolérance près. Si le pipeline
-/// perd un flux, génère un doublon, ou si quelqu'un écrit manuellement sur F99,
-/// l'identité casse et `ok = false`.
-pub fn check_level(con: &Connection, level: &str, flows: &[&str]) -> duckdb::Result<Vec<CheckResult>> {
+/// `ecart = closure_stored - somme` doit valoir 0 à la tolérance près. Si le
+/// pipeline perd un flux, génère un doublon, ou si quelqu'un écrit manuellement
+/// sur une clôture sans passer par la reconstruction, l'identité casse → `ok = false`.
+pub fn check_closures(con: &Connection, level: &str) -> duckdb::Result<Vec<CheckResult>> {
     let grid = load_grid(con, level)?;
+    let closure_map = load_closure_components(con)?;
 
-    // Liste triée des comptes présents.
-    let mut accounts: Vec<String> = grid
+    // Comptes présents à ce niveau (triés).
+    let accounts: Vec<String> = grid
         .keys()
         .map(|(acc, _)| acc.clone())
-        .collect::<std::collections::BTreeSet<_>>()
+        .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
 
-    let mut results = Vec::with_capacity(accounts.len());
-    for acc in accounts.drain(..) {
-        // F99 STOCKÉ en base (matérialisé par le pipeline). 0 si absent.
-        let f99 = grid
-            .get(&(acc.clone(), "F99".to_string()))
-            .copied()
-            .unwrap_or(Decimal::ZERO);
-        // Σ des flux constitutifs — calcul indépendant de F99.
-        let mut somme = Decimal::ZERO;
-        for f in flows {
-            somme += grid
-                .get(&(acc.clone(), f.to_string()))
+    let mut results = Vec::new();
+    for acc in accounts {
+        for (closure, comps) in &closure_map {
+            // Clôture STOCKÉE en base (matérialisée par le pipeline). 0 si absente.
+            let closure_stored = grid
+                .get(&(acc.clone(), closure.clone()))
                 .copied()
                 .unwrap_or(Decimal::ZERO);
+            // Σ des constituants — calcul indépendant de la clôture stockée.
+            let mut somme = Decimal::ZERO;
+            for cf in comps {
+                somme += grid
+                    .get(&(acc.clone(), cf.clone()))
+                    .copied()
+                    .unwrap_or(Decimal::ZERO);
+            }
+            // Skip les couples vides (ni clôture ni constituant sur ce compte).
+            if closure_stored.is_zero() && somme.is_zero() {
+                continue;
+            }
+            let ecart = closure_stored - somme;
+            let ok = ecart.abs() < TOLERANCE;
+            results.push(CheckResult {
+                account: acc.clone(),
+                closure: closure.clone(),
+                closure_stored,
+                somme,
+                ecart,
+                ok,
+            });
         }
-        let ecart = f99 - somme;
-        let ok = ecart.abs() < TOLERANCE;
-        results.push(CheckResult {
-            account: acc,
-            f99,
-            somme,
-            ecart,
-            ok,
-        });
     }
     Ok(results)
 }
 
-/// Validation de l'identité `F99 = F00+F01+F20+F80+F81+F98` au niveau consolidé.
+/// Validation des identités de clôture au niveau consolidé (devise de
+/// présentation, écarts inclus).
 pub fn validate_consolidated(con: &Connection) -> duckdb::Result<Vec<CheckResult>> {
-    check_level(con, "consolidated", COMPONENT_FLOWS)
+    check_closures(con, "consolidated")
 }
 
-/// Validation de l'identité en devise fonctionnelle (écarts = 0).
-///
-/// Au niveau reclassified, seuls F00/F01/F20/F98 sont présents (pas d'écarts
-/// F80/F81 en devise fonctionnelle) : on vérifie que leur somme reconstitue
-/// bien le F99 fonctionnel stocké à ce niveau.
+/// Validation des identités de clôture au niveau reclassified (devise
+/// fonctionnelle, écarts absents).
 pub fn validate_functional(con: &Connection) -> duckdb::Result<Vec<CheckResult>> {
-    check_level(con, "reclassified", FUNC_FLOWS)
+    check_closures(con, "reclassified")
 }

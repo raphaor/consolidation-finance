@@ -101,8 +101,8 @@ fn main() {
         }
     };
 
-    // --- 4. Validation F99 + invariants ---
-    let f99_ok = match check_identity(&con) {
+    // --- 4. Validation clôtures + invariants ---
+    let closures_ok = match check_identity(&con) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("\n✗ ERREUR validation : {e}");
@@ -111,14 +111,14 @@ fn main() {
     };
 
     // --- 5. Rapport ---
-    print_report(&report, n_stg, f99_ok);
+    print_report(&report, n_stg, closures_ok);
 
     // Nettoyage du fichier de bench (optionnel : on garde le fichier pour
     // inspection, mais on libère la connexion à la fermeture).
     drop(con);
 
     println!("\n  (fichier conservé : {db_path})");
-    std::process::exit(if f99_ok { 0 } else { 1 });
+    std::process::exit(if closures_ok { 0 } else { 1 });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,19 +281,20 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Validation : identité F99 + invariants non triviaux
+//  Validation : identités de clôture + invariants non triviaux
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Vérifie l'identité F99 (via le validateur du crate) et un invariant réel :
-/// les écarts F80/F81 doivent être absents des niveaux en devise fonctionnelle
-/// (corporate / reclassified). Ces écarts n'existent qu'après l'étape C.
+/// Vérifie les identités de clôture (via le validateur du crate) et un invariant
+/// réel : les écarts F80/F81 doivent être absents des niveaux en devise
+/// fonctionnelle (corporate / reclassified). Ces écarts n'existent qu'après
+/// l'étape C.
 fn check_identity(con: &Connection) -> duckdb::Result<bool> {
     // (a) validateur du crate — tous les comptes doivent passer.
     let checks = validate_consolidated(con)?;
-    let f99_ok = !checks.is_empty() && checks.iter().all(|c| c.ok);
-    if !f99_ok {
+    let closures_ok = !checks.is_empty() && checks.iter().all(|c| c.ok);
+    if !closures_ok {
         let failed: Vec<&str> = checks.iter().filter(|c| !c.ok).map(|c| c.account.as_str()).collect();
-        eprintln!("\n✗ Identité F99 en échec pour : {}", failed.join(", "));
+        eprintln!("\n✗ Identité de clôture en échec pour : {}", failed.join(", "));
     }
 
     // (b) invariant structurel : F80/F81 absents des niveaux fonctionnels.
@@ -320,14 +321,14 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
         return Ok(false);
     }
 
-    Ok(f99_ok)
+    Ok(closures_ok)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Rapport final
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn print_report(report: &conso_engine::pipeline::PipelineReport, n_stg: i64, f99_ok: bool) {
+fn print_report(report: &conso_engine::pipeline::PipelineReport, n_stg: i64, closures_ok: bool) {
     println!();
     println!("{}", "═".repeat(70));
     println!("  RAPPORT DE PERFORMANCE");
@@ -355,8 +356,8 @@ fn print_report(report: &conso_engine::pipeline::PipelineReport, n_stg: i64, f99
         total_throughput
     );
     println!();
-    let verdict = if f99_ok { "✓ OK — identité F99 + invariants tenus" } else { "✗ ÉCHEC" };
-    println!("  Verdict F99 : {verdict}");
+    let verdict = if closures_ok { "✓ OK — identités de clôture + invariants tenus" } else { "✗ ÉCHEC" };
+    println!("  Verdict clôtures : {verdict}");
     println!("{}", "═".repeat(70));
 }
 

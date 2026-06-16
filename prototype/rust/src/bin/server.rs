@@ -14,10 +14,19 @@
 //!
 //! # Configuration (variables d'environnement)
 //!
-//! - `CONSO_PORT`     : port d'écoute (défaut : 3000).
-//! - `CONSO_DB_PATH`  : chemin du fichier DuckDB (défaut : `conso.duckdb`).
-//! - `CONSO_CSV_DIR`  : répertoire contenant les CSV (défaut : `data`).
-//! - `CONSO_WEB_DIR`  : répertoire du frontend buildé à servir en statique (défaut : `../../web/dist` depuis `prototype/rust`). Si absent, seule l'API est exposée.
+//! - `CONSO_PORT`          : port d'écoute (défaut : 3000).
+//! - `CONSO_DB_PATH`       : chemin du fichier DuckDB (défaut : `conso.duckdb`).
+//! - `CONSO_CSV_DIR`       : répertoire contenant les CSV (défaut : `data`).
+//! - `CONSO_WEB_DIR`       : répertoire du frontend buildé à servir en statique (défaut : `../../web/dist` depuis `prototype/rust`). Si absent, seule l'API est exposée.
+//! - `CONSO_FORCE_RESEED`  : `1` pour forcer le rechargement CSV au démarrage (DROP schéma + import + pipeline), même si la base existe déjà. Utile après une évolution du schéma. À chaud, préférer `POST /api/reset`.
+//!
+//! # Persistance
+//!
+//! Au démarrage, les CSV ne sont réimportés que si la base est vierge (schéma
+//! absent). Sinon, la base DuckDB existante est conservée telle quelle : les
+//! éditions de master data faites via l'UI (périmètre, taux, entités…)
+//! survivent aux redémarrages. Pour repartir des CSV : `POST /api/reset` ou
+//! `CONSO_FORCE_RESEED=1`.
 
 use axum::{
     extract::{Query, State},
@@ -445,20 +454,54 @@ async fn main() {
         .unwrap_or_else(|e| panic!("✗ Impossible d'ouvrir DuckDB ({db_path}) : {e}"));
 
     // Schéma + chargement initial des CSV.
-    create_schema(&con).expect("✗ create_schema");
-    load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
+    //
+    // IMPORTANT : on ne recharge les CSV que si la base n'est pas déjà
+    // initialisée. Sinon, `create_schema` (DROP de toutes les tables) +
+    // `load_all` effaceraient à chaque démarrage les éditions de master data
+    // faites via l'UI (périmètre, taux, entités…). La base DuckDB est ainsi la
+    // source de vérité entre redémarrages.
+    //
+    // Pour forcer un rechargement complet (ex. après évolution du schéma) :
+    //   - POST /api/reset (à chaud), ou
+    //   - CONSO_FORCE_RESEED=1 au démarrage.
+    let force_reseed = std::env::var("CONSO_FORCE_RESEED").unwrap_or_default() == "1";
+    let schema_exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM information_schema.tables \
+             WHERE table_schema = 'main' AND table_name = 'fact_entry'",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap_or(false);
 
-    // Pipeline initial pour exposer des données exploitables dès le démarrage.
-    // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
-    match run_pipeline(&con, &ConvertParams::default()) {
-        Ok(counts) => {
-            println!(
-                "   Pipeline initial : corporate={}, reclassified={}, converted={}, consolidated={}",
-                counts[0], counts[1], counts[2], counts[3]
-            );
+    if schema_exists && !force_reseed {
+        let n: i64 = con
+            .query_row("SELECT COUNT(*) FROM fact_entry", [], |r| r.get(0))
+            .unwrap_or(0);
+        println!(
+            "   Base déjà initialisée ({n} lignes dans fact_entry) — CSV non réimportés, éditions UI préservées."
+        );
+        println!("   (Pour forcer le rechargement : POST /api/reset ou CONSO_FORCE_RESEED=1)");
+    } else {
+        if force_reseed {
+            println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");
         }
-        Err(e) => {
-            eprintln!("⚠ Pipeline initial échoué (le serveur démarre quand même) : {e}");
+        println!("   Initialisation : création du schéma + import CSV…");
+        create_schema(&con).expect("✗ create_schema");
+        load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
+
+        // Pipeline initial pour exposer des données exploitables dès le démarrage.
+        // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
+        match run_pipeline(&con, &ConvertParams::default()) {
+            Ok(counts) => {
+                println!(
+                    "   Pipeline initial : corporate={}, reclassified={}, converted={}, consolidated={}",
+                    counts[0], counts[1], counts[2], counts[3]
+                );
+            }
+            Err(e) => {
+                eprintln!("⚠ Pipeline initial échoué (le serveur démarre quand même) : {e}");
+            }
         }
     }
 

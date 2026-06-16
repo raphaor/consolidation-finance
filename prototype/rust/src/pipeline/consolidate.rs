@@ -7,9 +7,11 @@
 //!   - proportionnelle : `amount × pct_integration`
 //!   - équivalence     : EXCLUE du MVP (non traitée)
 //!
-//! **NB** : F99 est exclu de la consolidation (solde reconstruit, jamais
-//! consolidé). Il est materialisé séparément à ce niveau par
-//! [`super::materialize_f99`].
+//! **NB** : tous les flux sont consolidés, **clôtures (F99) comprises** : le
+//! `pct_integration` est appliqué à la clôture (indispensable pour la méthode
+//! proportionnelle). La clôtre consolidée (portée) est ensuite écrasée par
+//! [`super::materialize_closures`] au niveau consolidated, qui la reconstruit
+//! depuis les constituants consolidés (même valeur, mais autoritaire).
 
 use super::count_level;
 use duckdb::Connection;
@@ -28,7 +30,6 @@ JOIN sat_perimeter p
  AND p.scenario = f.scenario
  AND p.period = f.entry_period
 WHERE f.level = 'converted'
-  AND f.flow <> 'F99'  -- F99 = solde reconstruit, jamais consolidé
   AND p.methode IN ('globale', 'proportionnelle');  -- équivalence hors MVP";
 
 /// Exécute l'étape D : applique la méthode d'intégration de chaque entité.

@@ -19,7 +19,7 @@
 pub mod aggregate;
 pub mod consolidate;
 pub mod convert;
-pub mod materialize_f99;
+pub mod materialize_closures;
 pub mod reclassify;
 
 use duckdb::Connection;
@@ -56,24 +56,31 @@ impl Default for ConvertParams {
 /// Ordre des éléments de `LevelCounts` :
 /// `[corporate, reclassified, converted, consolidated]`.
 ///
-/// Après les étapes B et D, on materialise le flux de clôture F99 (= somme des
-/// autres flux) afin que le validateur [`crate::validate`] puisse comparer le
-/// F99 stocké à la somme des flux constitutifs.
+/// Après chacune des étapes B, C et D, on materialise les flux de clôture
+/// (flux auto-référentiels de `dim_flow.flux_de_report`) = Σ des flux qui y
+/// reportent — en écrasant la clôture portée par l'étape (les clôtures
+/// transitent comme n'importe quel flux, puis sont reconstruites de façon
+/// autoritaire à chaque niveau). Le validateur [`crate::validate`] compare
+/// ensuite la clôture stockée à cette somme (data-driven).
 pub fn run_pipeline(
     con: &Connection,
     params: &ConvertParams,
 ) -> duckdb::Result<LevelCounts> {
     let corporate = aggregate::step_a(con)?;
     let reclassified = {
-        let n = reclassify::step_b(con)?;
-        materialize_f99::materialize_f99(con, "reclassified")?;
-        n + count_f99(con, "reclassified")?
+        reclassify::step_b(con)?;
+        materialize_closures::materialize_closures(con, "reclassified")?;
+        count_level(con, "reclassified")?
     };
-    let converted = convert::step_c(con, params)?;
+    let converted = {
+        convert::step_c(con, params)?;
+        materialize_closures::materialize_closures(con, "converted")?;
+        count_level(con, "converted")?
+    };
     let consolidated = {
-        let n = consolidate::step_d(con)?;
-        materialize_f99::materialize_f99(con, "consolidated")?;
-        n + count_f99(con, "consolidated")?
+        consolidate::step_d(con)?;
+        materialize_closures::materialize_closures(con, "consolidated")?;
+        count_level(con, "consolidated")?
     };
     Ok([corporate, reclassified, converted, consolidated])
 }
@@ -131,21 +138,25 @@ pub fn run_pipeline_timed(
 
     let t = Instant::now();
     let reclassified = {
-        let n = reclassify::step_b(con)?;
-        materialize_f99::materialize_f99(con, "reclassified")?;
-        n + count_f99(con, "reclassified")?
+        reclassify::step_b(con)?;
+        materialize_closures::materialize_closures(con, "reclassified")?;
+        count_level(con, "reclassified")?
     };
     let ms_b = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
-    let converted = convert::step_c(con, params)?;
+    let converted = {
+        convert::step_c(con, params)?;
+        materialize_closures::materialize_closures(con, "converted")?;
+        count_level(con, "converted")?
+    };
     let ms_c = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
     let consolidated = {
-        let n = consolidate::step_d(con)?;
-        materialize_f99::materialize_f99(con, "consolidated")?;
-        n + count_f99(con, "consolidated")?
+        consolidate::step_d(con)?;
+        materialize_closures::materialize_closures(con, "consolidated")?;
+        count_level(con, "consolidated")?
     };
     let ms_d = t.elapsed().as_secs_f64() * 1000.0;
 
@@ -166,16 +177,6 @@ pub fn run_pipeline_timed(
 fn count_level(con: &Connection, level: &str) -> duckdb::Result<usize> {
     let n: i64 = con.query_row(
         "SELECT COUNT(*) FROM fact_entry WHERE level = ?",
-        [level],
-        |row| row.get(0),
-    )?;
-    Ok(n as usize)
-}
-
-/// Nombre de lignes F99 materialisées à un niveau donné.
-fn count_f99(con: &Connection, level: &str) -> duckdb::Result<usize> {
-    let n: i64 = con.query_row(
-        "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND flow = 'F99'",
         [level],
         |row| row.get(0),
     )?;

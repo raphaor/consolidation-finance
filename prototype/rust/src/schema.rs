@@ -85,21 +85,25 @@ CREATE TABLE dim_sous_classe (
 /// 5. dim_flow : catalogue des flux de consolidation (cf. docs/FLUX_CONSO.md §6).
 ///
 /// Modèle de flux :
-///   F00 = Ouverture              (taux close_n1, écart → F80)
-///   F01 = Entrée périmètre       (taux close_n1, écart → F80)
-///   F20 = Variation              (taux avg,      écart → F81)
-///   F80 = Écart conv. ouverture  (terminal,      pas d'écart)
-///   F81 = Écart conv. variation  (terminal,      pas d'écart)
-///   F98 = Sortie périmètre       (terminal,      pas d'écart)
-///   F99 = Clôture                (close_n,       pas d'écart)
-///   Identité : F99 = F00 + F01 + F20 + F80 + F81 + F98
+///   F00 = Ouverture              (taux close_n1, écart → F80, reporte à F99)
+///   F01 = Entrée périmètre       (taux close_n1, écart → F80, reporte à F99)
+///   F20 = Variation              (taux avg,      écart → F81, reporte à F99)
+///   F80 = Écart conv. ouverture  (terminal,      reporte à F99)
+///   F81 = Écart conv. variation  (terminal,      reporte à F99)
+///   F98 = Sortie périmètre       (terminal,      reporte à F99)
+///   F99 = Clôture                (close_n, auto-référentiel → clôture reconstruite)
+///
+/// Reconstruction (cf. `pipeline::materialize_closures`) : pour chaque clôture C
+/// (flux auto-référentiel : `flux_de_report(C) = C`), `C = Σ(X | flux_de_report(X)
+/// = C et X ≠ C)`. Aujourd'hui seule F99 est une clôture ; la logique est
+/// générique et pilotée par `dim_flow.flux_de_report`.
 pub const DDL_DIM_FLOW: &str = "\
 CREATE TABLE dim_flow (
     code             TEXT PRIMARY KEY,
     libelle          TEXT,
     taux_conversion  TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n', 'terminal')),
     flux_ecart       TEXT,           -- flux d'écart de conversion associé (NULL pour les terminaux)
-    flux_de_report   TEXT DEFAULT 'F99'   -- flux dans lequel ce flux se reporte (reconstruction F99)
+    flux_de_report   TEXT DEFAULT 'F99'   -- flux dans lequel ce flux se reporte ; auto-référence = clôture reconstruite
 );";
 
 /// 6. dim_currency : devise référentielle (code ISO, décimales).
