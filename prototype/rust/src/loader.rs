@@ -5,17 +5,18 @@
 //!
 //! # Tables attendues et leurs fichiers
 //!
-//! | Fichier          | Table cible          | Remarques                          |
-//! |------------------|----------------------|------------------------------------|
-//! | `scenarios.csv`  | `dim_scenario`       | lecture directe                    |
-//! | `entities.csv`   | `dim_entity`         | lecture directe                    |
-//! | `periods.csv`    | `dim_period`         | lecture directe                    |
-//! | `accounts.csv`   | `dim_account`        | CAST `capitaux_propres` AS BOOLEAN |
-//! | `flows.csv`      | `dim_flow`           | lecture directe                    |
-//! | `currencies.csv` | `dim_currency`       | CAST `decimales` AS INTEGER        |
-//! | `perimeter.csv`  | `sat_perimeter`      | CAST `entree`/`sortie` AS BOOLEAN  |
-//! | `rates.csv`      | `sat_exchange_rate`  | lecture directe                    |
-//! | `entries.csv`    | `stg_entry`          | lecture directe                    |
+//! | Fichier             | Table cible          | Remarques                          |
+//! |---------------------|----------------------|------------------------------------|
+//! | `scenarios.csv`     | `dim_scenario`       | lecture directe                    |
+//! | `entities.csv`      | `dim_entity`         | lecture directe                    |
+//! | `periods.csv`       | `dim_period`         | lecture directe                    |
+//! | `sous_classes.csv`  | `dim_sous_classe`    | lecture directe                    |
+//! | `accounts.csv`      | `dim_account`        | lecture directe                    |
+//! | `flows.csv`         | `dim_flow`           | lecture directe                    |
+//! | `currencies.csv`    | `dim_currency`       | CAST `decimales` AS INTEGER        |
+//! | `perimeter.csv`     | `sat_perimeter`      | CAST `entree`/`sortie` AS BOOLEAN  |
+//! | `rates.csv`         | `sat_exchange_rate`  | lecture directe                    |
+//! | `entries.csv`       | `stg_entry`          | lecture directe                    |
 //!
 //! Les cellules vides sont lues comme NULL par `read_csv_auto`.
 
@@ -24,7 +25,7 @@ use std::path::Path;
 
 /// Charge tous les CSV d'un répertoire dans les tables du schéma.
 ///
-/// Enchaîne 9 `INSERT ... SELECT ... FROM read_csv_auto(...)` en réutilisant
+/// Enchaîne 10 `INSERT ... SELECT ... FROM read_csv_auto(...)` en réutilisant
 /// l'inférence de types de DuckDB. Les CAST explicites (BOOLEAN, INTEGER)
 /// concernent les colonnes que `read_csv_auto` peut mal inférer (typiquement
 /// `true`/`false` vus comme VARCHAR, ou les entiers courts).
@@ -68,10 +69,18 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
     )?;
     con.execute(
         &format!(
-            "INSERT INTO dim_account \
-             SELECT code, libelle, classe, \
-                    CAST(capitaux_propres AS BOOLEAN), compte_parent \
+            "INSERT INTO dim_sous_classe \
+             SELECT code, libelle, classe \
              FROM read_csv_auto('{}')",
+            csv_path("sous_classes.csv")
+        ),
+        [],
+    )?;
+    con.execute(
+        &format!(
+            "INSERT INTO dim_account \
+             SELECT code, libelle, classe, sous_classe, technical_grouping, compte_parent \
+             FROM read_csv('{}', auto_detect=false, columns={{'code':'VARCHAR','libelle':'VARCHAR','classe':'VARCHAR','sous_classe':'VARCHAR','technical_grouping':'VARCHAR','compte_parent':'VARCHAR'}}, header=true, delim=',', null_padding=true)",
             csv_path("accounts.csv")
         ),
         [],
@@ -79,7 +88,7 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
     con.execute(
         &format!(
             "INSERT INTO dim_flow \
-             SELECT code, libelle, taux_conversion, flux_ecart \
+             SELECT code, libelle, taux_conversion, flux_ecart, flux_de_report \
              FROM read_csv_auto('{}')",
             csv_path("flows.csv")
         ),

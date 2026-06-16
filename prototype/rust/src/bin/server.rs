@@ -229,9 +229,9 @@ async fn get_levels(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Level
 /// GET /api/bilan?level=consolidated — bilan par flux.
 ///
 /// Le « bilan » au sens large (actif + passif + capitaux propres) regroupe les
-/// comptes de classe `bilan` ou `equity`. Les comptes de `resultat` (P&L :
-/// classes 6/7) sont exclus — ils sont exposés via `/api/compte-resultat`.
-/// On join `dim_account` pour filtrer sur la classe.
+/// comptes de classe `bilan`. Les comptes de `resultat` (P&L : classes 6/7) sont
+/// exclus — ils sont exposés via `/api/compte-resultat`. On join `dim_account`
+/// pour filtrer sur la classe.
 async fn get_bilan(
     Query(q): Query<BilanQuery>,
     State(state): State<Arc<AppState>>,
@@ -243,7 +243,7 @@ async fn get_bilan(
             "SELECT e.account, e.flow, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
-             WHERE e.level = ? AND a.classe IN ('bilan', 'equity') {fsql}
+             WHERE e.level = ? AND a.classe = 'bilan' {fsql}
              GROUP BY e.account, e.flow
              ORDER BY e.account, e.flow"
         );

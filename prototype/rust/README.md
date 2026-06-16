@@ -73,9 +73,8 @@ mémoire** (isolation totale). Ils contrôlent :
 
 - les comptes produits par niveau (`corporate=16`, `reclassified=14`,
   `converted=19`, `consolidated=19`) ;
-- les montants F99 attendus au niveau consolidated (`100_Capital=18 980.00`,
-  `200_Immobilisations=27 116.00`, `300_Stocks=3 000.00`,
-  `400_Resultat=9 774.00`) ;
+- les montants F99 attendus au niveau consolidated (`100=18 980.00`,
+  `200=27 116.00`, `300=3 000.00`, `400=9 774.00`) ;
 - l'identité de reconstruction via `validate` ;
 - la présence/absence des écarts F80/F81 selon la devise (absents en devise
   fonctionnelle, présents en devise de présentation pour les entités non-EUR) ;

@@ -109,8 +109,8 @@ fn main() {
     // 4. Restitutions
     let _ = print_level_counts(&con);
     let _ = bilan_par_flux(&con, "consolidated");
-    let _ = compare_levels(&con, "400_Resultat");
-    let _ = compare_levels(&con, "100_Capital");
+    let _ = compare_levels(&con, "400");
+    let _ = compare_levels(&con, "100");
 
     // 5. Validation des identités F99 = F00 + F01 + F20 + F80 + F81 + F98
     let ok = match print_validation(&con) {

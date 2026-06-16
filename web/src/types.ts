@@ -93,7 +93,7 @@ export const LEVELS = [
 
 export type Level = (typeof LEVELS)[number];
 
-// ---------- Master data (CRUD 8 tables) ----------
+// ---------- Master data (CRUD tables référentielles) ----------
 
 export type MasterTable =
   | 'scenarios'
@@ -103,13 +103,15 @@ export type MasterTable =
   | 'flows'
   | 'currencies'
   | 'perimeter'
-  | 'rates';
+  | 'rates'
+  | 'sous_classes';
 
 export interface ColumnDef {
   name: string;
   label: string;
   type: 'text' | 'number' | 'bool' | 'date' | 'select';
   options?: string[];
+  optionsFrom?: { table: MasterTable; value: string; label?: string };
   nullable?: boolean;
   pk?: boolean;
 }
@@ -164,9 +166,16 @@ export const MASTER_TABLES: TableDef[] = [
         name: 'classe',
         label: 'Classe',
         type: 'select',
-        options: ['bilan', 'resultat', 'equity', 'flux'],
+        options: ['bilan', 'resultat', 'flux'],
       },
-      { name: 'capitaux_propres', label: 'Cap. propres', type: 'bool' },
+      {
+        name: 'sous_classe',
+        label: 'Sous-classe',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'sous_classes', value: 'code', label: 'libelle' },
+      },
+      { name: 'technical_grouping', label: 'Groupement tech.', type: 'text', nullable: true },
       { name: 'compte_parent', label: 'Compte parent', type: 'text', nullable: true },
     ],
   },
@@ -183,6 +192,13 @@ export const MASTER_TABLES: TableDef[] = [
         options: ['close_n1', 'avg', 'close_n', 'terminal'],
       },
       { name: 'flux_ecart', label: 'Flux écart', type: 'text', nullable: true },
+      {
+        name: 'flux_de_report',
+        label: 'Flux de report',
+        type: 'select',
+        nullable: true,
+        options: ['F00', 'F01', 'F20', 'F80', 'F81', 'F98', 'F99'],
+      },
     ],
   },
   {
@@ -195,12 +211,44 @@ export const MASTER_TABLES: TableDef[] = [
     ],
   },
   {
+    table: 'sous_classes',
+    label: 'Sous-classes',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+      {
+        name: 'classe',
+        label: 'Classe',
+        type: 'select',
+        options: ['bilan', 'resultat', 'flux'],
+      },
+    ],
+  },
+  {
     table: 'perimeter',
     label: 'Périmètre',
     columns: [
-      { name: 'entity', label: 'Entité', type: 'text', pk: true },
-      { name: 'scenario', label: 'Scénario', type: 'text', pk: true },
-      { name: 'period', label: 'Période', type: 'text', pk: true },
+      {
+        name: 'entity',
+        label: 'Entité',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'entities', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'scenario',
+        label: 'Scénario',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'scenarios', value: 'code' },
+      },
+      {
+        name: 'period',
+        label: 'Période',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'periods', value: 'code' },
+      },
       {
         name: 'methode',
         label: 'Méthode',
@@ -217,8 +265,20 @@ export const MASTER_TABLES: TableDef[] = [
     table: 'rates',
     label: 'Taux de change',
     columns: [
-      { name: 'currency_source', label: 'Devise source', type: 'text', pk: true },
-      { name: 'period', label: 'Période', type: 'text', pk: true },
+      {
+        name: 'currency_source',
+        label: 'Devise source',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'currencies', value: 'code_iso', label: 'libelle' },
+      },
+      {
+        name: 'period',
+        label: 'Période',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'periods', value: 'code' },
+      },
       { name: 'taux_close', label: 'Taux clôture', type: 'number' },
       { name: 'taux_moyen', label: 'Taux moyen', type: 'number', nullable: true },
     ],

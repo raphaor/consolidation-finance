@@ -53,6 +53,7 @@ Pas des décisions de scope, mais des **deep-dives de conception** nécessaires 
 | Q14 | **Évolutivité** : critères concrets (ajouter entité / référentiel / module sans refonte) ? | EDB §6 | POST | OUVERTE | — |
 | Q24 | **Éditeur de règles de consolidation** : modèle de composition des écritures automatiques (déclencheur, conditions, contrepassation, imputation). Démarre par éliminations interco + participations. | EDB §3.4 | POST | OUVERTE | — |
 | Q27 | **Mode de fusion** : privilégier F07 (à l'ouverture, `= −F00`) ou F70 (en cours d'exercice, `= −F99`), ou garder les deux ? | [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9 | POST | OUVERTE | — |
+| Q28 | **Reconstruction F99 selon `flux_de_report`** : actuellement F99 = Σ(tous les autres flux). Évolution prévue : utiliser `flux_de_report` de chaque flux pour déterminer dans quel flux il s'agrège (un flux peut reporter ailleurs que F99). | [`FLUX_CONSO.md`](./FLUX_CONSO.md) · `dim_flow.flux_de_report` | POST | OUVERTE | Attribut `flux_de_report` (DEFAULT 'F99') ajouté à `dim_flow` le 2026-06-16. La reconstruction reste F99 = Σ des autres flux pour l'instant. |
 
 ## Hors périmètre prototype (à ne pas traiter maintenant)
 

@@ -1,4 +1,4 @@
-// Page « Master data » : CRUD générique sur les 8 tables de référentiel.
+// Page « Master data » : CRUD générique sur les tables de référentiel.
 // Les colonnes et le formulaire sont générés depuis MASTER_TABLES (types.ts).
 
 import {
@@ -68,12 +68,46 @@ function FieldInput({
   value,
   disabled,
   onChange,
+  optionsRows,
+  allValues,
 }: {
   col: ColumnDef;
   value: string;
   disabled: boolean;
   onChange: (v: string) => void;
+  optionsRows?: Row[];
+  allValues: Record<string, string>;
 }): ReactNode {
+  if (col.type === 'select' && col.optionsFrom) {
+    const valueKey = col.optionsFrom.value;
+    const labelKey = col.optionsFrom.label ?? valueKey;
+    const rows = optionsRows ?? [];
+    let filtered = rows;
+    if (
+      col.optionsFrom.table === 'sous_classes' &&
+      col.name === 'sous_classe'
+    ) {
+      const currentClasse = allValues['classe'] ?? '';
+      filtered =
+        currentClasse === ''
+          ? rows
+          : rows.filter((r) => String(r['classe'] ?? '') === currentClasse);
+    }
+    return (
+      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
+        {col.nullable && <option value="">—</option>}
+        {filtered.map((r) => {
+          const v = String(r[valueKey] ?? '');
+          const l = String(r[labelKey] ?? v);
+          return (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          );
+        })}
+      </select>
+    );
+  }
   if (col.type === 'select' && col.options) {
     return (
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
@@ -111,11 +145,18 @@ function FieldInput({
 interface RowFormProps {
   tableDef: TableDef;
   initial: Row | null;
+  optionsData: Record<string, Row[]>;
   onSubmit: (values: Record<string, string>) => Promise<void>;
   onCancel: () => void;
 }
 
-function RowForm({ tableDef, initial, onSubmit, onCancel }: RowFormProps) {
+function RowForm({
+  tableDef,
+  initial,
+  optionsData,
+  onSubmit,
+  onCancel,
+}: RowFormProps) {
   const isEdit = initial !== null;
   const [values, setValues] = useState<Record<string, string>>(() =>
     initialValues(tableDef, initial),
@@ -150,6 +191,8 @@ function RowForm({ tableDef, initial, onSubmit, onCancel }: RowFormProps) {
           <div className="form-grid">
             {tableDef.columns.map((col) => {
               const locked = isEdit && col.pk === true;
+              const optSource = col.optionsFrom?.table;
+              const optRows = optSource ? optionsData[optSource] : undefined;
               return (
                 <label key={col.name} className="field">
                   <span>
@@ -160,6 +203,8 @@ function RowForm({ tableDef, initial, onSubmit, onCancel }: RowFormProps) {
                     col={col}
                     value={values[col.name]}
                     disabled={locked}
+                    optionsRows={optRows}
+                    allValues={values}
                     onChange={(v) => setField(col.name, v)}
                   />
                 </label>
@@ -193,6 +238,7 @@ export function MasterDataPage() {
   );
 
   const [data, setData] = useState<Row[]>([]);
+  const [optionsData, setOptionsData] = useState<Record<string, Row[]>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -203,15 +249,31 @@ export function MasterDataPage() {
     setLoading(true);
     setError(null);
     try {
-      const rows = (await api.masterData.list(table)) as Row[];
-      setData(rows);
+      const sourceTables = Array.from(
+        new Set(
+          tableDef.columns
+            .map((c) => c.optionsFrom?.table)
+            .filter((t): t is MasterTable => t !== undefined),
+        ),
+      );
+      const [rows, ...optResults] = await Promise.all([
+        api.masterData.list(table),
+        ...sourceTables.map((t) => api.masterData.list(t)),
+      ]);
+      setData(rows as Row[]);
+      const opts: Record<string, Row[]> = {};
+      sourceTables.forEach((t, i) => {
+        opts[t] = optResults[i] as Row[];
+      });
+      setOptionsData(opts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'erreur');
       setData([]);
+      setOptionsData({});
     } finally {
       setLoading(false);
     }
-  }, [table]);
+  }, [table, tableDef]);
 
   useEffect(() => {
     setNotice(null);
@@ -399,6 +461,7 @@ export function MasterDataPage() {
         <RowForm
           tableDef={tableDef}
           initial={formState.mode === 'edit' ? formState.row : null}
+          optionsData={optionsData}
           onSubmit={handleSubmit}
           onCancel={() => setFormState(null)}
         />

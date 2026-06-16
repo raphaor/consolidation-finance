@@ -56,13 +56,30 @@ CREATE TABLE dim_period (
 );";
 
 /// 4. dim_account : plan de compte du groupe (classe + hiérarchie).
+///
+/// `sous_classe` référence `dim_sous_classe.code` (pas de FK dure en DuckDB pour
+/// le proto — contrainte uniquement sémantique). `technical_grouping` permet de
+/// regrouper des comptes par nature (ex. `capitaux_propres` pour la mise en
+/// équivalence), indépendamment de la classe comptable.
 pub const DDL_DIM_ACCOUNT: &str = "\
 CREATE TABLE dim_account (
-    code             TEXT PRIMARY KEY,
-    libelle          TEXT,
-    classe           TEXT CHECK (classe IN ('bilan', 'resultat', 'equity', 'flux')),
-    capitaux_propres BOOLEAN,       -- identifie les capitaux propres (mise en équivalence)
-    compte_parent    TEXT           -- hiérarchie d'agrégation
+    code               TEXT PRIMARY KEY,
+    libelle            TEXT,
+    classe             TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
+    sous_classe        TEXT,           -- référence dim_sous_classe.code
+    technical_grouping TEXT,           -- regroupement par nature (ex. capitaux_propres)
+    compte_parent      TEXT            -- hiérarchie d'agrégation
+);";
+
+/// 4b. dim_sous_classe : sous-classes de comptes (actif / passif / charges / produits).
+///
+/// Table de référence pour `dim_account.sous_classe`. La `classe` reprend la
+/// même nomenclature que `dim_account.classe` (bilan / resultat / flux).
+pub const DDL_DIM_SOUS_CLASSE: &str = "\
+CREATE TABLE dim_sous_classe (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT,
+    classe  TEXT CHECK (classe IN ('bilan', 'resultat', 'flux'))
 );";
 
 /// 5. dim_flow : catalogue des flux de consolidation (cf. docs/FLUX_CONSO.md §6).
@@ -81,7 +98,8 @@ CREATE TABLE dim_flow (
     code             TEXT PRIMARY KEY,
     libelle          TEXT,
     taux_conversion  TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n', 'terminal')),
-    flux_ecart       TEXT           -- flux d'écart de conversion associé (NULL pour les terminaux)
+    flux_ecart       TEXT,           -- flux d'écart de conversion associé (NULL pour les terminaux)
+    flux_de_report   TEXT DEFAULT 'F99'   -- flux dans lequel ce flux se reporte (reconstruction F99)
 );";
 
 /// 6. dim_currency : devise référentielle (code ISO, décimales).
@@ -174,6 +192,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_ENTITY,
     DDL_DIM_PERIOD,
     DDL_DIM_ACCOUNT,
+    DDL_DIM_SOUS_CLASSE,
     DDL_DIM_FLOW,
     DDL_DIM_CURRENCY,
     DDL_SAT_PERIMETER,
@@ -193,6 +212,7 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS sat_perimeter;",
     "DROP TABLE IF EXISTS dim_currency;",
     "DROP TABLE IF EXISTS dim_flow;",
+    "DROP TABLE IF EXISTS dim_sous_classe;",
     "DROP TABLE IF EXISTS dim_account;",
     "DROP TABLE IF EXISTS dim_period;",
     "DROP TABLE IF EXISTS dim_entity;",

@@ -1,4 +1,4 @@
-//! CRUD générique sur les 8 tables master data (6 dimensions + 2 satellites).
+//! CRUD générique sur les 9 tables master data (7 dimensions + 2 satellites).
 //!
 //! Expose `router()` qui monte les routes `/api/md/{table}` (GET/POST/PUT/DELETE)
 //! sur le serveur Axum. La table est validée contre une whitelist statique
@@ -46,13 +46,19 @@ const TABLES: &[TableDef] = &[
     TableDef {
         api_name: "accounts",
         sql_name: "dim_account",
-        columns: &["code", "libelle", "classe", "capitaux_propres", "compte_parent"],
+        columns: &["code", "libelle", "classe", "sous_classe", "technical_grouping", "compte_parent"],
+        pk: &["code"],
+    },
+    TableDef {
+        api_name: "sous_classes",
+        sql_name: "dim_sous_classe",
+        columns: &["code", "libelle", "classe"],
         pk: &["code"],
     },
     TableDef {
         api_name: "flows",
         sql_name: "dim_flow",
-        columns: &["code", "libelle", "taux_conversion", "flux_ecart"],
+        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report"],
         pk: &["code"],
     },
     TableDef {

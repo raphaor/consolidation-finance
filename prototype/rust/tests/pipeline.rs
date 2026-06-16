@@ -167,26 +167,26 @@ fn pipeline_produit_les_bons_comptes_par_niveau() {
 fn montants_f99_consolidated_attendus() {
     let con = setup();
 
-    let capital = f99_consolidated(&con, "100_Capital");
-    let immo = f99_consolidated(&con, "200_Immobilisations");
-    let stocks = f99_consolidated(&con, "300_Stocks");
-    let resultat = f99_consolidated(&con, "400_Resultat");
+    let capital = f99_consolidated(&con, "100");
+    let immo = f99_consolidated(&con, "200");
+    let stocks = f99_consolidated(&con, "300");
+    let resultat = f99_consolidated(&con, "400");
 
     assert!(
         (capital - 18_980.00).abs() < TOL,
-        "100_Capital consolidated F99 = {capital} (attendu 18980.00)"
+        "100 consolidated F99 = {capital} (attendu 18980.00)"
     );
     assert!(
         (immo - 27_116.00).abs() < TOL,
-        "200_Immobilisations consolidated F99 = {immo} (attendu 27116.00)"
+        "200 consolidated F99 = {immo} (attendu 27116.00)"
     );
     assert!(
         (stocks - 3_000.00).abs() < TOL,
-        "300_Stocks consolidated F99 = {stocks} (attendu 3000.00)"
+        "300 consolidated F99 = {stocks} (attendu 3000.00)"
     );
     assert!(
         (resultat - 9_774.00).abs() < TOL,
-        "400_Resultat consolidated F99 = {resultat} (attendu 9774.00)"
+        "400 consolidated F99 = {resultat} (attendu 9774.00)"
     );
 }
 
@@ -194,10 +194,10 @@ fn montants_f99_consolidated_attendus() {
 fn comptes_attendus_presents_au_niveau_consolidated() {
     let con = setup();
     for acc in &[
-        "100_Capital",
-        "200_Immobilisations",
-        "300_Stocks",
-        "400_Resultat",
+        "100",
+        "200",
+        "300",
+        "400",
     ] {
         let n: i64 = con
             .query_row(
@@ -305,16 +305,16 @@ fn ecarts_f80_f81_localises_sur_entites_non_eur() {
 fn conversion_reconstitue_montant_au_taux_close_n() {
     let con = setup();
 
-    // Pour A (USD), compte 100_Capital, flux F01 (ex F00 entrant) :
+    // Pour A (USD), compte 100 (Capital), flux F01 (ex F00 entrant) :
     //   converted(F01) + écart(F80) doit valoir fonctionnel × taux_close_n (0.90).
-    let f01_pres = flow_sum(&con, "consolidated", "100_Capital", &["F01"]);
-    let f80_pres = flow_sum(&con, "consolidated", "100_Capital", &["F80"]);
+    let f01_pres = flow_sum(&con, "consolidated", "100", &["F01"]);
+    let f80_pres = flow_sum(&con, "consolidated", "100", &["F80"]);
 
     // Côté fonctionnel (reclassified) : F01 de A = 5000 USD.
     let f01_func: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='reclassified' AND account='100_Capital' AND flow='F01' AND entity='A'",
+             WHERE level='reclassified' AND account='100' AND flow='F01' AND entity='A'",
             [],
             |row| row.get(0),
         )
@@ -326,7 +326,7 @@ fn conversion_reconstitue_montant_au_taux_close_n() {
     let attendu = f01_func * 0.90; // taux_close_n USD 2024 = 0.90
     assert!(
         (reconstruit - attendu).abs() < TOL,
-        "conversion A/100_Capital : reconstruit {reconstruit} ≠ attendu {attendu}"
+        "conversion A/100 : reconstruit {reconstruit} ≠ attendu {attendu}"
     );
 }
 
@@ -340,7 +340,7 @@ fn pipeline_reproductible_apres_reset() {
     let con = setup();
 
     // Snapshot des montants F99 consolidés.
-    let accounts = ["100_Capital", "200_Immobilisations", "300_Stocks", "400_Resultat"];
+    let accounts = ["100", "200", "300", "400"];
     let before: Vec<f64> = accounts.iter().map(|a| f99_consolidated(&con, a)).collect();
     let counts_before: [i64; 4] = [
         level_count(&con, "corporate"),

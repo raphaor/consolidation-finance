@@ -154,28 +154,28 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             'actif'
         FROM range(0, {N_ENTITIES}) t(i);
 
-        -- Plan de compte : mix bilan / resultat / equity.
-        INSERT INTO dim_account (code, libelle, classe, capitaux_propres, compte_parent)
+        -- Plan de compte : mix bilan / resultat / flux (sous_classe et
+        -- technical_grouping NULLABLE — laissés à NULL pour les comptes synthétiques).
+        INSERT INTO dim_account (code, libelle, classe, sous_classe, technical_grouping, compte_parent)
         SELECT
             'ACC_' || LPAD(CAST(i AS VARCHAR), 4, '0'),
             'Compte ' || CAST(i AS VARCHAR),
             CASE
                 WHEN i % 5 IN (0,1) THEN 'bilan'
                 WHEN i % 5 IN (2,3) THEN 'resultat'
-                ELSE                     'equity'
+                ELSE                     'flux'
             END,
-            FALSE,
-            NULL
+            NULL, NULL, NULL
         FROM range(0, {N_ACCOUNTS}) t(i);
 
         INSERT INTO dim_flow VALUES
-            ('F00','Ouverture','close_n1','F80'),
-            ('F01','Entrée périmètre','close_n1','F80'),
-            ('F20','Variation','avg','F81'),
-            ('F80','Écart conv. ouverture','terminal',NULL),
-            ('F81','Écart conv. variation','terminal',NULL),
-            ('F98','Sortie périmètre','terminal',NULL),
-            ('F99','Clôture','close_n',NULL);
+            ('F00','Ouverture','close_n1','F80','F99'),
+            ('F01','Entrée périmètre','close_n1','F80','F99'),
+            ('F20','Variation','avg','F81','F99'),
+            ('F80','Écart conv. ouverture','terminal',NULL,'F99'),
+            ('F81','Écart conv. variation','terminal',NULL,'F99'),
+            ('F98','Sortie périmètre','terminal',NULL,'F99'),
+            ('F99','Clôture','close_n',NULL,'F99');
 
         INSERT INTO dim_currency VALUES
             ('EUR','Euro',2),
