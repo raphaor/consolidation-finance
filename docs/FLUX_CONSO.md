@@ -105,11 +105,11 @@ Tous les flux sont saisis en **devise fonctionnelle** et convertis via leur `tau
 
 ### Sémantique d'écrasement (valeur autoritaire)
 
-La reconstruction est **autoritaire** : pour un grain dimensionnel donné, elle remplace toute valeur de clôture pré-existante (implémentée en `DELETE` ciblé + `INSERT` dans `materialize_closures`). Une saisie résiduelle sur un flux de clôture est donc écrasée — pas additionnée. En revanche, une clôture sur un grain sans composante (autre compte, autre code `Nature` à venir) est **préservée** : l'écrasement ne déborde pas sur un grain distinct.
+La reconstruction est **autoritaire** : pour un grain dimensionnel donné, elle remplace toute valeur de clôture pré-existante (implémentée en `DELETE` ciblé + `INSERT` dans `materialize_closures`). Une saisie résiduelle sur un flux de clôture est donc écrasée — pas additionnée. En revanche, une clôture sur un grain sans composante (autre compte, autre **nature**) est **préservée** : l'écrasement ne déborde pas sur un grain distinct.
 
 ### Grain de reconstruction
 
-Grain actuel : `(scenario, entity, entry_period, period, account, currency)` — les dimensions `partner` / `share` / `analysis` sont volontairement hors grain (une clôture est un solde agrégé, pas une écriture détaillée). **À chaque ajout de dimension** (ex. `Nature`), se demander : *deux clôtures différant seulement par cette dimension sont-elles des soldes distincts ?* Si oui, la dimension entre dans le grain (à ajouter au `GROUP BY` de l'INSERT **et** à la clause de ciblage du `DELETE`, sinon l'écrasement serait trop large). Détail et marqueurs `GRAIN` dans `prototype/rust/src/pipeline/materialize_closures.rs`.
+Grain actuel : `(scenario, entity, entry_period, period, account, currency, nature)` — les dimensions `partner` / `share` / `analysis` sont volontairement hors grain (une clôture est un solde agrégé, pas une écriture détaillée). **`Nature` entre dans le grain** (décision 2026-06-17) : deux clôtures différant seulement par la nature sont des soldes distincts. Détail et marqueurs `GRAIN` dans `prototype/rust/src/pipeline/materialize_closures.rs`.
 
 ## 4. À-nouveau
 

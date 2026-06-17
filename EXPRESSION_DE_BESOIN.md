@@ -70,7 +70,7 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 - Format d'échange : **CSV** (prototype ; évolutif ensuite — voir [Q18](./docs/QUESTIONS_OUVERTES.md)).
 - Champs en entrée (ordre et casse à respecter) :
 
-  `Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Audit_id, Partner*, Share*, Analysis*, Amount`
+  `Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Audit_id, Partner*, Share*, Analysis*, Amount`
 
   `*` = champ optionnel. Tout autre champ est obligatoire.
 - Sémantique détaillée des champs et master data de chaque dimension : voir [`docs/MODELE_DONNEES.md`](./docs/MODELE_DONNEES.md).
@@ -78,9 +78,9 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 ## 5. Restitution & reporting
 
 **Sorties du POC** (format : **web interactif**) :
-- Table consolidée filtrable (toutes les lignes, filtres sur tous les champs).
-- **Bilan par flux** : comptes en lignes, flux en colonnes (`solde_ouverture` / `variation` / `solde_clôture`).
-- **Compte de résultat** : flux d'ouverture et flux de clôture.
+- Table consolidée filtrable (toutes les lignes, filtres sur tous les champs dont **nature**).
+- **Bilan par flux** : comptes en lignes, flux en colonnes (`solde_ouverture` / `variation` / `solde_clôture`), filtrable par **nature**.
+- **Compte de résultat** : flux d'ouverture et flux de clôture, filtrable par **nature**.
 
 **À terme** (post-POC) : bilan consolidé mis en forme, tableau de flux de trésorerie, annexe / notes, dashboards analytiques.
 

@@ -16,6 +16,7 @@ Sémantique des champs du CSV et caractéristiques *master data* de chaque dimen
 | `Account` | Dimension | Compte du plan de compte du groupe |
 | `Flow` | Dimension | Code de flux identifiant l'origine du montant (F00 ouverture, F20 variation, F80/F81 conversion, F01/F98 périmètre, F99 clôture…) — voir [`FLUX_CONSO.md`](./FLUX_CONSO.md) |
 | `Currency` | Dimension | Devise de l'écriture |
+| `Nature` | Dimension | Nature de l'écriture (code identifiant l'origine et le niveau de chargement — ex. `0LIASS`, `1AJUST`). Obligatoire. Voir §3 `Nature`. |
 | `Partner*` | Dimension | Contrepartie (interco si dans le périmètre, sinon tiers lié / externe) |
 | `Share*` | Dimension | Participation visée par l'écriture (A détient B → `Share` identifie la relation et la cible B) |
 | `Analysis*` | Dimension | Axe analytique libre (centre de coût, projet…) |
@@ -62,6 +63,22 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 ### `Currency`
 - **Master** : `code_ISO`, `libellé`, `décimales`, `rôle` (fonctionnelle / présentation)
 - **Conso** : conversion multi-devises [B], via la table *Taux de change*.
+
+### `Nature`
+- **Rôle** : identifie l'**origine et le niveau de chargement** d'une écriture. Le préfixe du code détermine à quelle étape du pipeline la nature est chargée.
+- **Master** : `code`, `libellé`, `rules` (TEXT, JSON — pour le futur module de traitement automatique)
+- **Convention de nommage** (préfixe → étape de chargement) :
+
+  | Préfixe | Chargement | Exemple |
+  |---|---|---|
+  | `0` | Données de liasse (saisie brute) | `0LIASS` |
+  | `1` | Avant reclassification | `1AJUST` |
+  | `2` | Après reclass, avant conversion | *(à venir)* |
+  | `3` | Après conversion, avant consolidation | *(à venir)* |
+  | `4` | Après consolidation | *(à venir)* |
+
+- **Conso** : la nature est **préservée à travers toutes les étapes** du pipeline. Deux écritures de natures différentes **ne sont jamais agrégées** — la nature entre dans le `GROUP BY` de chaque étape (agrégation, reclassification, conversion, consolidation) et dans le grain de reconstruction des clôtures (F99).
+- **Valeurs de base** : `0LIASS` (liasse), `1AJUST` (ajustement).
 
 ### `Partner*`
 - **Rôle** : contrepartie d'une opération. **Rôle** sur la liste centrale des entités (entité du groupe = interco ; tiers lié = associé / coentreprise).
