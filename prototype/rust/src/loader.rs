@@ -14,6 +14,7 @@
 //! | `accounts.csv`      | `dim_account`        | lecture directe                    |
 //! | `flows.csv`         | `dim_flow`           | lecture directe                    |
 //! | `currencies.csv`    | `dim_currency`       | CAST `decimales` AS INTEGER        |
+//! | `natures.csv`       | `dim_nature`         | lecture directe                    |
 //! | `perimeter.csv`     | `sat_perimeter`      | CAST `entree`/`sortie` AS BOOLEAN  |
 //! | `rates.csv`         | `sat_exchange_rate`  | lecture directe                    |
 //! | `entries.csv`       | `stg_entry`          | lecture directe                    |
@@ -103,6 +104,15 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
         ),
         [],
     )?;
+    con.execute(
+        &format!(
+            "INSERT INTO dim_nature \
+             SELECT code, libelle, rules \
+             FROM read_csv_auto('{}')",
+            csv_path("natures.csv")
+        ),
+        [],
+    )?;
 
     // --- Tables satellites (règles de consolidation) ---
     con.execute(
@@ -129,7 +139,7 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
     con.execute(
         &format!(
             "INSERT INTO stg_entry \
-             SELECT scenario, entity, entry_period, period, account, flow, currency, \
+             SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
                     partner, share, analysis, audit_id, amount \
              FROM read_csv_auto('{}')",
             csv_path("entries.csv")

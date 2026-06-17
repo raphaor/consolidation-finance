@@ -8,6 +8,7 @@ export interface LevelCount {
 export interface BilanRow {
   account: string;
   flow: string;
+  nature: string;
   amount: number;
 }
 
@@ -20,6 +21,7 @@ export interface Entry {
   account: string;
   flow: string;
   currency: string;
+  nature: string;
   partner: string | null;
   share: string | null;
   analysis: string | null;
@@ -63,11 +65,18 @@ export interface Entity {
   statut: string;
 }
 
+export interface Nature {
+  code: string;
+  libelle: string;
+  rules: string | null;
+}
+
 export interface ReportFilters {
   scenario?: string;
   entity?: string;
   entry_period?: string;
   period?: string;
+  nature?: string;
 }
 
 // Catalogue des flux attendus en colonnes du bilan par flux
@@ -102,6 +111,7 @@ export type MasterTable =
   | 'accounts'
   | 'flows'
   | 'currencies'
+  | 'natures'
   | 'perimeter'
   | 'rates'
   | 'sous_classes';
@@ -208,6 +218,15 @@ export const MASTER_TABLES: TableDef[] = [
       { name: 'code_iso', label: 'Code ISO', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
       { name: 'decimales', label: 'Décimales', type: 'number' },
+    ],
+  },
+  {
+    table: 'natures',
+    label: 'Natures',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+      { name: 'rules', label: 'Règles', type: 'text', nullable: true },
     ],
   },
   {

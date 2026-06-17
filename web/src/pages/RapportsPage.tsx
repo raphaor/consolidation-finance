@@ -15,6 +15,7 @@ export function RapportsPage() {
   const [entity, setEntity] = useState('');
   const [entryPeriod, setEntryPeriod] = useState('');
   const [period, setPeriod] = useState('');
+  const [nature, setNature] = useState('');
   const [rows, setRows] = useState<BilanRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +29,7 @@ export function RapportsPage() {
         entity: entity || undefined,
         entry_period: entryPeriod || undefined,
         period: period || undefined,
+        nature: nature || undefined,
       };
       const data =
         reportType === 'bilan'
@@ -40,7 +42,7 @@ export function RapportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [reportType, level, scenario, entity, entryPeriod, period]);
+  }, [reportType, level, scenario, entity, entryPeriod, period, nature]);
 
   useEffect(() => {
     void load();
@@ -69,10 +71,12 @@ export function RapportsPage() {
             entity={entity}
             entryPeriod={entryPeriod}
             period={period}
+            nature={nature}
             onScenarioChange={setScenario}
             onEntityChange={setEntity}
             onEntryPeriodChange={setEntryPeriod}
             onPeriodChange={setPeriod}
+            onNatureChange={setNature}
             disabled={loading}
           />
           <label className="field">

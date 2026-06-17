@@ -65,7 +65,7 @@ struct LevelCount {
     count: i64,
 }
 
-/// Ligne `/api/bilan` : montant agrégé par (compte, flux) au niveau demandé.
+/// Ligne `/api/bilan` : montant agrégé par (compte, flux, nature) au niveau demandé.
 ///
 /// `amount` est sérialisé en **nombre** JSON (feature `serde-float` de
 /// `rust_decimal`) — le frontend TS attend `amount: 9774.0`, pas une chaîne.
@@ -73,6 +73,7 @@ struct LevelCount {
 struct BilanRow {
     account: String,
     flow: String,
+    nature: String,
     amount: Decimal,
 }
 
@@ -90,6 +91,7 @@ struct EntryRow {
     account: String,
     flow: String,
     currency: String,
+    nature: String,
     partner: Option<String>,
     share: Option<String>,
     analysis: Option<String>,
@@ -130,6 +132,8 @@ struct BilanQuery {
     entry_period: Option<String>,
     #[serde(default)]
     period: Option<String>,
+    #[serde(default)]
+    nature: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -148,6 +152,8 @@ struct EntriesQuery {
     entry_period: Option<String>,
     #[serde(default)]
     period: Option<String>,
+    #[serde(default)]
+    nature: Option<String>,
 }
 
 fn default_level() -> String {
@@ -159,14 +165,15 @@ fn default_limit() -> i64 {
 }
 
 /// Construit le fragment SQL et les paramètres pour les filtres optionnels
-/// `scenario`, `entity`, `entry_period` (exercice clôturé) et `period`
-/// (période impactée par l'écriture). Renvoie une chaîne préfixée par " AND ..."
-/// prête à concaténer après un WHERE existant.
+/// `scenario`, `entity`, `entry_period` (exercice clôturé), `period`
+/// (période impactée par l'écriture) et `nature`. Renvoie une chaîne
+/// préfixée par " AND ..." prête à concaténer après un WHERE existant.
 fn build_filters(
     scenario: &Option<String>,
     entity: &Option<String>,
     entry_period: &Option<String>,
     period: &Option<String>,
+    nature: &Option<String>,
 ) -> (String, Vec<DbValue>) {
     let mut sql = String::new();
     let mut params = Vec::new();
@@ -185,6 +192,10 @@ fn build_filters(
     if let Some(p) = period {
         sql.push_str(" AND period = ?");
         params.push(DbValue::Text(p.clone()));
+    }
+    if let Some(n) = nature {
+        sql.push_str(" AND nature = ?");
+        params.push(DbValue::Text(n.clone()));
     }
     (sql, params)
 }
@@ -247,24 +258,25 @@ async fn get_bilan(
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period);
+        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
         let sql = format!(
-            "SELECT e.account, e.flow, SUM(e.amount) AS amount
+            "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
              WHERE e.level = ? AND a.classe = 'bilan' {fsql}
-             GROUP BY e.account, e.flow
-             ORDER BY e.account, e.flow"
+             GROUP BY e.account, e.flow, e.nature
+             ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
         params.extend(fparams);
         let mut stmt = con.prepare(&sql).map_err(db_err)?;
         let iter = stmt
             .query_map(params_from_iter(params), |row| {
-                let m: Money = row.get(2)?;
+                let m: Money = row.get(3)?;
                 Ok(BilanRow {
                     account: row.get(0)?,
                     flow: row.get(1)?,
+                    nature: row.get(2)?,
                     amount: m.into_decimal(),
                 })
             })
@@ -287,24 +299,25 @@ async fn get_compte_resultat(
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period);
+        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
         let sql = format!(
-            "SELECT e.account, e.flow, SUM(e.amount) AS amount
+            "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
              WHERE e.level = ? AND a.classe = 'resultat' {fsql}
-             GROUP BY e.account, e.flow
-             ORDER BY e.account, e.flow"
+             GROUP BY e.account, e.flow, e.nature
+             ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
         params.extend(fparams);
         let mut stmt = con.prepare(&sql).map_err(db_err)?;
         let iter = stmt
             .query_map(params_from_iter(params), |row| {
-                let m: Money = row.get(2)?;
+                let m: Money = row.get(3)?;
                 Ok(BilanRow {
                     account: row.get(0)?,
                     flow: row.get(1)?,
+                    nature: row.get(2)?,
                     amount: m.into_decimal(),
                 })
             })
@@ -319,7 +332,7 @@ async fn get_compte_resultat(
 }
 
 fn map_entry_row(row: &duckdb::Row) -> duckdb::Result<EntryRow> {
-    let m: Money = row.get(13)?;
+    let m: Money = row.get(14)?;
     Ok(EntryRow {
         id: row.get(0)?,
         scenario: row.get(1)?,
@@ -329,11 +342,12 @@ fn map_entry_row(row: &duckdb::Row) -> duckdb::Result<EntryRow> {
         account: row.get(5)?,
         flow: row.get(6)?,
         currency: row.get(7)?,
-        partner: row.get(8)?,
-        share: row.get(9)?,
-        analysis: row.get(10)?,
-        audit_id: row.get(11)?,
-        level: row.get(12)?,
+        nature: row.get(8)?,
+        partner: row.get(9)?,
+        share: row.get(10)?,
+        analysis: row.get(11)?,
+        audit_id: row.get(12)?,
+        level: row.get(13)?,
         amount: m.into_decimal(),
     })
 }
@@ -348,7 +362,7 @@ async fn get_entries(
 ) -> Result<Json<Vec<EntryRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period);
+        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
         let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
             let where_stg = if fsql.is_empty() {
                 String::new()
@@ -359,7 +373,7 @@ async fn get_entries(
                 "SELECT * FROM (
                     SELECT ROW_NUMBER() OVER (ORDER BY entity, scenario, period, account, flow, audit_id) AS id,
                            scenario, entity, entry_period, period, account, flow,
-                           currency, partner, share, analysis, audit_id,
+                           currency, nature, partner, share, analysis, audit_id,
                            'raw' AS level, amount
                     FROM stg_entry {where_stg}
                 ) ORDER BY id
@@ -372,7 +386,7 @@ async fn get_entries(
         } else {
             let sql = format!(
                 "SELECT id, scenario, entity, entry_period, period, account, flow,
-                        currency, partner, share, analysis, audit_id, level, amount
+                        currency, nature, partner, share, analysis, audit_id, level, amount
                  FROM fact_entry
                  WHERE level = ? {fsql}
                  ORDER BY id

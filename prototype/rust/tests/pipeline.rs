@@ -448,13 +448,22 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     )
     .expect("seed dim_flow");
 
-    // Composantes au niveau reclassified : F20 = 50 et F10 = 30 sur le compte 100.
+    // dim_nature minimale pour le test (2 codes : liasse + ajustement).
+    con.execute_batch(
+        "INSERT INTO dim_nature VALUES
+            ('0LIASS','Liasse',NULL),
+            ('1AJUST','Ajustement',NULL);",
+    )
+    .expect("seed dim_nature");
+
+    // Composantes au niveau reclassified : F20 = 50 et F10 = 30 sur le compte 100
+    // (nature 0LIASS).
     con.execute_batch(
         "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, level, amount)
+            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
          VALUES
-            ('REEL','M','2024','2024','100','F20','EUR','reclassified',50.00),
-            ('REEL','M','2024','2024','100','F10','EUR','reclassified',30.00);",
+            ('REEL','M','2024','2024','100','F20','EUR','0LIASS','reclassified',50.00),
+            ('REEL','M','2024','2024','100','F10','EUR','0LIASS','reclassified',30.00);",
     )
     .expect("seed composantes");
 
@@ -486,10 +495,10 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     //                                                  → doit être PRÉSERVÉ.
     con.execute_batch(
         "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, level, amount)
+            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
          VALUES
-            ('REEL','M','2024','2024','100','F99','EUR','reclassified',999.00),
-            ('REEL','M','2024','2024','200','F99','EUR','reclassified',777.00);",
+            ('REEL','M','2024','2024','100','F99','EUR','0LIASS','reclassified',999.00),
+            ('REEL','M','2024','2024','200','F99','EUR','0LIASS','reclassified',777.00);",
     )
     .expect("seed résiduel");
 
@@ -534,10 +543,90 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
         "F99@200 (grain sans composante) doit rester 777, eu {f99_200}"
     );
 
-    // Note : lorsqu'une nouvelle dimension (ex. Nature) entrera dans le grain de
-    // clôture, ce même test démontrera la non-diversion entre codes Nature : il
-    // suffira d'ajouter la colonne et de dupliquer le cas (b)/(c) sur deux codes
-    // Nature d'un même compte. Voir la doc d'en-tête de `materialize_closures`.
+    // (d) Non-diversion entre codes Nature : la reconstruction sur la nature
+    //     0LIASS ne doit pas écraser une clôture résiduelle portée par une
+    //     AUTRE nature (1AJUST) sur le même compte. Puisque `nature` entre
+    //     dans le grain, F99@100@1AJUST est un grain distinct de F99@100@0LIASS.
+    con.execute_batch(
+        "INSERT INTO fact_entry
+            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+         VALUES
+            ('REEL','M','2024','2024','100','F99','EUR','1AJUST','reclassified',555.00);",
+    )
+    .expect("seed résiduel autre nature");
+
+    materialize_closures(&con, "reclassified").expect("materialize #3");
+
+    let f99_ajust: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='reclassified' AND account='100' AND flow='F99' \
+               AND nature='1AJUST'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        (f99_ajust - 555.0).abs() < TOL,
+        "F99@100@1AJUST doit être préservé à 555 (grain nature distinct), eu {f99_ajust}"
+    );
+    // Et la clôture 0LIASS reste à 50 (pas de diversion).
+    let f99_liasse_apres: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='reclassified' AND account='100' AND flow='F99' \
+               AND nature='0LIASS'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        (f99_liasse_apres - 50.0).abs() < TOL,
+        "F99@100@0LIASS reste 50 après la reconstruction sur 1AJUST (non-diversion), eu {f99_liasse_apres}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  9. Validation de la nature (obligatoire + FK sur dim_nature)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn check_natures_ok_pour_le_seed() {
+    use conso_engine::validate::check_natures;
+    let con = setup();
+    let anomalies = check_natures(&con).expect("check_natures");
+    assert!(
+        anomalies.is_empty(),
+        "le seed ne doit contenir aucune écriture sans nature ou avec nature inconnue : {anomalies:?}"
+    );
+}
+
+#[test]
+fn check_natures_detecte_nature_manquante_et_inconnue() {
+    use conso_engine::validate::check_natures;
+    let con = setup();
+
+    // Une écriture sans nature (NULL via colonne omise → on UPDATE à NULL/Vide).
+    con.execute(
+        "UPDATE stg_entry SET nature = '' WHERE audit_id = 'S-M-001'",
+        [],
+    )
+    .expect("update nature vide");
+
+    // Une écriture avec une nature inconnue de dim_nature.
+    con.execute(
+        "UPDATE stg_entry SET nature = 'XNOPE' WHERE audit_id = 'S-M-002'",
+        [],
+    )
+    .expect("update nature inconnue");
+
+    let anomalies = check_natures(&con).expect("check_natures");
+    let has_missing = anomalies.iter().any(|a| a.kind == "missing" && a.count >= 1);
+    let has_unknown = anomalies
+        .iter()
+        .any(|a| a.kind == "unknown" && a.nature.as_deref() == Some("XNOPE"));
+    assert!(has_missing, "doit détecter une nature manquante : {anomalies:?}");
+    assert!(has_unknown, "doit détecter une nature inconnue : {anomalies:?}");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

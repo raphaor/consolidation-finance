@@ -114,6 +114,18 @@ CREATE TABLE dim_currency (
     decimales INT
 );";
 
+/// 6b. dim_nature : nature des écritures (liasse, ajustement…).
+///
+/// La nature est une dimension **obligatoire** de toutes les écritures :
+/// deux écritures de natures différentes ne sont jamais agrégées. Elle est
+/// préservée à travers toutes les étapes du pipeline (cf. `pipeline::*`).
+pub const DDL_DIM_NATURE: &str = "\
+CREATE TABLE dim_nature (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT,
+    rules   TEXT
+);";
+
 // --- Tables satellites (règles de consolidation) ------------------------------
 
 /// 7. sat_perimeter : composition du périmètre par (entity, scenario, period).
@@ -156,6 +168,7 @@ CREATE TABLE stg_entry (
     account      TEXT,
     flow         TEXT,
     currency     TEXT,
+    nature       TEXT NOT NULL,
     partner      TEXT,
     share        TEXT,
     analysis     TEXT,
@@ -176,6 +189,7 @@ CREATE TABLE fact_entry (
     account      TEXT,
     flow         TEXT,
     currency     TEXT,
+    nature       TEXT NOT NULL,
     partner      TEXT,
     share        TEXT,
     analysis     TEXT,
@@ -199,6 +213,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_SOUS_CLASSE,
     DDL_DIM_FLOW,
     DDL_DIM_CURRENCY,
+    DDL_DIM_NATURE,
     DDL_SAT_PERIMETER,
     DDL_SAT_EXCHANGE_RATE,
     DDL_STG_ENTRY,
@@ -214,6 +229,7 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS stg_entry;",
     "DROP TABLE IF EXISTS sat_exchange_rate;",
     "DROP TABLE IF EXISTS sat_perimeter;",
+    "DROP TABLE IF EXISTS dim_nature;",
     "DROP TABLE IF EXISTS dim_currency;",
     "DROP TABLE IF EXISTS dim_flow;",
     "DROP TABLE IF EXISTS dim_sous_classe;",

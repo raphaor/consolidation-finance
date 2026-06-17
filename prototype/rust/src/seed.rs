@@ -88,6 +88,16 @@ const CURRENCIES: &[(&str, &str, i32)] = &[
     ("GBP", "Livre sterling", 2),
 ];
 
+/// Natures d'écriture : (code, libelle, rules).
+///
+/// La nature est une dimension obligatoire des écritures : deux écritures de
+/// natures différentes ne sont jamais agrégées. `0LIASS` est la nature par
+/// défaut de la saisie de liasse sociale.
+const NATURES: &[(&str, &str, Option<&str>)] = &[
+    ("0LIASS", "Liasse",    None),
+    ("1AJUST", "Ajustement", None),
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Tables satellites
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,54 +132,54 @@ const RATES: &[((&str, &str), (Option<Decimal>, Option<Decimal>))] = &[
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Ligne de saisie brute :
-/// (scenario, entity, entry_period, period, account, flow, currency,
+/// (scenario, entity, entry_period, period, account, flow, currency, nature,
 ///  partner, share, analysis, audit_id, amount).
 type RawRow = (&'static str, &'static str, &'static str, &'static str,
-               &'static str, &'static str, &'static str,
+               &'static str, &'static str, &'static str, &'static str,
                Option<&'static str>, Option<&'static str>, Option<&'static str>,
                &'static str, Decimal);
 
 const RAW: &[RawRow] = &[
     // ── Mère M (EUR) — périmètre continu ──
-    ("REEL", "M", "2024", "2024", "100", "F00", "EUR", None, None, None, "S-M-001", dec!(10000)),
-    ("REEL", "M", "2024", "2024", "400", "F00", "EUR", None, None, None, "S-M-002", dec!(5000)),
-    ("REEL", "M", "2024", "2024", "400", "F20", "EUR", None, None, None, "S-M-003", dec!(500)),
-    ("REEL", "M", "2024", "2024", "400", "F20", "EUR", None, None, None, "S-M-004", dec!(300)),
-    ("REEL", "M", "2024", "2024", "200", "F00", "EUR", None, None, None, "S-M-005", dec!(12000)),
-    ("REEL", "M", "2024", "2024", "200", "F20", "EUR", None, None, None, "S-M-006", dec!(500)),
-    ("REEL", "M", "2024", "2024", "300", "F00", "EUR", None, None, None, "S-M-007", dec!(3000)),
+    ("REEL", "M", "2024", "2024", "100", "F00", "EUR", "0LIASS", None, None, None, "S-M-001", dec!(10000)),
+    ("REEL", "M", "2024", "2024", "400", "F00", "EUR", "0LIASS", None, None, None, "S-M-002", dec!(5000)),
+    ("REEL", "M", "2024", "2024", "400", "F20", "EUR", "0LIASS", None, None, None, "S-M-003", dec!(500)),
+    ("REEL", "M", "2024", "2024", "400", "F20", "EUR", "0LIASS", None, None, None, "S-M-004", dec!(300)),
+    ("REEL", "M", "2024", "2024", "200", "F00", "EUR", "0LIASS", None, None, None, "S-M-005", dec!(12000)),
+    ("REEL", "M", "2024", "2024", "200", "F20", "EUR", "0LIASS", None, None, None, "S-M-006", dec!(500)),
+    ("REEL", "M", "2024", "2024", "300", "F00", "EUR", "0LIASS", None, None, None, "S-M-007", dec!(3000)),
     // Comptes de P&L (classe « resultat ») — F20 uniquement
-    ("REEL", "M", "2024", "2024", "700", "F20", "EUR", None, None, None, "S-M-010", dec!(2000)),
-    ("REEL", "M", "2024", "2024", "705", "F20", "EUR", None, None, None, "S-M-011", dec!(1000)),
-    ("REEL", "M", "2024", "2024", "600", "F20", "EUR", None, None, None, "S-M-012", dec!(800)),
-    ("REEL", "M", "2024", "2024", "610", "F20", "EUR", None, None, None, "S-M-013", dec!(500)),
-    ("REEL", "M", "2024", "2024", "640", "F20", "EUR", None, None, None, "S-M-014", dec!(200)),
+    ("REEL", "M", "2024", "2024", "700", "F20", "EUR", "0LIASS", None, None, None, "S-M-010", dec!(2000)),
+    ("REEL", "M", "2024", "2024", "705", "F20", "EUR", "0LIASS", None, None, None, "S-M-011", dec!(1000)),
+    ("REEL", "M", "2024", "2024", "600", "F20", "EUR", "0LIASS", None, None, None, "S-M-012", dec!(800)),
+    ("REEL", "M", "2024", "2024", "610", "F20", "EUR", "0LIASS", None, None, None, "S-M-013", dec!(500)),
+    ("REEL", "M", "2024", "2024", "640", "F20", "EUR", "0LIASS", None, None, None, "S-M-014", dec!(200)),
 
     // ── Filiale A (USD) — ENTRE en N ──
-    ("REEL", "A", "2024", "2024", "100", "F00", "USD", None, None, None, "S-A-001", dec!(5000)),
-    ("REEL", "A", "2024", "2024", "400", "F00", "USD", None, None, None, "S-A-002", dec!(2000)),
-    ("REEL", "A", "2024", "2024", "400", "F20", "USD", None, None, None, "S-A-003", dec!(300)),
-    ("REEL", "A", "2024", "2024", "200", "F00", "USD", None, None, None, "S-A-004", dec!(8000)),
-    ("REEL", "A", "2024", "2024", "200", "F20", "USD", None, None, None, "S-A-005", dec!(400)),
+    ("REEL", "A", "2024", "2024", "100", "F00", "USD", "0LIASS", None, None, None, "S-A-001", dec!(5000)),
+    ("REEL", "A", "2024", "2024", "400", "F00", "USD", "0LIASS", None, None, None, "S-A-002", dec!(2000)),
+    ("REEL", "A", "2024", "2024", "400", "F20", "USD", "0LIASS", None, None, None, "S-A-003", dec!(300)),
+    ("REEL", "A", "2024", "2024", "200", "F00", "USD", "0LIASS", None, None, None, "S-A-004", dec!(8000)),
+    ("REEL", "A", "2024", "2024", "200", "F20", "USD", "0LIASS", None, None, None, "S-A-005", dec!(400)),
     // Comptes de P&L — F20 uniquement
-    ("REEL", "A", "2024", "2024", "700", "F20", "USD", None, None, None, "S-A-010", dec!(1000)),
-    ("REEL", "A", "2024", "2024", "705", "F20", "USD", None, None, None, "S-A-011", dec!(500)),
-    ("REEL", "A", "2024", "2024", "600", "F20", "USD", None, None, None, "S-A-012", dec!(400)),
-    ("REEL", "A", "2024", "2024", "610", "F20", "USD", None, None, None, "S-A-013", dec!(200)),
-    ("REEL", "A", "2024", "2024", "640", "F20", "USD", None, None, None, "S-A-014", dec!(100)),
+    ("REEL", "A", "2024", "2024", "700", "F20", "USD", "0LIASS", None, None, None, "S-A-010", dec!(1000)),
+    ("REEL", "A", "2024", "2024", "705", "F20", "USD", "0LIASS", None, None, None, "S-A-011", dec!(500)),
+    ("REEL", "A", "2024", "2024", "600", "F20", "USD", "0LIASS", None, None, None, "S-A-012", dec!(400)),
+    ("REEL", "A", "2024", "2024", "610", "F20", "USD", "0LIASS", None, None, None, "S-A-013", dec!(200)),
+    ("REEL", "A", "2024", "2024", "640", "F20", "USD", "0LIASS", None, None, None, "S-A-014", dec!(100)),
 
     // ── Filiale B (GBP) — SORT en N ──
-    ("REEL", "B", "2024", "2024", "100", "F00", "GBP", None, None, None, "S-B-001", dec!(4000)),
-    ("REEL", "B", "2024", "2024", "400", "F00", "GBP", None, None, None, "S-B-002", dec!(1500)),
-    ("REEL", "B", "2024", "2024", "400", "F20", "GBP", None, None, None, "S-B-003", dec!(200)),
-    ("REEL", "B", "2024", "2024", "200", "F00", "GBP", None, None, None, "S-B-004", dec!(6000)),
-    ("REEL", "B", "2024", "2024", "200", "F20", "GBP", None, None, None, "S-B-005", dec!(300)),
+    ("REEL", "B", "2024", "2024", "100", "F00", "GBP", "0LIASS", None, None, None, "S-B-001", dec!(4000)),
+    ("REEL", "B", "2024", "2024", "400", "F00", "GBP", "0LIASS", None, None, None, "S-B-002", dec!(1500)),
+    ("REEL", "B", "2024", "2024", "400", "F20", "GBP", "0LIASS", None, None, None, "S-B-003", dec!(200)),
+    ("REEL", "B", "2024", "2024", "200", "F00", "GBP", "0LIASS", None, None, None, "S-B-004", dec!(6000)),
+    ("REEL", "B", "2024", "2024", "200", "F20", "GBP", "0LIASS", None, None, None, "S-B-005", dec!(300)),
     // Comptes de P&L — F20 uniquement
-    ("REEL", "B", "2024", "2024", "700", "F20", "GBP", None, None, None, "S-B-010", dec!(800)),
-    ("REEL", "B", "2024", "2024", "705", "F20", "GBP", None, None, None, "S-B-011", dec!(400)),
-    ("REEL", "B", "2024", "2024", "600", "F20", "GBP", None, None, None, "S-B-012", dec!(300)),
-    ("REEL", "B", "2024", "2024", "610", "F20", "GBP", None, None, None, "S-B-013", dec!(200)),
-    ("REEL", "B", "2024", "2024", "640", "F20", "GBP", None, None, None, "S-B-014", dec!(100)),
+    ("REEL", "B", "2024", "2024", "700", "F20", "GBP", "0LIASS", None, None, None, "S-B-010", dec!(800)),
+    ("REEL", "B", "2024", "2024", "705", "F20", "GBP", "0LIASS", None, None, None, "S-B-011", dec!(400)),
+    ("REEL", "B", "2024", "2024", "600", "F20", "GBP", "0LIASS", None, None, None, "S-B-012", dec!(300)),
+    ("REEL", "B", "2024", "2024", "610", "F20", "GBP", "0LIASS", None, None, None, "S-B-013", dec!(200)),
+    ("REEL", "B", "2024", "2024", "640", "F20", "GBP", "0LIASS", None, None, None, "S-B-014", dec!(100)),
 ];
 
 /// Insère toutes les données de test : master data, satellites et saisie brute.
@@ -219,6 +229,12 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             params![c.0, c.1, c.2],
         )?;
     }
+    for n in NATURES {
+        con.execute(
+            "INSERT INTO dim_nature VALUES (?, ?, ?)",
+            params![n.0, n.1, n.2],
+        )?;
+    }
 
     // --- Tables satellites ---
     for (k, v) in PERIMETER {
@@ -243,10 +259,10 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     // --- Staging (saisie brute) ---
     for row in RAW {
         con.execute(
-            "INSERT INTO stg_entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
-                row.0, row.1, row.2, row.3, row.4, row.5, row.6,
-                row.7, row.8, row.9, row.10, Money(row.11),
+                row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7,
+                row.8, row.9, row.10, row.11, Money(row.12),
             ],
         )?;
     }

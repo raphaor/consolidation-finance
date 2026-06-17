@@ -183,6 +183,10 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             ('GBP','Livre sterling',2),
             ('CHF','Franc suisse',2),
             ('JPY','Yen',0);
+
+        INSERT INTO dim_nature VALUES
+            ('0LIASS','Liasse',NULL),
+            ('1AJUST','Ajustement',NULL);
         "
     ))?;
     Ok(())
@@ -252,7 +256,7 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
     let sql = format!(
         "
         INSERT INTO stg_entry
-            (scenario, entity, entry_period, period, account, flow, currency,
+            (scenario, entity, entry_period, period, account, flow, currency, nature,
              partner, share, analysis, audit_id, amount)
         WITH gen AS (
             SELECT g.i,
@@ -268,6 +272,7 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
             a.code,
             CASE WHEN gen.fl = 0 THEN 'F00' ELSE 'F20' END,
             e.devise_fonctionnelle,
+            '0LIASS',
             NULL, NULL, NULL,
             'BENCH-' || CAST(gen.i AS VARCHAR),
             CAST(((gen.i % 9000) + 1000) AS DECIMAL(18,2))

@@ -28,7 +28,7 @@
 //! Le « grain » est l'ensemble des dimensions qui identifient un solde de clôture
 //! **unique**. La reconstruction agrège au grain ; l'écrasement est ciblé au grain.
 //!
-//! Grain actuel : `(scenario, entity, entry_period, period, account, currency)`.
+//! Grain actuel : `(scenario, entity, entry_period, period, account, currency, nature)`.
 //!
 //! Les dimensions `partner`, `share`, `analysis` existent dans `fact_entry` mais
 //! sont volontairement **hors grain** : une clôture est un solde agrégé, pas une
@@ -40,7 +40,7 @@
 //! > *Deux clôtures qui ne diffèrent que par cette dimension sont-elles des soldes
 //! > distincts ?*
 //!
-//! - **Oui** (ex. `Nature` « bilan » vs « résultat » : ce sont des clôtures
+//! - **Oui** (ex. `Nature` « liasse » vs « ajustement » : ce sont des clôtures
 //!   différentes) → la dimension **entre dans le grain**. Il faut alors l'ajouter
 //!   aux **deux** endroits repérés par le marqueur `// GRAIN` dans le SQL ci-dessous
 //!   (le `GROUP BY` + `SELECT` de l'INSERT, **et** la clause de match du DELETE).
@@ -86,9 +86,10 @@ WHERE fe.level = ?
         AND e.period        = fe.period
         AND e.account       = fe.account
         AND e.currency      = fe.currency
+        AND e.nature        = fe.nature
         -- GRAIN : ajouter ici `AND e.<nouvelle_dim> = fe.<nouvelle_dim>`
-        --        pour toute dimension devant entrer dans le grain de clôture
-        --        (ex. Nature). Voir doc d'en-tête.
+        --        pour toute dimension devant entrer dans le grain de clôture.
+        --        Voir doc d'en-tête.
   );",
         [level, level],
     )?;
@@ -97,11 +98,12 @@ WHERE fe.level = ?
     con.execute(
         "\
 INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, level, amount)
+    (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
 SELECT
     e.scenario, e.entity, e.entry_period, e.period, e.account,
     fl.flux_de_report AS flow,
     e.currency,
+    e.nature,
     ?                AS level,
     SUM(e.amount)    AS amount
 FROM fact_entry e
@@ -113,7 +115,7 @@ WHERE e.level = ?
   AND fl.flux_de_report IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)
 GROUP BY
     e.scenario, e.entity, e.entry_period, e.period, e.account, e.currency,
-    fl.flux_de_report;",
+    e.nature, fl.flux_de_report;",
         [level, level],
     )?;
 

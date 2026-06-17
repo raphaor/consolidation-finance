@@ -160,12 +160,46 @@ def run_tests():
     check("CR contient F99 (clôture)", "F99" in flows_cr,
           f"flows={flows_cr}")
 
+    # Le bilan et le CR exposent la nature dans leurs lignes
+    if isinstance(bilan, list) and bilan:
+        check("bilan expose la nature dans ses lignes",
+              all("nature" in row and row["nature"] for row in bilan),
+              f"sample={bilan[:1]}")
+    if isinstance(cr, list) and cr:
+        check("CR expose la nature dans ses lignes",
+              all("nature" in row and row["nature"] for row in cr),
+              f"sample={cr[:1]}")
+
+    # Filtre par nature sur bilan et CR
+    code, bilan_n = req("GET", "/api/bilan?scenario=REEL&period=2024&nature=0LIASS", expect=200)
+    check("bilan nature=0LIASS → 200", code == 200)
+    if isinstance(bilan_n, list) and bilan_n:
+        check("bilan nature=0LIASS filtre correct",
+              all(row.get("nature") == "0LIASS" for row in bilan_n),
+              f"natures={ {row.get('nature') for row in bilan_n} }")
+
+    code, cr_n = req("GET", "/api/compte-resultat?scenario=REEL&period=2024&nature=0LIASS", expect=200)
+    check("CR nature=0LIASS → 200", code == 200)
+    if isinstance(cr_n, list) and cr_n:
+        check("CR nature=0LIASS filtre correct",
+              all(row.get("nature") == "0LIASS" for row in cr_n),
+              f"natures={ {row.get('nature') for row in cr_n} }")
+
     # ── 7. Entries avec filtres ──────────────────────────────────────
     print(dim("\n7. Entries (filtres)"))
     code, entries = req("GET", "/api/entries?level=consolidated&limit=10", expect=200)
     check("entries consolidated → 200", code == 200)
     check("entries retourne ≤ 10 lignes", isinstance(entries, list) and 0 < len(entries) <= 10,
           f"len={len(entries) if isinstance(entries, list) else 'N/A'}")
+
+    # Vérif présence de la colonne nature
+    if isinstance(entries, list) and entries:
+        check("entries portent la colonne nature",
+              all("nature" in e and e["nature"] for e in entries),
+              f"natures={[e.get('nature') for e in entries[:3]]}")
+        check("entries ont une nature non vide (0LIASS)",
+              all(e.get("nature") == "0LIASS" for e in entries),
+              f"natures={[e.get('nature') for e in entries[:3]]}")
 
     # Filtre par entité
     code, entries_e = req("GET", "/api/entries?entity=D&limit=5", expect=200)
@@ -176,6 +210,16 @@ def run_tests():
               f"entities={[e.get('entity') for e in entries_e]}")
     else:
         check("entries entity=D filtre correct", False, "réponse vide")
+
+    # Filtre par nature
+    code, entries_n = req("GET", "/api/entries?nature=0LIASS&limit=5", expect=200)
+    check("entries nature=0LIASS → 200", code == 200)
+    if isinstance(entries_n, list) and entries_n:
+        all_n = all(e.get("nature") == "0LIASS" for e in entries_n)
+        check("entries nature=0LIASS filtre correct", all_n,
+              f"natures={[e.get('nature') for e in entries_n[:3]]}")
+    else:
+        check("entries nature=0LIASS filtre correct", False, "réponse vide")
 
     # Filtre par scénario
     code, entries_s = req("GET", "/api/entries?scenario=REEL&limit=5", expect=200)
@@ -242,10 +286,21 @@ def run_tests():
     # ── 9. Autres tables master data ─────────────────────────────────
     print(dim("\n9. Master Data — autres tables"))
     for table in ["entities", "flows", "sous_classes", "currencies",
-                  "scenarios", "periods"]:
+                  "scenarios", "periods", "natures"]:
         code, rows = req("GET", f"/api/md/{table}", expect=200)
         check(f"GET {table} → 200", code == 200,
               f"status={code}")
+
+    # Vérif spécifique natures : 0LIASS et 1AJUST présents
+    code, natures = req("GET", "/api/md/natures", expect=200)
+    check("GET natures retourne une liste", isinstance(natures, list),
+          f"body={natures}")
+    if isinstance(natures, list):
+        codes_n = {n.get("code") for n in natures}
+        check("natures contient 0LIASS", "0LIASS" in codes_n,
+              f"codes={codes_n}")
+        check("natures contient 1AJUST", "1AJUST" in codes_n,
+              f"codes={codes_n}")
 
     # ── 10. Cas d'erreur ─────────────────────────────────────────────
     print(dim("\n10. Cas d'erreur"))

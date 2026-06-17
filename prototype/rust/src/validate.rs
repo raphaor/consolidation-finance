@@ -1,4 +1,5 @@
-//! Vérifications d'identité de reconstruction des flux de clôture.
+//! Vérifications d'identité de reconstruction des flux de clôture, et
+//! validation des données de saisie (FK nature).
 //!
 //! Miroir de `prototype/python/conso/validate.py`.
 //!
@@ -181,4 +182,64 @@ pub fn validate_consolidated(con: &Connection) -> duckdb::Result<Vec<CheckResult
 /// fonctionnelle, écarts absents).
 pub fn validate_functional(con: &Connection) -> duckdb::Result<Vec<CheckResult>> {
     check_closures(con, "reclassified")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Validation de la saisie : colonne `nature` obligatoire et FK sur dim_nature.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Ligne d'anomalie de validation de la nature d'une écriture de `stg_entry`.
+#[derive(Debug, Clone)]
+pub struct NatureCheck {
+    /// Code anomalie : `missing` (nature NULL/vide) ou `unknown` (absente de `dim_nature`).
+    pub kind: &'static str,
+    /// Nombre d'écritures concernées par cette anomalie.
+    pub count: i64,
+    /// Valeur observée (NULL vide pour `missing`, code nature inconnu sinon).
+    pub nature: Option<String>,
+}
+
+/// Vérifie que `nature` est **obligatoire** (non-null, non-vide) sur `stg_entry`
+/// et que chaque valeur pointe vers une ligne existante de `dim_nature` (FK).
+///
+/// Renvoie une ligne par anomalie :
+///   - `missing` : écritures dont la nature est NULL ou vide.
+///   - `unknown` : écritures dont la nature ne correspond à aucun code `dim_nature`.
+///
+/// Une liste vide signifie que toutes les écritures sont conformes.
+pub fn check_natures(con: &Connection) -> duckdb::Result<Vec<NatureCheck>> {
+    let mut stmt = con.prepare(
+        "WITH diag AS (
+            SELECT
+                CASE
+                    WHEN nature IS NULL OR nature = '' THEN '__MISSING__'
+                    ELSE nature
+                END AS nature_key,
+                CASE
+                    WHEN nature IS NULL OR nature = '' THEN 1
+                    WHEN nature NOT IN (SELECT code FROM dim_nature) THEN 1
+                    ELSE 0
+                END AS bad
+            FROM stg_entry
+        )
+        SELECT nature_key, COUNT(*) AS n
+        FROM diag
+        WHERE bad = 1
+        GROUP BY nature_key
+        ORDER BY nature_key",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let key: String = row.get(0)?;
+        let count: i64 = row.get(1)?;
+        if key == "__MISSING__" {
+            Ok(NatureCheck { kind: "missing", count, nature: None })
+        } else {
+            Ok(NatureCheck { kind: "unknown", count, nature: Some(key) })
+        }
+    })?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r?);
+    }
+    Ok(out)
 }

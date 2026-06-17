@@ -3,7 +3,7 @@
 //! Deux endpoints :
 //! - `POST /api/import/entries` : ajoute (append) dans `stg_entry` au format
 //!   EDB (`Scenario, Entity, Entry_period, Period, Account, Flow, Currency,
-//!   Audit_id, Partner*, Share*, Analysis*, Amount`).
+//!   Nature, Audit_id, Partner*, Share*, Analysis*, Amount`).
 //! - `POST /api/import/rates` : upsert dans `sat_exchange_rate`
 //!   (`currency_source, period, taux_close, taux_moyen`).
 //!
@@ -97,6 +97,7 @@ async fn import_entries(
         "account",
         "flow",
         "currency",
+        "nature",
         "audit_id",
         "amount",
     ];
@@ -111,9 +112,9 @@ async fn import_entries(
     let path = escape_csv_path(&tmp.display().to_string());
     let sql = format!(
         "INSERT INTO stg_entry \
-         (scenario, entity, entry_period, period, account, flow, currency, \
+         (scenario, entity, entry_period, period, account, flow, currency, nature, \
           partner, share, analysis, audit_id, amount) \
-         SELECT scenario, entity, entry_period, period, account, flow, currency, \
+         SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
                 {partner}, {share}, {analysis}, audit_id, amount \
          FROM read_csv_auto('{path}', header=true)"
     );

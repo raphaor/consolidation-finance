@@ -32,6 +32,7 @@ export function EcrituresPage() {
   const [entity, setEntity] = useState('');
   const [entryPeriod, setEntryPeriod] = useState('');
   const [period, setPeriod] = useState('');
+  const [nature, setNature] = useState('');
   const [data, setData] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +50,7 @@ export function EcrituresPage() {
         entity: entity || undefined,
         entry_period: entryPeriod || undefined,
         period: period || undefined,
+        nature: nature || undefined,
       });
       setData(rows);
     } catch (err) {
@@ -57,7 +59,7 @@ export function EcrituresPage() {
     } finally {
       setLoading(false);
     }
-  }, [level, scenario, entity, entryPeriod, period]);
+  }, [level, scenario, entity, entryPeriod, period, nature]);
 
   useEffect(() => {
     void load();
@@ -70,6 +72,7 @@ export function EcrituresPage() {
       { header: 'Account', accessorKey: 'account' },
       { header: 'Flow', accessorKey: 'flow' },
       { header: 'Currency', accessorKey: 'currency' },
+      { header: 'Nature', accessorKey: 'nature' },
       {
         header: 'Amount',
         accessorKey: 'amount',
@@ -112,10 +115,12 @@ export function EcrituresPage() {
             entity={entity}
             entryPeriod={entryPeriod}
             period={period}
+            nature={nature}
             onScenarioChange={setScenario}
             onEntityChange={setEntity}
             onEntryPeriodChange={setEntryPeriod}
             onPeriodChange={setPeriod}
+            onNatureChange={setNature}
             disabled={loading}
           />
           <label className="field">

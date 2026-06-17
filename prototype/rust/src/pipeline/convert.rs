@@ -33,7 +33,7 @@ const SQL_STEP_C: &str = "\
 WITH conv AS (
     SELECT
         f.scenario, f.entity, f.entry_period, f.period, f.account,
-        f.flow, f.currency, f.amount,
+        f.flow, f.currency, f.nature, f.amount,
         fl.taux_conversion,
         fl.flux_ecart,
         -- Taux applicable au flux (1.0 si déjà en devise de présentation)
@@ -60,17 +60,20 @@ WITH conv AS (
     WHERE f.level = 'reclassified'
 )
 INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, level, amount)
+    (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
 -- Montants convertis (tous flux constitutifs, exprimés en devise de présentation)
 SELECT scenario, entity, entry_period, period, account, flow,
        ? AS currency,
+       nature,
        'converted' AS level,
        amount * taux_flux AS amount
 FROM conv
 UNION ALL
 -- Lignes d'écart (devise ≠ présentation, flux porteur d'un flux_ecart, écart ≠ 0)
+-- L'écart F80/F81 hérite de la nature du flux parent.
 SELECT scenario, entity, entry_period, period, account, flux_ecart AS flow,
        ? AS currency,
+       nature,
        'converted' AS level,
        amount * (taux_close_n - taux_flux) AS amount
 FROM conv
