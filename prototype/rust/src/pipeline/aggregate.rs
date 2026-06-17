@@ -8,6 +8,10 @@
 //! partie du grain d'agrégation : deux écritures de natures différentes ne sont
 //! jamais agrégées.
 //!
+//! **Staging par nature** : seules les écritures de préfixe `0` ou `1` passent
+//! par l'étape A. Les préfixes `2`, `3`, `4` sont injectés directement à leur
+//! niveau cible par le module `staging`. Voir `docs/FLUX_CONSO.md` « Staging ».
+//!
 //! Aucun filtre sur les flux : la saisie (mode écriture ou formulaire bilan)
 //! est agrégée telle quelle. En mode écriture, les liasses ne contiennent que
 //! F00/F20 ; en mode bilan, le F99 (clôture) saisi sera agrégé ici puis
@@ -27,6 +31,7 @@ SELECT
     'corporate' AS level,
     SUM(amount) AS amount
 FROM stg_entry
+WHERE substr(nature, 1, 1) IN ('0', '1')
 GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature;";
 
 /// Exécute l'étape A : agrège les écritures brutes au niveau corporate.

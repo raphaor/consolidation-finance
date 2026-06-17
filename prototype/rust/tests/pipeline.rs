@@ -705,3 +705,100 @@ fn sortie_perimetre_donne_f99_zero_et_f98_negatif() {
         "aucun F99 non nul pour B au niveau consolidated (écarts absorbés par F98)"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  10. Staging par nature — routing des préfixes 2/3/4 vers leur niveau
+//      d'injection (post-MVP, mais le mécanisme est en place).
+//
+//      Les écritures dont le préfixe de nature est 2/3/4 sont injectées
+//      directement au niveau correspondant, en sautant les étapes précédentes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn staging_route_les_prefixes_vers_le_bon_niveau() {
+    let con = Connection::open_in_memory().expect("open_in_memory");
+    create_schema(&con).expect("create_schema");
+    seed_all(&con).expect("seed_all");
+
+    // Natures de test pour les préfixes 2/3/4
+    con.execute_batch(
+        "INSERT INTO dim_nature VALUES
+            ('2TEST','Test reclass skip',NULL),
+            ('3TEST','Test convert skip',NULL),
+            ('4TEST','Test cons skip',NULL);",
+    )
+    .expect("seed natures");
+
+    // Écritures de test dans stg_entry
+    con.execute_batch(
+        "INSERT INTO stg_entry
+            (scenario, entity, entry_period, period, account, flow, currency, nature, amount)
+         VALUES
+            ('REEL','M','2024','2024','100','F20','EUR','2TEST',999.00),
+            ('REEL','M','2024','2024','100','F20','EUR','3TEST',888.00),
+            ('REEL','M','2024','2024','100','F20','EUR','4TEST',777.00);",
+    )
+    .expect("seed stg entries");
+
+    run_pipeline(&con, &ConvertParams::default()).expect("run_pipeline");
+
+    // Préfixe 2 : visible à reclassified, invisible à corporate
+    let n2_corp: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='corporate' AND substr(nature,1,1)='2'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let n2_reclass: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='reclassified' AND nature='2TEST'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n2_corp, 0, "préfixe 2 ne doit pas apparaître à corporate");
+    assert!(n2_reclass > 0, "préfixe 2 doit apparaître à reclassified");
+
+    // Préfixe 3 : visible à converted, invisible à corporate et reclassified
+    let n3_reclass: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='reclassified' AND substr(nature,1,1)='3'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let n3_conv: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' AND nature='3TEST'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        n3_reclass, 0,
+        "préfixe 3 ne doit pas apparaître à reclassified"
+    );
+    assert!(n3_conv > 0, "préfixe 3 doit apparaître à converted");
+
+    // Préfixe 4 : visible à consolidated, invisible ailleurs
+    let n4_conv: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' AND substr(nature,1,1)='4'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let n4_cons: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level='consolidated' AND nature='4TEST'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n4_conv, 0, "préfixe 4 ne doit pas apparaître à converted");
+    assert!(
+        n4_cons > 0,
+        "préfixe 4 doit apparaître à consolidated"
+    );
+}

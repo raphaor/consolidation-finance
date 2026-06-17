@@ -21,6 +21,7 @@ pub mod consolidate;
 pub mod convert;
 pub mod materialize_closures;
 pub mod reclassify;
+pub mod staging;
 
 use duckdb::Connection;
 use std::time::Instant;
@@ -69,16 +70,19 @@ pub fn run_pipeline(
     let corporate = aggregate::step_a(con)?;
     let reclassified = {
         reclassify::step_b(con)?;
+        staging::inject_by_prefix(con, "reclassified", "2")?;
         materialize_closures::materialize_closures(con, "reclassified")?;
         count_level(con, "reclassified")?
     };
     let converted = {
         convert::step_c(con, params)?;
+        staging::inject_by_prefix(con, "converted", "3")?;
         materialize_closures::materialize_closures(con, "converted")?;
         count_level(con, "converted")?
     };
     let consolidated = {
         consolidate::step_d(con)?;
+        staging::inject_by_prefix(con, "consolidated", "4")?;
         materialize_closures::materialize_closures(con, "consolidated")?;
         count_level(con, "consolidated")?
     };
@@ -139,6 +143,7 @@ pub fn run_pipeline_timed(
     let t = Instant::now();
     let reclassified = {
         reclassify::step_b(con)?;
+        staging::inject_by_prefix(con, "reclassified", "2")?;
         materialize_closures::materialize_closures(con, "reclassified")?;
         count_level(con, "reclassified")?
     };
@@ -147,6 +152,7 @@ pub fn run_pipeline_timed(
     let t = Instant::now();
     let converted = {
         convert::step_c(con, params)?;
+        staging::inject_by_prefix(con, "converted", "3")?;
         materialize_closures::materialize_closures(con, "converted")?;
         count_level(con, "converted")?
     };
@@ -155,6 +161,7 @@ pub fn run_pipeline_timed(
     let t = Instant::now();
     let consolidated = {
         consolidate::step_d(con)?;
+        staging::inject_by_prefix(con, "consolidated", "4")?;
         materialize_closures::materialize_closures(con, "consolidated")?;
         count_level(con, "consolidated")?
     };
