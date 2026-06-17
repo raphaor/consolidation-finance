@@ -224,6 +224,25 @@ fn fetch_one(
     Ok(rows.into_iter().next())
 }
 
+/// Rejette les champs JSON qui ne correspondent à aucune colonne connue.
+/// Évite la perte silencieuse de données (ex: `label` au lieu de `libelle`).
+fn reject_unknown_fields(def: &TableDef, obj: &Map<String, JsonValue>) -> Result<(), AppError> {
+    let known: std::collections::HashSet<&str> = def.columns.iter().copied().collect();
+    let unknown: Vec<&str> = obj
+        .keys()
+        .filter(|k| !known.contains(k.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    if !unknown.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "champs inconnus : {}. Colonnes valides : {}",
+            unknown.join(", "),
+            def.columns.join(", ")
+        )));
+    }
+    Ok(())
+}
+
 fn pk_from_body(def: &TableDef, body: &JsonValue) -> Result<Vec<(String, JsonValue)>, AppError> {
     let obj = body
         .as_object()
@@ -265,6 +284,8 @@ async fn create(
         .as_object()
         .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?
         .clone();
+
+    reject_unknown_fields(def, &obj)?;
 
     let result = {
         let con = lock_con(&state)?;
@@ -314,6 +335,8 @@ async fn update(
         .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?
         .clone();
 
+    reject_unknown_fields(def, &obj)?;
+
     let result = {
         let con = lock_con(&state)?;
         let pk_vals = pk_from_body(def, &JsonValue::Object(obj.clone()))?;
@@ -361,28 +384,38 @@ async fn remove(
     Path(table): Path<String>,
     State(state): State<Arc<AppState>>,
     Query(query): Query<Vec<(String, String)>>,
+    body_bytes: axum::body::Bytes,
 ) -> Result<Json<JsonValue>, AppError> {
     let def = find_table(&table)
         .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
-    if query.len() != def.pk.len() {
-        return Err(AppError::bad_request(format!(
-            "attendu {} paramètre(s) de PK dans la query string, reçu {}",
-            def.pk.len(),
-            query.len()
-        )));
-    }
-    let pk_vals: Vec<(String, JsonValue)> = def
-        .pk
-        .iter()
-        .map(|col| {
-            let val = query
-                .iter()
-                .find(|(k, _)| k == *col)
-                .map(|(_, v)| v.clone())
-                .ok_or_else(|| AppError::bad_request(format!("paramètre PK manquant : {col}")))?;
-            Ok((col.to_string(), JsonValue::String(val)))
-        })
-        .collect::<Result<Vec<_>, AppError>>()?;
+
+    // PK depuis query string ou body JSON (query string prioritaire)
+    let pk_vals: Vec<(String, JsonValue)> = {
+        let from_query: Vec<(String, JsonValue)> = def
+            .pk
+            .iter()
+            .filter_map(|col| {
+                query
+                    .iter()
+                    .find(|(k, _)| k == *col)
+                    .map(|(_, v)| (col.to_string(), JsonValue::String(v.clone())))
+            })
+            .collect();
+
+        if from_query.len() == def.pk.len() {
+            from_query
+        } else if !body_bytes.is_empty() {
+            let body: JsonValue = serde_json::from_slice(&body_bytes)
+                .map_err(|_| AppError::bad_request("body JSON invalide"))?;
+            pk_from_body(def, &body)?
+        } else {
+            let pk_cols = def.pk.join(", ");
+            return Err(AppError::bad_request(format!(
+                "PK manquante. Passez-la en query string (?{pk_cols}=valeur) ou dans le body JSON.\n\
+                 Exemple : DELETE /api/md/{table}?{pk_cols}=valeur"
+            )));
+        }
+    };
 
     let deleted = {
         let con = lock_con(&state)?;
