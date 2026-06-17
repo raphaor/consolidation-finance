@@ -67,6 +67,72 @@ Stockage          Traitement
 
 ---
 
+## Staging — Injection par nature (Q29, post-MVP)
+
+La dimension `Nature` porte un **préfixe `0`→`4`** qui indique à quelle étape du pipeline une écriture doit être injectée (cf. [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §3 `Nature`). Aujourd'hui tout entre dans `stg_entry` puis passe A→B→C→D d'un bloc. Le staging **restructurera** le pipeline en points d'injection distincts.
+
+### Points d'injection
+
+| Préfixe Nature | Injection | Étapes sautées | Exemple |
+|---|---|---|---|
+| `0` | `stg_entry` (saisie brute) → A | — | `0LIASS` (liasse sociale) |
+| `1` | Avant B (niveau *corporate*) | A (agrégation) | `1AJUST` (ajustement) |
+| `2` | Avant C (niveau *reclassifié*) | A + B (reclassification) | *(à venir)* |
+| `3` | Avant D (niveau *converti*) | A + B + C (conversion) | *(à venir)* |
+| `4` | Après D (niveau *consolidé*) | A + B + C + D (tout le pipeline) | *(à venir)* |
+
+### Architecture cible
+
+```
+                   stg_entry (préfixe 0)
+                      │
+                      ▼ A. Agrégation
+                 ┌─────────┐
+                 │Corporate│ ◄── injection préfixe 1
+                 └────┬────┘
+                      ▼ B. Reclassification
+                ┌────────────┐
+                │Reclassifié │ ◄── injection préfixe 2
+                └─────┬──────┘
+                      ▼ C. Conversion
+                 ┌─────────┐
+                 │Converti │ ◄── injection préfixe 3
+                 └────┬────┘
+                      ▼ D. Consolidation
+                ┌──────────┐
+                │Consolidé │ ◄── injection préfixe 4
+                └──────────┘
+```
+
+Une écriture de préfixe `1` (ex. `1AJUST`) entre directement au niveau *corporate* : elle saute l'agrégation (étape A) mais subit la reclassification, la conversion et la consolidation. Une écriture de préfixe `3` entre au niveau *converti* : déjà reclassifiée et convertie, elle ne subit que la consolidation.
+
+### Couplage avec le module de règles
+
+Le staging et l'**éditeur de règles** ([Q24](./QUESTIONS_OUVERTES.md)) sont couplés :
+
+- Les écritures générées par les règles (éliminations interco, participations, retraitements) seront taguées avec une nature de préfixe `2`/`3`/`4` selon le niveau où elles s'appliquent.
+- Le `champ rules` (JSON) de `dim_nature` portera la définition du traitement automatique associé à chaque nature.
+- Implémenter le staging sans le module de règles n'aurait pas de valeur métier : les préfixes `2`/`3`/`4` ne sont alimentés que par des écritures automatiques.
+
+**Décision (2026-06-17)** : la dimension Nature est posée maintenant (table, champ obligatoire, agrégation séparée, filtrage), mais le staging et le routing par préfixe sont reportés à la conception du module de règles (post-MVP).
+
+### Ce qui est déjà en place (MVP)
+
+- `dim_nature` avec `code`, `libellé`, `rules` (JSON, réservé).
+- `nature NOT NULL` sur `stg_entry` et `fact_entry`.
+- `nature` dans le `GROUP BY` de **toutes** les étapes du pipeline (jamais agrégée entre natures).
+- `nature` dans le grain de reconstruction F99 ([§3](#3-identité-de-reconstruction-par-les-flux)).
+- Filtre `nature` sur toutes les restitutions (bilan, CR, table, entries).
+- Valeurs de base : `0LIASS` (liasse), `1AJUST` (ajustement).
+
+### Ce qui reste (post-MVP)
+
+- Pipeline multi-points : router `stg_entry` selon le préfixe vers le bon niveau d'injection.
+- Module de règles : générer des écritures de préfixes `2`/`3`/`4` et les injecter au bon niveau.
+- Validation : rejeter une écriture de préfixe `2` qui contiendrait un flux devant subir la reclassification (incohérence de niveau).
+
+---
+
 ## 1. Modèle des flux (master data `Flow`)
 
 Table créable/éditable via CRUD. Attributs de chaque flux :
