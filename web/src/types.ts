@@ -25,7 +25,7 @@ export interface Entry {
   partner: string | null;
   share: string | null;
   analysis: string | null;
-  audit_id: string;
+  analysis2: string;
   level: string;
   amount: number;
 }
@@ -303,3 +303,91 @@ export const MASTER_TABLES: TableDef[] = [
     ],
   },
 ];
+
+// ---------- Règles de consolidation ----------
+
+export interface RuleSummary {
+  code: string;
+  libelle: string;
+}
+
+export interface RuleDetail {
+  code: string;
+  libelle: string;
+  definition: object;
+}
+
+// Une condition de périmètre
+export interface ScopeCond {
+  target: 'entity' | 'partner';
+  dim: string; // methode, pct_interet, pct_integration, entree, sortie
+  op: string; // =, !=, >, <, >=, <=, IN, IS NULL, IS NOT NULL
+  val: unknown;
+}
+
+// Une condition de sélection sur fact_entry
+export interface SelectionCond {
+  dim: string; // scenario, entity, account, flow, etc.
+  op: string;
+  val: unknown;
+}
+
+// Une opération
+export interface Operation {
+  seq: number;
+  level: string; // corporate, reclassified, converted, consolidated
+  selection: SelectionCond[];
+  coefficient: { type: string; value?: number }; // pct_integration | pct_interet | constant
+  multiplicateur: number;
+  destination: Record<
+    string,
+    { mode: 'inherit' | 'override' | 'null'; value?: string }
+  >;
+}
+
+// Définition complète d'une règle
+export interface RuleDefinition {
+  scope: ScopeCond[];
+  operations: Operation[];
+}
+
+export interface RulesetSummary {
+  code: string;
+  libelle: string;
+}
+
+export interface RulesetItem {
+  ordre: number;
+  rule_code: string;
+  rule_libelle?: string;
+}
+
+export interface RulesetDetail {
+  code: string;
+  libelle: string;
+  items: RulesetItem[];
+}
+
+export interface RuleResult {
+  rule_code: string;
+  level: string;
+  generated: number;
+}
+
+export interface RulesetReport {
+  ruleset: string;
+  rules: RuleResult[];
+  total_generated: number;
+}
+
+// ---------- Dimensions (registre central) ----------
+
+export type DimCategory = 'Fixed' | 'Active' | 'Analytical';
+
+export interface DimensionInfo {
+  name: string;
+  category: DimCategory;
+  custom: boolean;
+  label: string;
+  pilotable: boolean;
+}

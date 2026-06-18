@@ -31,7 +31,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use duckdb::params_from_iter;
@@ -45,8 +45,8 @@ use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
-    create_schema, import, load_all, masterdata, money::Money, run_pipeline, run_ruleset,
-    ConvertParams,
+    create_schema, dimensions, import, load_all, masterdata, money::Money, run_pipeline,
+    run_ruleset, ConvertParams,
 };
 use conso_engine::rules::RulesetReport;
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
@@ -450,6 +450,103 @@ async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetR
         status: "ok",
         entries,
     }))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Dimensions — registre central (built-in + custom)
+//
+//  Trois endpoints :
+//  - GET    /api/meta/dimensions        : liste toutes les dimensions
+//  - POST   /api/meta/dimensions        : crée une dimension custom
+//  - DELETE /api/meta/dimensions/{name} : supprime une dimension custom
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Ligne `GET /api/meta/dimensions` : une dimension du registre.
+#[derive(Serialize)]
+struct DimensionInfo {
+    name: String,
+    category: String,
+    custom: bool,
+    label: String,
+    pilotable: bool,
+}
+
+/// Corps accepté par `POST /api/meta/dimensions`.
+#[derive(Deserialize)]
+struct DimensionBody {
+    name: String,
+    label: String,
+}
+
+impl DimensionInfo {
+    fn from_def(d: &dimensions::DimDef) -> Self {
+        Self {
+            name: d.name.clone(),
+            category: format!("{:?}", d.category),
+            custom: d.custom,
+            label: d.label.clone(),
+            pilotable: d.pilotable(),
+        }
+    }
+}
+
+/// GET /api/meta/dimensions — liste toutes les dimensions (built-in + custom).
+async fn list_dimensions(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<DimensionInfo>>, AppError> {
+    let rows = {
+        let con = lock_con(&state)?;
+        let dims = dimensions::load_all(&con).map_err(db_err)?;
+        dims.iter().map(DimensionInfo::from_def).collect()
+    };
+    Ok(Json(rows))
+}
+
+/// POST /api/meta/dimensions — crée une dimension custom.
+///
+/// Valide le nom via `dimensions::is_valid_custom_name` et refuse les
+/// doublons (built-in ou déjà présente dans le registre). Répond 201 + la
+/// dimension créée.
+async fn create_dimension(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DimensionBody>,
+) -> Result<(StatusCode, Json<DimensionInfo>), AppError> {
+    let info = {
+        let con = lock_con(&state)?;
+        dimensions::create_custom(&con, &body.name, &body.label).map_err(|e| {
+            // Les erreurs de validation sont des `InvalidParameterName` → 400.
+            AppError::bad_request(e.to_string())
+        })?;
+        DimensionInfo {
+            name: body.name.clone(),
+            category: "Analytical".to_string(),
+            custom: true,
+            label: body.label.clone(),
+            pilotable: true,
+        }
+    };
+    Ok((StatusCode::CREATED, Json(info)))
+}
+
+/// DELETE /api/meta/dimensions/{name} — supprime une dimension custom.
+async fn delete_dimension(
+    Path(name): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<JsonValue>, AppError> {
+    let deleted = {
+        let con = lock_con(&state)?;
+        match dimensions::delete_custom(&con, &name) {
+            Ok(()) => 1,
+            Err(e) => {
+                // Inexistante → 404 ; autre erreur DuckDB → 500.
+                if matches!(e, duckdb::Error::InvalidParameterName(_)) {
+                    return Err(AppError::not_found(e.to_string()));
+                }
+                return Err(db_err(e));
+            }
+        }
+    };
+    Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1036,6 +1133,15 @@ async fn main() {
         .route("/api/entries", get(get_entries))
         .route("/api/run", post(run_pipeline_handler))
         .route("/api/reset", post(reset_handler))
+        // Dimensions — registre central (built-in + custom)
+        .route(
+            "/api/meta/dimensions",
+            get(list_dimensions).post(create_dimension),
+        )
+        .route(
+            "/api/meta/dimensions/{name}",
+            delete(delete_dimension),
+        )
         // Règles de consolidation (CRUD + exécution)
         .route(
             "/api/rules",

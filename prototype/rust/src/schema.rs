@@ -188,6 +188,22 @@ CREATE TABLE dim_ruleset_item (
     PRIMARY KEY (ruleset_code, ordre)
 );";
 
+/// 8e. dim_custom_dimension : registre des dimensions custom (cf. `dimensions`).
+///
+/// Les dimensions ajoutées par l'utilisateur sont toutes de catégorie
+/// `Analytical` (donc nullables). Leurs colonnes physiques sont ajoutées à
+/// `fact_entry` / `stg_entry` via `ALTER TABLE ADD COLUMN` à la création.
+///
+/// `CREATE TABLE IF NOT EXISTS` : la table doit survivre à un reset complet
+/// (sinon le registre et les colonnes seraient perdus). `ALL_DROP` ne la
+/// supprime pas et `create_schema` ré-applique les `ALTER TABLE ADD COLUMN`
+/// après re-création du schéma.
+pub const DDL_DIM_CUSTOM_DIMENSION: &str = "\
+CREATE TABLE IF NOT EXISTS dim_custom_dimension (
+    name  TEXT PRIMARY KEY,
+    label TEXT NOT NULL
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — même structure que fact_entry sans la colonne `level`.
@@ -236,6 +252,10 @@ CREATE TABLE fact_entry (
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Toutes les ordres DDL dans l'ordre de création (dimensions → satellites → fait).
+///
+/// `DDL_DIM_CUSTOM_DIMENSION` précède `DDL_STG_ENTRY` / `DDL_FACT_ENTRY` : il
+/// faut que la table registre existe quand `create_schema` exécute les
+/// `ALTER TABLE ADD COLUMN` pour ré-appliquer les customs survivantes.
 pub const ALL_DDL: &[&str] = &[
     DDL_SEQ_ENTRY,
     DDL_DIM_SCENARIO,
@@ -251,14 +271,16 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_RULE,
     DDL_DIM_RULESET,
     DDL_DIM_RULESET_ITEM,
+    DDL_DIM_CUSTOM_DIMENSION,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];
 
 /// Ordres de suppression (DROP) dans l'ordre inverse des dépendances.
 ///
-/// Permet de repartir d'un état propre avant de recréer le schéma
-/// (idempotence en cas de re-exécution).
+/// `dim_custom_dimension` n'est **pas** droppée : le registre des dimensions
+/// custom survive à un reset (et `create_schema` ré-applique ensuite les
+/// `ALTER TABLE ADD COLUMN` correspondants sur `fact_entry` / `stg_entry`).
 pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS fact_entry;",
     "DROP TABLE IF EXISTS stg_entry;",
@@ -278,16 +300,32 @@ pub const ALL_DROP: &[&str] = &[
     "DROP SEQUENCE IF EXISTS seq_entry;",
 ];
 
-/// Crée toutes les tables (idempotent).
+/// Crée toutes les tables (idempotent) en préservant les dimensions custom.
 ///
-/// Supprime d'abord les tables existantes (cf. `ALL_DROP`) puis exécute
-/// le DDL complet (cf. `ALL_DDL`). Miroir de `conso/schema.py::create_schema`.
+/// Étapes :
+/// 1. Sauvegarde des customs existantes depuis `dim_custom_dimension`
+///    (la table survit aux resets — sinon vecteur vide).
+/// 2. DROP de toutes les tables **sauf** `dim_custom_dimension`.
+/// 3. CREATE de toutes les tables (incluant `dim_custom_dimension` via
+///    `IF NOT EXISTS`).
+/// 4. Ré-applique les customs survivantes : `ALTER TABLE ADD COLUMN` sur
+///    `fact_entry` et `stg_entry` + re-INSERT dans le registre.
 pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
+    // 1. Sauvegarder les customs survivantes.
+    let saved_customs = crate::dimensions::load_customs(con).unwrap_or_default();
+
+    // 2. DROP (sans toucher à dim_custom_dimension).
     for stmt in ALL_DROP {
         con.execute(stmt, [])?;
     }
+
+    // 3. CREATE (dim_custom_dimension utilise CREATE TABLE IF NOT EXISTS).
     for stmt in ALL_DDL {
         con.execute(stmt, [])?;
     }
+
+    // 4. Ré-appliquer les colonnes custom survivantes.
+    crate::dimensions::apply_custom_columns(con, &saved_customs)?;
+
     Ok(())
 }

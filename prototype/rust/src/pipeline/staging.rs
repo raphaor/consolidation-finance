@@ -11,25 +11,30 @@
 //! Les écritures injectées sont supposées déjà traitées pour les étapes
 //! qu'elles sautent. L'agrégation se fait par le grain standard.
 
+use crate::dimensions;
 use duckdb::Connection;
 
 /// Insère dans `fact_entry` au niveau `level` les écritures de `stg_entry`
 /// dont le préfixe de nature correspond à `prefix` (un seul caractère '2'/'3'/'4').
 ///
-/// L'agrégation se fait par le grain standard (scenario, entity, entry_period,
-/// period, account, flow, currency, nature, partner).
+/// L'agrégation se fait par le grain complet des dimensions propagées
+/// (built-in + customs), généré dynamiquement depuis le registre.
 ///
 /// Renvoie le nombre de lignes produites à ce niveau pour ce préfixe.
 pub fn inject_by_prefix(con: &Connection, level: &str, prefix: &str) -> duckdb::Result<usize> {
+    let dims = dimensions::load_all(con)?;
+    let cols = dimensions::propagated_cols(&dims);
+    let col_list = cols.join(", ");
+
     let sql = format!(
-        "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2, level, amount)
-         SELECT scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2,
-                '{level}' AS level,
-                SUM(amount) AS amount
-         FROM stg_entry
-         WHERE substr(nature, 1, 1) = '{prefix}'
-         GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2"
+        "INSERT INTO fact_entry\n\
+         ({col_list}, level, amount)\n\
+         SELECT {col_list},\n\
+                '{level}' AS level,\n\
+                SUM(amount) AS amount\n\
+         FROM stg_entry\n\
+         WHERE substr(nature, 1, 1) = '{prefix}'\n\
+         GROUP BY {col_list}"
     );
     con.execute(&sql, [])?;
     let n: i64 = con.query_row(

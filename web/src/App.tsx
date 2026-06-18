@@ -9,6 +9,7 @@ import { ImportPage } from './pages/ImportPage';
 import { MasterDataPage } from './pages/MasterDataPage';
 import { PipelinePage } from './pages/PipelinePage';
 import { RapportsPage } from './pages/RapportsPage';
+import { RulesPage } from './pages/RulesPage';
 import './App.css';
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
       {page === 'ecritures' && <EcrituresPage />}
       {page === 'pipeline' && <PipelinePage />}
       {page === 'masterdata' && <MasterDataPage />}
+      {page === 'regles' && <RulesPage />}
       {page === 'import' && <ImportPage />}
     </Layout>
   );

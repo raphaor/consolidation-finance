@@ -561,3 +561,156 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---------- Règles de consolidation ---------- */
+
+.subtabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtab--active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.rule-modal {
+  max-width: 880px;
+}
+
+.rule-section {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--header-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.rule-section__title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rule-condition {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.rule-condition .field {
+  flex: 0 1 auto;
+}
+
+.rule-condition .field input,
+.rule-condition .field select {
+  min-width: 120px;
+}
+
+.rule-operation {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rule-operation__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rule-operation__head .field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.rule-dest-row {
+  display: grid;
+  grid-template-columns: 110px 140px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.rule-dest-row .rule-dest-label {
+  color: var(--text-muted);
+}
+
+.rule-dest-row .rule-dest-input {
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.rule-add-btn {
+  align-self: flex-start;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-weight: 500;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.rule-add-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.rule-report {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.rule-report__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rule-report__total {
+  margin: 8px 0 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+}

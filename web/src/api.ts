@@ -12,12 +12,18 @@
 
 import type {
   BilanRow,
+  DimensionInfo,
   Entry,
   HealthStatus,
   LevelCount,
   MasterTable,
   PipelineCounts,
   ReportFilters,
+  RuleDetail,
+  RuleSummary,
+  RulesetDetail,
+  RulesetReport,
+  RulesetSummary,
 } from './types';
 
 const BASE = '/api';
@@ -129,5 +135,43 @@ export const api = {
     const form = new FormData();
     form.append('file', file);
     return postForm<{ imported: number }>('/import/perimeter', form);
+  },
+  rules: {
+    list: () => getJson<RuleSummary[]>('/rules'),
+    get: (code: string) => getJson<RuleDetail>(`/rules/${code}`),
+    create: (body: { code: string; libelle: string; definition: object }) =>
+      postJsonRaw<RuleDetail>('/rules', body),
+    update: (code: string, body: { libelle?: string; definition?: object }) =>
+      putJson<RuleDetail>(`/rules/${code}`, body),
+    remove: (code: string) => deleteJson<{ deleted: number }>(`/rules/${code}`),
+  },
+  rulesets: {
+    list: () => getJson<RulesetSummary[]>('/rulesets'),
+    get: (code: string) => getJson<RulesetDetail>(`/rulesets/${code}`),
+    create: (
+      body: {
+        code: string;
+        libelle: string;
+        items: { ordre: number; rule_code: string }[];
+      },
+    ) => postJsonRaw<RulesetDetail>('/rulesets', body),
+    update: (
+      code: string,
+      body: {
+        libelle?: string;
+        items?: { ordre: number; rule_code: string }[];
+      },
+    ) => putJson<RulesetDetail>(`/rulesets/${code}`, body),
+    remove: (code: string) =>
+      deleteJson<{ deleted: number }>(`/rulesets/${code}`),
+    run: (ruleset: string) =>
+      postJsonRaw<RulesetReport>('/rules/run', { ruleset }),
+  },
+  dimensions: {
+    list: () => getJson<DimensionInfo[]>('/meta/dimensions'),
+    create: (body: { name: string; label: string }) =>
+      postJsonRaw<DimensionInfo>('/meta/dimensions', body),
+    remove: (name: string) =>
+      deleteJson<{ deleted: number }>(`/meta/dimensions/${name}`),
   },
 };

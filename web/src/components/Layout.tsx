@@ -5,7 +5,13 @@ import type { ReactNode } from 'react';
 import { HealthBadge } from './HealthBadge';
 import type { HealthState } from '../hooks/useHealth';
 
-export type PageId = 'rapports' | 'ecritures' | 'pipeline' | 'masterdata' | 'import';
+export type PageId =
+  | 'rapports'
+  | 'ecritures'
+  | 'pipeline'
+  | 'masterdata'
+  | 'regles'
+  | 'import';
 
 interface Props {
   active: PageId;
@@ -19,6 +25,7 @@ const TABS: { id: PageId; label: string }[] = [
   { id: 'ecritures', label: 'Écritures' },
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'masterdata', label: 'Master data' },
+  { id: 'regles', label: 'Règles' },
   { id: 'import', label: 'Import' },
 ];
 

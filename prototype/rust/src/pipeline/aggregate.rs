@@ -3,12 +3,12 @@
 //! Miroir de `conso/pipeline.py::step_a_aggregate`.
 //!
 //! Cumul des écritures source par entité. Lit la saisie brute (`stg_entry`),
-//! agrège par (scenario, entity, entry_period, period, account, flow, currency,
-//! nature, partner) et stocke au niveau *corporate* (en devise fonctionnelle).
-//! La nature fait partie du grain d'agrégation : deux écritures de natures
-//! différentes ne sont jamais agrégées. La dimension `partner` est également
-//! préservée au grain : deux écritures interco sur des partenaires distincts
-//! restent séparées (nécessaire pour les règles d'élimination interco).
+//! agrège par le grain complet des dimensions propagées (built-in + customs)
+//! et stocke au niveau *corporate* (en devise fonctionnelle). La nature fait
+//! partie du grain d'agrégation : deux écritures de natures différentes ne
+//! sont jamais agrégées. La dimension `partner` est également préservée au
+//! grain : deux écritures interco sur des partenaires distincts restent
+//! séparées (nécessaire pour les règles d'élimination interco).
 //!
 //! **Staging par nature** : seules les écritures de préfixe `0` ou `1` passent
 //! par l'étape A. Les préfixes `2`, `3`, `4` sont injectés directement à leur
@@ -22,24 +22,34 @@
 //! cette étape.
 
 use super::count_level;
+use crate::dimensions;
 use duckdb::Connection;
-
-/// SQL de l'agrégation corporate.
-const SQL_STEP_A: &str = "\
-INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2, level, amount)
-SELECT
-    scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2,
-    'corporate' AS level,
-    SUM(amount) AS amount
-FROM stg_entry
-WHERE substr(nature, 1, 1) IN ('0', '1')
-GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2;";
 
 /// Exécute l'étape A : agrège les écritures brutes au niveau corporate.
 ///
+/// Le SQL est généré dynamiquement depuis le registre des dimensions
+/// (`dimensions::load_all`) : la liste des colonnes propagées définit à la
+/// fois le `SELECT`, l'`INSERT` et le `GROUP BY`. Pour les 12 colonnes
+/// built-in, le SQL produit est identique au SQL statique historique (test
+/// golden inchangé).
+///
 /// Renvoie le nombre de lignes produites au niveau `corporate`.
 pub fn step_a(con: &Connection) -> duckdb::Result<usize> {
-    con.execute(SQL_STEP_A, [])?;
+    let dims = dimensions::load_all(con)?;
+    let cols = dimensions::propagated_cols(&dims);
+    let col_list = cols.join(", ");
+
+    let sql = format!(
+        "INSERT INTO fact_entry\n\
+         ({col_list}, level, amount)\n\
+         SELECT\n\
+             {col_list},\n\
+             'corporate' AS level,\n\
+             SUM(amount) AS amount\n\
+         FROM stg_entry\n\
+         WHERE substr(nature, 1, 1) IN ('0', '1')\n\
+         GROUP BY {col_list};"
+    );
+    con.execute(&sql, [])?;
     count_level(con, "corporate")
 }

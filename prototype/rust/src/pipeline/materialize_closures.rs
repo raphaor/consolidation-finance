@@ -28,30 +28,30 @@
 //! Le « grain » est l'ensemble des dimensions qui identifient un solde de clôture
 //! **unique**. La reconstruction agrège au grain ; l'écrasement est ciblé au grain.
 //!
-//! Grain actuel : `(scenario, entity, entry_period, period, account, currency, nature)`.
+//! Grain actuel : `closure_grain_cols` privé de `flow` = Fixed + Active sans flow
+//! (ex. `scenario, entity, entry_period, period, account, currency, nature`).
 //!
-//! Les dimensions `partner`, `share`, `analysis`, `analysis2` existent dans
-//! `fact_entry` mais sont volontairement **hors grain** : une clôture est un
-//! solde agrégé, pas une écriture détaillée (l'interco / l'analyse n'a pas de
-//! sens sur un solde de clôture).
+//! La dimension `flow` est **hors grain** : la clôture est identifiée par
+//! `fl.flux_de_report` (qui vaut F99 pour tous les constituants reportant à F99),
+//! donc le `GROUP BY` porte sur `fl.flux_de_report` plutôt que sur `e.flow`.
 //!
-//! **À chaque ajout de dimension** (ex. `Nature` à venir, puis éventuellement
-//! d'autres), se poser la question :
+//! Les dimensions analytiques (`partner`, `share`, `analysis`, `analysis2` + customs)
+//! sont volontairement **hors grain** : une clôture est un solde agrégé, pas une
+//! écriture détaillée (l'interco / l'analyse n'a pas de sens sur un solde de clôture).
+//!
+//! **À chaque ajout de dimension** (custom comprise), se poser la question :
 //!
 //! > *Deux clôtures qui ne diffèrent que par cette dimension sont-elles des soldes
 //! > distincts ?*
 //!
 //! - **Oui** (ex. `Nature` « liasse » vs « ajustement » : ce sont des clôtures
-//!   différentes) → la dimension **entre dans le grain**. Il faut alors l'ajouter
-//!   aux **deux** endroits repérés par le marqueur `// GRAIN` dans le SQL ci-dessous
-//!   (le `GROUP BY` + `SELECT` de l'INSERT, **et** la clause de match du DELETE).
-//!   Sinon l'écrasement serait trop large (une reconstruction sur un code nature
-//!   écraserait aussi celle d'un autre code nature).
+//!   différentes) → la dimension **entre dans le grain**. Comme les customs sont
+//!   `Analytical` par construction, elles n'y entrent pas par défaut ; il faudrait
+//!   ajuster `closure_grain_cols` ou la logique de filtrage.
 //! - **Non** → ne pas l'ajouter : la dimension sera agrégée (somme) dans la clôture,
 //!   ce qui n'a de sens que si elle est nulle ou constante pour les flux concernés.
-//!
-//! Mettre à jour le grain documenté ci-dessus à chaque évolution.
 
+use crate::dimensions;
 use duckdb::Connection;
 
 /// # Reconstruction des clôtures (DELETE ciblé puis INSERT).
@@ -68,55 +68,66 @@ use duckdb::Connection;
 /// 2. **INSERT** : agrège les composantes au grain et écrit une ligne de clôture
 ///    par (clôture × grain).
 pub fn materialize_closures(con: &Connection, level: &str) -> duckdb::Result<usize> {
+    let dims = dimensions::load_all(con)?;
+    // Grain de reconstruction = Fixed + Active, sans `flow` (la clôture est
+    // identifiée par `fl.flux_de_report`, pas par le flux source).
+    let grain_cols: Vec<&str> = dimensions::closure_grain_cols(&dims)
+        .into_iter()
+        .filter(|c| *c != "flow")
+        .collect();
+    let grain_list = grain_cols.join(", ");
+    let e_grain_list = grain_cols
+        .iter()
+        .map(|c| format!("e.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let fe_grain_match = grain_cols
+        .iter()
+        .map(|c| format!("e.{c} = fe.{c}"))
+        .collect::<Vec<_>>()
+        .join("\n        AND ");
+
     // 1) DELETE ciblé — écrasement au grain seulement.
     con.execute(
-        "\
-DELETE FROM fact_entry fe
-WHERE fe.level = ?
-  AND fe.flow IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)
-  AND EXISTS (
-      SELECT 1
-      FROM fact_entry e
-      JOIN dim_flow fl ON fl.code = e.flow
-      WHERE e.level = ?
-        AND fl.flux_de_report = fe.flow
-        AND e.flow <> fl.flux_de_report
-        AND e.scenario      = fe.scenario
-        AND e.entity        = fe.entity
-        AND e.entry_period  = fe.entry_period
-        AND e.period        = fe.period
-        AND e.account       = fe.account
-        AND e.currency      = fe.currency
-        AND e.nature        = fe.nature
-        -- GRAIN : ajouter ici `AND e.<nouvelle_dim> = fe.<nouvelle_dim>`
-        --        pour toute dimension devant entrer dans le grain de clôture.
-        --        Voir doc d'en-tête.
-  );",
+        &format!(
+            "\
+DELETE FROM fact_entry fe\n\
+WHERE fe.level = ?\n\
+  AND fe.flow IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)\n\
+  AND EXISTS (\n\
+      SELECT 1\n\
+      FROM fact_entry e\n\
+      JOIN dim_flow fl ON fl.code = e.flow\n\
+      WHERE e.level = ?\n\
+        AND fl.flux_de_report = fe.flow\n\
+        AND e.flow <> fl.flux_de_report\n\
+        AND {fe_grain_match}\n\
+  );"
+        ),
         [level, level],
     )?;
 
     // 2) INSERT de la reconstruction, agrégée au grain.
     con.execute(
-        "\
-INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
-SELECT
-    e.scenario, e.entity, e.entry_period, e.period, e.account,
-    fl.flux_de_report AS flow,
-    e.currency,
-    e.nature,
-    ?                AS level,
-    SUM(e.amount)    AS amount
-FROM fact_entry e
-JOIN dim_flow fl ON fl.code = e.flow
-WHERE e.level = ?
-  AND fl.flux_de_report IS NOT NULL
-  AND e.flow <> fl.flux_de_report
-  -- On ne reconstruit que les flux de clôture (auto-référentiels) :
-  AND fl.flux_de_report IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)
-GROUP BY
-    e.scenario, e.entity, e.entry_period, e.period, e.account, e.currency,
-    e.nature, fl.flux_de_report;",
+        &format!(
+            "\
+INSERT INTO fact_entry\n\
+    ({grain_list}, flow, level, amount)\n\
+SELECT\n\
+    {e_grain_list},\n\
+    fl.flux_de_report AS flow,\n\
+    ?                AS level,\n\
+    SUM(e.amount)    AS amount\n\
+FROM fact_entry e\n\
+JOIN dim_flow fl ON fl.code = e.flow\n\
+WHERE e.level = ?\n\
+  AND fl.flux_de_report IS NOT NULL\n\
+  AND e.flow <> fl.flux_de_report\n\
+  -- On ne reconstruit que les flux de clôture (auto-référentiels) :\n\
+  AND fl.flux_de_report IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)\n\
+GROUP BY\n\
+    {e_grain_list}, fl.flux_de_report;"
+        ),
         [level, level],
     )?;
 

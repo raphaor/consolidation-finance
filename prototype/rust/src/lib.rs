@@ -38,6 +38,7 @@
 //! Aujourd'hui seule F99 est une clôture ; la logique est générique et pilotée
 //! par `dim_flow.flux_de_report`.
 
+pub mod dimensions;
 pub mod import;
 pub mod loader;
 pub mod masterdata;

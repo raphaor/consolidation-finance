@@ -19,9 +19,17 @@
 //! # Sécurité SQL
 //!
 //! Les noms de colonnes (`selection.dim`, `scope.dim`, clés de `destination`,
-//! `level`) sont validés contre des whitelists statiques : aucun identifiant
+//! `level`) sont validés contre des whitelists : aucun identifiant
 //! n'est interpolé depuis l'utilisateur. Les valeurs passent par des `?`
 //! paramétrés.
+//!
+//! Les whitelists `selection.dim` et `destination.<dim>` sont **dynamiques** :
+//! elles sont calculées depuis le registre central des dimensions
+//! ([`crate::dimensions`]) au début de chaque exécution d'un ruleset. Les
+//! dimensions built-in (12) et les dimensions custom (ajoutées par
+//! l'utilisateur via l'API) y figurent toutes. Les noms de colonnes custom
+//! proviennent du registre (créés via l'API et validés à la création), jamais
+//! du JSON de la règle → pas de risque d'injection SQL via ces noms.
 //!
 //! # Reconstruction des clôtures
 //!
@@ -29,6 +37,7 @@
 //! pour chaque niveau touché : les F99 sont reconstruites depuis leurs
 //! constituants (y compris les nouvelles écritures générées par la règle).
 
+use crate::dimensions;
 use crate::pipeline::materialize_closures::materialize_closures;
 use duckdb::{params_from_iter, types::Value as DbValue, Connection};
 use serde::Serialize;
@@ -42,23 +51,6 @@ use std::collections::BTreeSet;
 /// Niveaux de stockage autorisés pour la sélection / l'écriture.
 const ALLOWED_LEVELS: &[&str] = &["corporate", "reclassified", "converted", "consolidated"];
 
-/// Colonnes de `fact_entry` autorisées dans `selection.dim`.
-const ALLOWED_SELECTION_DIMS: &[&str] = &[
-    "scenario",
-    "entity",
-    "entry_period",
-    "period",
-    "account",
-    "flow",
-    "currency",
-    "nature",
-    "partner",
-    "share",
-    "analysis",
-    "analysis2",
-    "level",
-];
-
 /// Colonnes de `sat_perimeter` autorisées dans `scope.dim`.
 const ALLOWED_SCOPE_DIMS: &[&str] = &[
     "methode",
@@ -68,14 +60,49 @@ const ALLOWED_SCOPE_DIMS: &[&str] = &[
     "sortie",
 ];
 
-/// Dimensions pilotables via `destination`. Les autres sont toujours héritées.
-const PILOTABLE_DIMS: &[&str] = &["entity", "account", "flow", "nature", "partner", "share"];
-
 /// Cibles autorisées pour `scope.target`.
 const ALLOWED_TARGETS: &[&str] = &["entity", "partner"];
 
 /// Opérateurs acceptés sur les conditions (scope et sélection).
 const ALLOWED_OPS: &[&str] = &["=", "!=", ">", "<", ">=", "<=", "IN", "IS NULL", "IS NOT NULL"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Contexte de parsing dynamique (registre des dimensions)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Contexte de validation construit depuis le registre des dimensions et
+/// passé aux fonctions de parsing.
+///
+/// - `selection_dims` : toutes les dimensions propagées + `level` (qui est une
+///   colonne de `fact_entry` sans être une dimension pilotable). Construit
+///   dynamiquement depuis [`dimensions::load_all`].
+/// - `pilotable_dims` : dimensions pilotables (Active + Analytical), cibles
+///   autorisées pour `destination.<dim>`.
+#[derive(Debug, Clone)]
+pub struct RuleContext {
+    pub selection_dims: Vec<String>,
+    pub pilotable_dims: Vec<String>,
+}
+
+impl RuleContext {
+    /// Construit le contexte depuis le registre des dimensions (built-in +
+    /// custom). `level` est ajouté manuellement à `selection_dims` (c'est une
+    /// colonne de `fact_entry`, pas une dimension au sens du registre).
+    pub fn from_registry(con: &Connection) -> Result<Self, duckdb::Error> {
+        let dims = dimensions::load_all(con)?;
+        let mut selection_dims: Vec<String> =
+            dims.iter().map(|d| d.name.clone()).collect();
+        selection_dims.push("level".to_string());
+        let pilotable_dims: Vec<String> = dimensions::pilotable_cols(&dims)
+            .into_iter()
+            .map(String::from)
+            .collect();
+        Ok(Self {
+            selection_dims,
+            pilotable_dims,
+        })
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Report
@@ -171,7 +198,7 @@ struct Destination {
 //  Parsing JSON → structures fortement typées
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn parse_definition(json: &str) -> RuleResult_<Definition> {
+fn parse_definition(json: &str, ctx: &RuleContext) -> RuleResult_<Definition> {
     let v: JsonValue = serde_json::from_str(json)
         .map_err(|e| format!("définition JSON invalide : {e}"))?;
     let obj = v
@@ -192,7 +219,7 @@ fn parse_definition(json: &str) -> RuleResult_<Definition> {
     let operations = match obj.get("operations") {
         Some(JsonValue::Array(a)) => a
             .iter()
-            .map(parse_operation)
+            .map(|v| parse_operation(v, ctx))
             .collect::<RuleResult_<Vec<_>>>()?,
         Some(_) => return Err("operations doit être un tableau".into()),
         None => return Err("operations manquant".into()),
@@ -235,7 +262,7 @@ fn parse_scope_cond(v: &JsonValue) -> RuleResult_<ScopeCond> {
     Ok(ScopeCond { target, dim, op, val })
 }
 
-fn parse_operation(v: &JsonValue) -> RuleResult_<Operation> {
+fn parse_operation(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Operation> {
     let obj = v
         .as_object()
         .ok_or("each operation doit être un objet")?;
@@ -251,7 +278,7 @@ fn parse_operation(v: &JsonValue) -> RuleResult_<Operation> {
         None | Some(JsonValue::Null) => Vec::new(),
         Some(JsonValue::Array(a)) => a
             .iter()
-            .map(parse_selection_cond)
+            .map(|v| parse_selection_cond(v, ctx))
             .collect::<RuleResult_<Vec<_>>>()?,
         Some(_) => return Err("selection doit être un tableau".into()),
     };
@@ -271,7 +298,7 @@ fn parse_operation(v: &JsonValue) -> RuleResult_<Operation> {
         Some(JsonValue::Object(map)) => {
             let mut out = Vec::with_capacity(map.len());
             for (k, v) in map {
-                if !PILOTABLE_DIMS.contains(&k.as_str()) {
+                if !ctx.pilotable_dims.contains(k) {
                     return Err(format!(
                         "destination.{k} n'est pas pilotable (dimension inconnue ou héritée par construction)"
                     ));
@@ -293,14 +320,15 @@ fn parse_operation(v: &JsonValue) -> RuleResult_<Operation> {
     })
 }
 
-fn parse_selection_cond(v: &JsonValue) -> RuleResult_<SelectionCond> {
+fn parse_selection_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<SelectionCond> {
     let obj = v
         .as_object()
         .ok_or("each selection item doit être un objet")?;
     let dim = expect_str(obj, "dim")?;
-    if !ALLOWED_SELECTION_DIMS.contains(&dim.as_str()) {
+    if !ctx.selection_dims.contains(&dim) {
         return Err(format!(
-            "selection.dim invalide : {dim} (attendu parmi {ALLOWED_SELECTION_DIMS:?})"
+            "selection.dim invalide : {dim} (attendu parmi {:?})",
+            ctx.selection_dims
         ));
     }
     let op = expect_str(obj, "op")?;
@@ -476,13 +504,33 @@ fn format_float(v: f64) -> String {
 
 /// Construit et exécute l'INSERT d'une opération, renvoie le nombre de lignes
 /// générées.
+///
+/// Le SELECT liste toutes les dimensions propagées (built-in + custom) dans
+/// l'ordre du registre, en appliquant les destinations. Les paramètres `?`
+/// sont poussés dans l'ordre textuel suivant :
+///
+/// 1. Pour chaque dim propagated (sauf `analysis2`) : si `destination.<dim>`
+///    est `override`, un `?` est poussé.
+/// 2. `analysis2` : `?` (toujours, tag `RULE:{code}:{seq}`).
+/// 3. `level` : `?` (toujours).
+/// 4. Conditions des JOINs `sat_perimeter` (scope).
+/// 5. Conditions du WHERE (sélection).
 fn exec_operation(
     con: &Connection,
     rule_code: &str,
     op: &Operation,
     scope: &[ScopeCond],
+    ctx: &RuleContext,
 ) -> Result<usize, duckdb::Error> {
     let snap = format!("_rule_snap_{}", op.level);
+
+    // Noms des colonnes propagées = `selection_dims` privé de `level`.
+    let propagated: Vec<&str> = ctx
+        .selection_dims
+        .iter()
+        .filter(|s| s.as_str() != "level")
+        .map(|s| s.as_str())
+        .collect();
 
     // Pour savoir quels JOINs ajouter :
     //  - p_ent : si scope sur entity, ou coefficient pct_integration/pct_interet
@@ -493,40 +541,38 @@ fn exec_operation(
     let need_p_ent = scope_has_entity || coeff_needs_p_ent;
     let need_p_part = scope_has_partner;
 
-    // Analysis2 calculé (tag automatique RULE:{rule_code}:{seq}).
-    let analysis2 = format!("RULE:{rule_code}:{}", op.seq);
-
-    // Construction du SELECT (14 colonnes dans l'ordre fact_entry).
+    // Construction du SELECT et de la liste INSERT dans le même ordre.
+    // Chaque dim propagated devient une colonne du SELECT + une colonne INSERT.
+    // Sauf `analysis2` qui reçoit le tag RULE:{code}:{seq} inconditionnellement.
     let mut params: Vec<DbValue> = Vec::new();
-    let entity_dest = dest_expr("entity", &op.destination, &mut params);
-    let account_dest = dest_expr("account", &op.destination, &mut params);
-    let flow_dest = dest_expr("flow", &op.destination, &mut params);
-    let nature_dest = dest_expr("nature", &op.destination, &mut params);
-    let partner_dest = dest_expr("partner", &op.destination, &mut params);
-    let share_dest = dest_expr("share", &op.destination, &mut params);
+    let mut select_parts: Vec<String> = Vec::with_capacity(propagated.len() + 2);
+    let mut insert_parts: Vec<&str> = Vec::with_capacity(propagated.len() + 2);
+
+    for dim in &propagated {
+        insert_parts.push(dim);
+        if *dim == "analysis2" {
+            // Tag RULE:{code}:{seq} — inconditionnel (cf. doc d'en-tête).
+            select_parts.push("? AS analysis2".to_string());
+            params.push(DbValue::Text(format!("RULE:{rule_code}:{}", op.seq)));
+        } else {
+            let expr = dest_expr(dim, &op.destination, &mut params);
+            select_parts.push(format!("{expr} AS {dim}"));
+        }
+    }
+    insert_parts.push("level");
+    insert_parts.push("amount");
+    select_parts.push("? AS level".to_string());
+    params.push(DbValue::Text(op.level.clone()));
+    select_parts.push(format!(
+        "e.amount * {coeff_expr} * {mult} AS amount",
+        mult = format_float(op.multiplicateur),
+    ));
 
     let select_clause = format!(
-        "SELECT\n    \
-            e.scenario,\n    \
-            {entity_dest} AS entity,\n    \
-            e.entry_period,\n    \
-            e.period,\n    \
-            {account_dest} AS account,\n    \
-            {flow_dest} AS flow,\n    \
-            e.currency,\n    \
-            {nature_dest} AS nature,\n    \
-            {partner_dest} AS partner,\n    \
-            {share_dest} AS share,\n    \
-            e.analysis,\n    \
-            ? AS analysis2,\n    \
-            ? AS level,\n    \
-            e.amount * {coeff_expr} * {mult} AS amount\n\
-         FROM {snap} e",
-        mult = format_float(op.multiplicateur),
+        "SELECT\n    {}\n FROM {} e",
+        select_parts.join(",\n    "),
+        snap,
     );
-    // Analysis2 + level (bindés après les dest override, avant les conditions).
-    params.push(DbValue::Text(analysis2));
-    params.push(DbValue::Text(op.level.clone()));
 
     // JOINs sur sat_perimeter.
     let mut joins = String::new();
@@ -575,10 +621,11 @@ fn exec_operation(
 
     // Assemblage final.
     let sql = format!(
-        "INSERT INTO fact_entry\n    \
-            (scenario, entity, entry_period, period, account, flow,\n     \
-             currency, nature, partner, share, analysis, analysis2, level, amount)\n\
-         {select_clause}{joins}{where_clause}"
+        "INSERT INTO fact_entry\n    ({})\n{}{}{}",
+        insert_parts.join(", "),
+        select_clause,
+        joins,
+        where_clause,
     );
 
     let n = con.execute(&sql, params_from_iter(params.into_iter()))?;
@@ -614,6 +661,9 @@ fn duckdb_synthesis_error(msg: String) -> duckdb::Error {
 /// Les snapshots empêchent qu'une opération lise les lignes générées par une
 /// opération précédente (idempotence de la règle).
 pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport, duckdb::Error> {
+    // Contexte dynamique : whitelists calculées depuis le registre des dimensions.
+    let ctx = RuleContext::from_registry(con)?;
+
     // 1. Charger les règles du ruleset dans l'ordre.
     let rules: Vec<(String, String)> = {
         let mut stmt = con.prepare(
@@ -638,7 +688,7 @@ pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport
     let mut total_generated = 0usize;
 
     for (rule_code, definition_json) in &rules {
-        let definition = parse_definition(definition_json).map_err(duckdb_synthesis_error)?;
+        let definition = parse_definition(definition_json, &ctx).map_err(duckdb_synthesis_error)?;
 
         // Niveaux distincts touchés par les opérations de la règle.
         let levels: BTreeSet<&str> = definition
@@ -661,7 +711,7 @@ pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport
         let mut generated_per_level: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
         for op in &definition.operations {
-            let n = exec_operation(con, rule_code, op, &definition.scope)?;
+            let n = exec_operation(con, rule_code, op, &definition.scope, &ctx)?;
             *generated_per_level.entry(op.level.clone()).or_default() += n;
         }
 
