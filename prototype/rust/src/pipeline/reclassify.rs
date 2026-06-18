@@ -23,15 +23,15 @@ use duckdb::Connection;
 /// SQL de la reclassification de périmètre.
 const SQL_STEP_B: &str = "\
 INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+    (scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2, level, amount)
 SELECT
-    scenario, entity, entry_period, period, account, flow, currency, nature,
+    scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2,
     'reclassified' AS level,
     SUM(amount)    AS amount
 FROM (
     -- 1) Entités continues : copie à l'identique
     SELECT f.scenario, f.entity, f.entry_period, f.period, f.account,
-           f.flow, f.currency, f.nature, f.amount
+           f.flow, f.currency, f.nature, f.partner, f.share, f.analysis, f.analysis2, f.amount
     FROM fact_entry f
     JOIN sat_perimeter p
       ON p.entity = f.entity
@@ -46,7 +46,7 @@ FROM (
     -- 2) Entités entrantes : F00 → F01, autres flux inchangés
     SELECT f.scenario, f.entity, f.entry_period, f.period, f.account,
            CASE WHEN f.flow = 'F00' THEN 'F01' ELSE f.flow END AS flow,
-           f.currency, f.nature, f.amount
+           f.currency, f.nature, f.partner, f.share, f.analysis, f.analysis2, f.amount
     FROM fact_entry f
     JOIN sat_perimeter p
       ON p.entity = f.entity
@@ -62,7 +62,7 @@ FROM (
     --     (clôtures incluses : une clôture saisie transite, puis sera écrasée
     --      par la reconstruction au niveau reclassified).
     SELECT f.scenario, f.entity, f.entry_period, f.period, f.account,
-           f.flow, f.currency, f.nature, f.amount
+           f.flow, f.currency, f.nature, f.partner, f.share, f.analysis, f.analysis2, f.amount
     FROM fact_entry f
     JOIN sat_perimeter p
       ON p.entity = f.entity
@@ -80,7 +80,7 @@ FROM (
     --      comme F98 reporte à F99 (flux_de_report = 'F99'), l'identité
     --      F99 = F00 + F20 + … + F98 se referme à 0.
     SELECT f.scenario, f.entity, f.entry_period, f.period, f.account,
-           'F98' AS flow, f.currency, f.nature, -f.amount AS amount
+           'F98' AS flow, f.currency, f.nature, f.partner, f.share, f.analysis, f.analysis2, -f.amount AS amount
     FROM fact_entry f
     JOIN sat_perimeter p
       ON p.entity = f.entity
@@ -90,7 +90,7 @@ FROM (
       AND COALESCE(p.sortie, FALSE)
       AND f.flow IN (SELECT code FROM dim_flow WHERE code <> flux_de_report)
 ) rec
-GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature;";
+GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2;";
 
 /// Exécute l'étape B : reclassifie les flux selon les variations de périmètre.
 ///

@@ -17,19 +17,19 @@ use duckdb::Connection;
 /// dont le préfixe de nature correspond à `prefix` (un seul caractère '2'/'3'/'4').
 ///
 /// L'agrégation se fait par le grain standard (scenario, entity, entry_period,
-/// period, account, flow, currency, nature).
+/// period, account, flow, currency, nature, partner).
 ///
 /// Renvoie le nombre de lignes produites à ce niveau pour ce préfixe.
 pub fn inject_by_prefix(con: &Connection, level: &str, prefix: &str) -> duckdb::Result<usize> {
     let sql = format!(
         "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
-         SELECT scenario, entity, entry_period, period, account, flow, currency, nature,
+            (scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2, level, amount)
+         SELECT scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2,
                 '{level}' AS level,
                 SUM(amount) AS amount
          FROM stg_entry
          WHERE substr(nature, 1, 1) = '{prefix}'
-         GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature"
+         GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2"
     );
     con.execute(&sql, [])?;
     let n: i64 = con.query_row(

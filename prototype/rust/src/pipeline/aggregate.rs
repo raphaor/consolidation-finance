@@ -3,10 +3,12 @@
 //! Miroir de `conso/pipeline.py::step_a_aggregate`.
 //!
 //! Cumul des écritures source par entité. Lit la saisie brute (`stg_entry`),
-//! agrège par (scenario, entity, entry_period, period, account, flow, currency, nature)
-//! et stocke au niveau *corporate* (en devise fonctionnelle). La nature fait
-//! partie du grain d'agrégation : deux écritures de natures différentes ne sont
-//! jamais agrégées.
+//! agrège par (scenario, entity, entry_period, period, account, flow, currency,
+//! nature, partner) et stocke au niveau *corporate* (en devise fonctionnelle).
+//! La nature fait partie du grain d'agrégation : deux écritures de natures
+//! différentes ne sont jamais agrégées. La dimension `partner` est également
+//! préservée au grain : deux écritures interco sur des partenaires distincts
+//! restent séparées (nécessaire pour les règles d'élimination interco).
 //!
 //! **Staging par nature** : seules les écritures de préfixe `0` ou `1` passent
 //! par l'étape A. Les préfixes `2`, `3`, `4` sont injectés directement à leur
@@ -25,14 +27,14 @@ use duckdb::Connection;
 /// SQL de l'agrégation corporate.
 const SQL_STEP_A: &str = "\
 INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+    (scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2, level, amount)
 SELECT
-    scenario, entity, entry_period, period, account, flow, currency, nature,
+    scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2,
     'corporate' AS level,
     SUM(amount) AS amount
 FROM stg_entry
 WHERE substr(nature, 1, 1) IN ('0', '1')
-GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature;";
+GROUP BY scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2;";
 
 /// Exécute l'étape A : agrège les écritures brutes au niveau corporate.
 ///

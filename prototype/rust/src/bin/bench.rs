@@ -257,7 +257,7 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
         "
         INSERT INTO stg_entry
             (scenario, entity, entry_period, period, account, flow, currency, nature,
-             partner, share, analysis, audit_id, amount)
+             partner, share, analysis, analysis2, amount)
         WITH gen AS (
             SELECT g.i,
                    g.i % {N_ENTITIES}                         AS ent_rn,

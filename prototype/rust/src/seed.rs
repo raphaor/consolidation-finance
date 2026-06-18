@@ -133,7 +133,7 @@ const RATES: &[((&str, &str), (Option<Decimal>, Option<Decimal>))] = &[
 
 /// Ligne de saisie brute :
 /// (scenario, entity, entry_period, period, account, flow, currency, nature,
-///  partner, share, analysis, audit_id, amount).
+///  partner, share, analysis, analysis2, amount).
 type RawRow = (&'static str, &'static str, &'static str, &'static str,
                &'static str, &'static str, &'static str, &'static str,
                Option<&'static str>, Option<&'static str>, Option<&'static str>,

@@ -135,29 +135,39 @@ fn pipeline_produit_les_bons_comptes_par_niveau() {
     // Comptages justifiés par le seed (cf. src/seed.rs). Rappel du périmètre :
     //   M = continu (EUR), A = entrante (USD), B = sortante (GBP) ; globale 100%.
     //
-    //   - corporate (A) = 31 : M=11 (4 F00 + 7 F20), A=10, B=10 (la saisie ne
-    //     contient que F00/F20 en mode écriture).
+    //   Le grain d'agrégation inclut partner/share/analysis/analysis2 : deux
+    //   écritures qui ne diffèrent que par analysis2 (ex-S-M-003/004 sur le
+    //   F20 du compte 400 de M) ne sont plus agrégées.
     //
-    //   - reclassified (B) : M copie (11), A entrante F00→F01 (10), B sortante
-    //     passe F00/F20 à l'identique + génère un miroir −X sur F98 par
-    //     constituant → 18 (3 F00 + 7 F20 + 8 F98 agrégés par compte).
-    //     Sous-total = 11 + 10 + 18 = 39. Puis on materialise F99 (25 lignes :
+    //   - corporate (A) = 32 : M=12 (4 F00 + 8 F20 — le F20/400 éclaté en 2
+    //     lignes analysis2 distinctes), A=10, B=10 (la saisie ne contient que
+    //     F00/F20 en mode écriture).
+    //
+    //   - reclassified (B) : M copie (12), A entrante F00→F01 (10), B sortante
+    //     passe F00/F20 à l'identique (10) + génère un miroir −X sur F98 par
+    //     constituant → 10 (les miroirs ne sont plus agrégés par compte, car
+    //     analysis2 diffère pour 400 et 200 : on avait 8 agrégés, on a 10).
+    //     Sous-total = 12 + 10 + 20 = 42. Puis on materialise F99 (25 lignes :
     //     M 9 comptes, A 8, B 8 — dont 8 lignes à 0 pour la sortante).
-    //     Total reclassified = 39 + 25 = 64.
+    //     Total reclassified = 42 + 25 = 67.
     //
     //   - converted (C) : on convertit TOUTES les lignes reclassifiées
-    //     (clôtures F99 comprises) = 64. A (USD) ET B (GBP) génèrent des écarts
-    //     (F00→F80, F20→F81) : 3 F80 + 7 F81 chacun, soit 20 écarts. Puis
+    //     (clôtures F99 comprises) = 67. A (USD) ET B (GBP) génèrent des écarts
+    //     (F01→F80, F20→F81) : 3 F80 + 7 F81 chacun, soit 20 écarts. Puis
     //     materialize(converted) écrase le F99 porté par la reconstruction
-    //     (compte net nul). Total = 64 + 20 = 84.
+    //     (compte net nul). Total = 67 + 20 = 87.
     //
     //   - consolidated (D) : on consolide TOUTES les lignes converted
-    //     (clôtures comprises, pct appliqué), = 84, puis materialize(consolidated)
-    //     écrase le F99 porté. Total = 84.
-    assert_eq!(level_count(&con, "corporate"), 31, "niveau corporate");
-    assert_eq!(level_count(&con, "reclassified"), 64, "niveau reclassified");
-    assert_eq!(level_count(&con, "converted"), 84, "niveau converted");
-    assert_eq!(level_count(&con, "consolidated"), 84, "niveau consolidated");
+    //     (clôtures comprises, pct appliqué), = 87, puis materialize(consolidated)
+    //     écrase le F99 porté. Total = 87.
+    let corp = level_count(&con, "corporate");
+    let recl = level_count(&con, "reclassified");
+    let conv = level_count(&con, "converted");
+    let cons = level_count(&con, "consolidated");
+    assert_eq!(corp, 32, "niveau corporate");
+    assert_eq!(recl, 67, "niveau reclassified");
+    assert_eq!(conv, 87, "niveau converted");
+    assert_eq!(cons, 87, "niveau consolidated");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -608,14 +618,14 @@ fn check_natures_detecte_nature_manquante_et_inconnue() {
 
     // Une écriture sans nature (NULL via colonne omise → on UPDATE à NULL/Vide).
     con.execute(
-        "UPDATE stg_entry SET nature = '' WHERE audit_id = 'S-M-001'",
+        "UPDATE stg_entry SET nature = '' WHERE analysis2 = 'S-M-001'",
         [],
     )
     .expect("update nature vide");
 
     // Une écriture avec une nature inconnue de dim_nature.
     con.execute(
-        "UPDATE stg_entry SET nature = 'XNOPE' WHERE audit_id = 'S-M-002'",
+        "UPDATE stg_entry SET nature = 'XNOPE' WHERE analysis2 = 'S-M-002'",
         [],
     )
     .expect("update nature inconnue");

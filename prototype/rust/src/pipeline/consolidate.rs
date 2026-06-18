@@ -19,9 +19,9 @@ use duckdb::Connection;
 /// SQL de la consolidation (application des méthodes).
 const SQL_STEP_D: &str = "\
 INSERT INTO fact_entry
-    (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+    (scenario, entity, entry_period, period, account, flow, currency, nature, partner, share, analysis, analysis2, level, amount)
 SELECT
-    f.scenario, f.entity, f.entry_period, f.period, f.account, f.flow, f.currency, f.nature,
+    f.scenario, f.entity, f.entry_period, f.period, f.account, f.flow, f.currency, f.nature, f.partner, f.share, f.analysis, f.analysis2,
     'consolidated' AS level,
     f.amount * COALESCE(p.pct_integration, 1.0) AS amount
 FROM fact_entry f

@@ -30,9 +30,10 @@
 //!
 //! Grain actuel : `(scenario, entity, entry_period, period, account, currency, nature)`.
 //!
-//! Les dimensions `partner`, `share`, `analysis` existent dans `fact_entry` mais
-//! sont volontairement **hors grain** : une clôture est un solde agrégé, pas une
-//! écriture détaillée (l'interco / l'analyse n'a pas de sens sur un solde de clôture).
+//! Les dimensions `partner`, `share`, `analysis`, `analysis2` existent dans
+//! `fact_entry` mais sont volontairement **hors grain** : une clôture est un
+//! solde agrégé, pas une écriture détaillée (l'interco / l'analyse n'a pas de
+//! sens sur un solde de clôture).
 //!
 //! **À chaque ajout de dimension** (ex. `Nature` à venir, puis éventuellement
 //! d'autres), se poser la question :

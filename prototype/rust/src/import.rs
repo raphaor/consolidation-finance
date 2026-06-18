@@ -98,7 +98,7 @@ async fn import_entries(
         "flow",
         "currency",
         "nature",
-        "audit_id",
+        "analysis2",
         "amount",
     ];
     require_columns(&header, required)?;
@@ -112,10 +112,10 @@ async fn import_entries(
     let path = escape_csv_path(&tmp.display().to_string());
     let sql = format!(
         "INSERT INTO stg_entry \
-         (scenario, entity, entry_period, period, account, flow, currency, nature, \
-          partner, share, analysis, audit_id, amount) \
-         SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
-                {partner}, {share}, {analysis}, audit_id, amount \
+          (scenario, entity, entry_period, period, account, flow, currency, nature, \
+           partner, share, analysis, analysis2, amount) \
+          SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
+                 {partner}, {share}, {analysis}, analysis2, amount \
          FROM read_csv_auto('{path}', header=true)"
     );
 

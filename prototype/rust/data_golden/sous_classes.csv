@@ -1,0 +1,5 @@
+code,libelle,classe
+actif,Actif,bilan
+passif,Passif,bilan
+charges,Charges,resultat
+produits,Produits,resultat

@@ -140,7 +140,7 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
         &format!(
             "INSERT INTO stg_entry \
              SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
-                    partner, share, analysis, audit_id, amount \
+                    partner, share, analysis, analysis2, amount \
              FROM read_csv_auto('{}')",
             csv_path("entries.csv")
         ),

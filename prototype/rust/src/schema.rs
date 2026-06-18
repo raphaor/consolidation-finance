@@ -156,6 +156,38 @@ CREATE TABLE sat_exchange_rate (
     PRIMARY KEY (currency_source, period)
 );";
 
+// --- Règles de consolidation (bibliothèque + jeux) -----------------------------
+
+/// 8b. dim_rule : bibliothèque centrale des règles de consolidation.
+///
+/// `definition` contient un JSON décrivant le scope (conditions sur le périmètre)
+/// et les opérations à appliquer (sélection, coefficient, multiplicateur,
+/// destination). Cf. `rules::run_ruleset` pour l'exécution.
+pub const DDL_DIM_RULE: &str = "\
+CREATE TABLE dim_rule (
+    code        TEXT PRIMARY KEY,
+    libelle     TEXT,
+    definition  TEXT          -- JSON : scope + operations
+);";
+
+/// 8c. dim_ruleset : jeu de règles ordonné (références vers dim_rule).
+pub const DDL_DIM_RULESET: &str = "\
+CREATE TABLE dim_ruleset (
+    code        TEXT PRIMARY KEY,
+    libelle     TEXT
+);";
+
+/// 8d. dim_ruleset_item : items ordonnés d'un jeu (lien vers dim_rule).
+///
+/// La PK (ruleset_code, ordre) garantit l'unicité de l'ordre dans un jeu.
+pub const DDL_DIM_RULESET_ITEM: &str = "\
+CREATE TABLE dim_ruleset_item (
+    ruleset_code TEXT,
+    ordre        INTEGER,
+    rule_code    TEXT,
+    PRIMARY KEY (ruleset_code, ordre)
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — même structure que fact_entry sans la colonne `level`.
@@ -172,7 +204,7 @@ CREATE TABLE stg_entry (
     partner      TEXT,
     share        TEXT,
     analysis     TEXT,
-    audit_id     TEXT,
+    analysis2    TEXT,
     amount       DECIMAL(18,2)
 );";
 
@@ -193,7 +225,7 @@ CREATE TABLE fact_entry (
     partner      TEXT,
     share        TEXT,
     analysis     TEXT,
-    audit_id     TEXT,
+    analysis2    TEXT,
     level        TEXT CHECK (level IN ('corporate', 'reclassified', 'converted', 'consolidated')),
     amount       DECIMAL(18,2),
     PRIMARY KEY (id)
@@ -216,6 +248,9 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_NATURE,
     DDL_SAT_PERIMETER,
     DDL_SAT_EXCHANGE_RATE,
+    DDL_DIM_RULE,
+    DDL_DIM_RULESET,
+    DDL_DIM_RULESET_ITEM,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];
@@ -227,6 +262,9 @@ pub const ALL_DDL: &[&str] = &[
 pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS fact_entry;",
     "DROP TABLE IF EXISTS stg_entry;",
+    "DROP TABLE IF EXISTS dim_ruleset_item;",
+    "DROP TABLE IF EXISTS dim_ruleset;",
+    "DROP TABLE IF EXISTS dim_rule;",
     "DROP TABLE IF EXISTS sat_exchange_rate;",
     "DROP TABLE IF EXISTS sat_perimeter;",
     "DROP TABLE IF EXISTS dim_nature;",

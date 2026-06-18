@@ -1,0 +1,5 @@
+currency_source,period,taux_close,taux_moyen
+USD,2023,0.92,
+USD,2024,0.90,0.95
+GBP,2023,1.15,
+GBP,2024,1.12,1.18

@@ -44,6 +44,7 @@ pub mod masterdata;
 pub mod money;
 pub mod pipeline;
 pub mod report;
+pub mod rules;
 pub mod schema;
 pub mod seed;
 pub mod state;
@@ -52,6 +53,7 @@ pub mod validate;
 // Ré-exports pour faciliter l'usage depuis le binaire.
 pub use loader::load_all;
 pub use pipeline::{run_pipeline, ConvertParams};
+pub use rules::run_ruleset;
 pub use schema::create_schema;
 pub use seed::seed_all;
 pub use state::AppState;
