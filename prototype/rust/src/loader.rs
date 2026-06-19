@@ -15,7 +15,7 @@
 //! | `entities.csv`              | `dim_entity`             | lecture directe                    |
 //! | `periods.csv`               | `dim_period`             | lecture directe                    |
 //! | `sous_classes.csv`          | `dim_sous_classe`        | lecture directe                    |
-//! | `accounts.csv`              | `dim_account`            | lecture directe                    |
+//! | `accounts.csv`              | `dim_account`            | schéma explicite + null_padding    |
 //! | `flows.csv`                 | `dim_flow`               | lecture directe                    |
 //! | `currencies.csv`            | `dim_currency`           | CAST `decimales` AS INTEGER        |
 //! | `natures.csv`               | `dim_nature`             | lecture directe                    |
@@ -28,175 +28,265 @@
 //! L'ordre d'insertion respecte les FK logiques (cf. schema.rs commentaire
 //! `ALL_DDL`) : `app_config` et `dim_rate_set` avant `sat_exchange_rate` ;
 //! `dim_scenario_category`, `dim_variant` avant `dim_scenario`.
+//!
+//! # Registre déclaratif
+//!
+//! La fonction [`load_all`] itère sur [`CSV_MAPPINGS`], un tableau `const`
+//! ordonné selon les dépendances FK. Chaque entrée décrit un mapping
+//! fichier → table → colonnes (+ casts éventuels). Ajouter un CSV = ajouter
+//! une ligne au registre, sans toucher au code de génération SQL.
 
 use duckdb::Connection;
 use std::path::Path;
 
+/// Description d'un chargement CSV → table.
+///
+/// - `columns` : colonnes sélectionnées **dans l'ordre du SELECT** (et de la
+///   table cible). Doivent correspondre aux en-têtes du fichier, sauf si
+///   `use_explicit_schema` est activé (auquel cas l'ordre vient du dictionnaire
+///   `columns={...}` passé au lecteur DuckDB).
+/// - `casts` : paires `(colonne, type_sql)` pour les colonnes que
+///   `read_csv_auto` peut mal inférer (BOOLEAN, INTEGER). Les autres colonnes
+///   sont lues telles quelles.
+/// - `use_explicit_schema` : quand `true`, on utilise `read_csv(..., columns={...})`
+///   avec toutes les colonnes typées en `VARCHAR`, `header=true`, `delim=','`
+///   et `null_padding=true`. Cas unique : `accounts.csv` (lignes incomplètes
+///   en queue de fichier → `null_padding` obligatoire).
+struct CsvMapping {
+    file: &'static str,
+    table: &'static str,
+    columns: &'static [&'static str],
+    casts: &'static [(&'static str, &'static str)],
+    use_explicit_schema: bool,
+}
+
+/// Registre ordonné des mappings CSV → table.
+///
+/// L'ordre suit les dépendances FK logiques (cf. `ALL_DDL` dans schema.rs) :
+/// `app_config` et `dim_rate_set` avant `sat_exchange_rate` ;
+/// `dim_scenario_category`, `dim_variant` avant `dim_scenario`.
+static CSV_MAPPINGS: &[CsvMapping] = &[
+    // 1. app_config : singleton clé/valeur (ex: pivot_currency=EUR).
+    CsvMapping {
+        file: "app_config.csv",
+        table: "app_config",
+        columns: &["key", "value"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 2. dim_scenario_category : catégorie du scénario (REEL, BUDGET, ...).
+    CsvMapping {
+        file: "scenario_categories.csv",
+        table: "dim_scenario_category",
+        columns: &["code", "libelle"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 3. dim_variant : variante du scénario (réel, budget, ...).
+    CsvMapping {
+        file: "variants.csv",
+        table: "dim_variant",
+        columns: &["code", "libelle"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 4. dim_rate_set : jeu de taux (référencé par sat_exchange_rate).
+    CsvMapping {
+        file: "rate_sets.csv",
+        table: "dim_rate_set",
+        columns: &["code", "libelle"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 5. dim_scenario (v2) : 9 colonnes — category, entry_period,
+    //    presentation_currency, variant, ruleset_code (nullable), rate_set, statut.
+    CsvMapping {
+        file: "scenarios.csv",
+        table: "dim_scenario",
+        columns: &[
+            "code",
+            "libelle",
+            "category",
+            "entry_period",
+            "presentation_currency",
+            "variant",
+            "ruleset_code",
+            "rate_set",
+            "statut",
+        ],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 6. dim_entity : entités consolidées (devise, parent, statut).
+    CsvMapping {
+        file: "entities.csv",
+        table: "dim_entity",
+        columns: &["code", "libelle", "devise_fonctionnelle", "entite_parent", "statut"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 7. dim_period : périodes (type, bornes, statut).
+    CsvMapping {
+        file: "periods.csv",
+        table: "dim_period",
+        columns: &["code", "libelle", "type", "date_debut", "date_fin", "statut"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 8. dim_sous_classe : sous-classes de compte (réf. de dim_account).
+    CsvMapping {
+        file: "sous_classes.csv",
+        table: "dim_sous_classe",
+        columns: &["code", "libelle", "classe"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 9. dim_account : plan de compte. Schéma explicite + null_padding car le
+    //    fichier peut contenir des lignes incomplètes (compte_parent vide).
+    CsvMapping {
+        file: "accounts.csv",
+        table: "dim_account",
+        columns: &[
+            "code",
+            "libelle",
+            "classe",
+            "sous_classe",
+            "technical_grouping",
+            "compte_parent",
+        ],
+        casts: &[],
+        use_explicit_schema: true,
+    },
+    // 10. dim_flow : codes de flux (taux_conversion, flux_ecart, flux_de_report).
+    CsvMapping {
+        file: "flows.csv",
+        table: "dim_flow",
+        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 11. dim_currency : devises. CAST decimales AS INTEGER (sinon VARCHAR/SMALLINT).
+    CsvMapping {
+        file: "currencies.csv",
+        table: "dim_currency",
+        columns: &["code_iso", "libelle", "decimales"],
+        casts: &[("decimales", "INTEGER")],
+        use_explicit_schema: false,
+    },
+    // 12. dim_nature : natures de traitement (code, libelle, rules JSON).
+    CsvMapping {
+        file: "natures.csv",
+        table: "dim_nature",
+        columns: &["code", "libelle", "rules"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 13. sat_perimeter : périmètre de consolidation. CAST entree/sortie AS BOOLEAN.
+    CsvMapping {
+        file: "perimeter.csv",
+        table: "sat_perimeter",
+        columns: &[
+            "entity",
+            "scenario",
+            "period",
+            "methode",
+            "pct_interet",
+            "pct_integration",
+            "entree",
+            "sortie",
+        ],
+        casts: &[("entree", "BOOLEAN"), ("sortie", "BOOLEAN")],
+        use_explicit_schema: false,
+    },
+    // 14. sat_exchange_rate (v2) : `rate_set` en 1ère colonne (PK étendue).
+    CsvMapping {
+        file: "rates.csv",
+        table: "sat_exchange_rate",
+        columns: &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 15. stg_entry : saisie brute (liasses sociales) — 13 colonnes v2.
+    CsvMapping {
+        file: "entries.csv",
+        table: "stg_entry",
+        columns: &[
+            "scenario",
+            "entity",
+            "entry_period",
+            "period",
+            "account",
+            "flow",
+            "currency",
+            "nature",
+            "partner",
+            "share",
+            "analysis",
+            "analysis2",
+            "amount",
+        ],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+];
+
+/// Construit la clause `SELECT ... FROM <reader>` pour un mapping.
+///
+/// - Les colonnes sans cast sont sélectionnées telles quelles.
+/// - Les colonnes dans `casts` sont enveloppées dans `CAST(col AS TYPE)`.
+/// - Le lecteur est `read_csv_auto(...)` par défaut, ou `read_csv(...)` avec
+///   schéma explicite (toutes colonnes en VARCHAR) + `null_padding` quand
+///   `use_explicit_schema` est activé.
+///
+/// Le SQL produit est identique à celui des 15 INSERT historiques codés en dur.
+fn build_insert_sql(m: &CsvMapping, csv_path: &str) -> String {
+    let select_cols: Vec<String> = m
+        .columns
+        .iter()
+        .map(|col| match m.casts.iter().find(|(c, _)| c == col) {
+            Some((_, ty)) => format!("CAST({col} AS {ty})"),
+            None => (*col).to_string(),
+        })
+        .collect();
+
+    let reader = if m.use_explicit_schema {
+        let cols_dict: Vec<String> = m
+            .columns
+            .iter()
+            .map(|c| format!("'{c}':'VARCHAR'"))
+            .collect();
+        format!(
+            "read_csv('{csv_path}', auto_detect=false, columns={{{}}}, header=true, delim=',', null_padding=true)",
+            cols_dict.join(",")
+        )
+    } else {
+        format!("read_csv_auto('{csv_path}')")
+    };
+
+    format!(
+        "INSERT INTO {} SELECT {} FROM {}",
+        m.table,
+        select_cols.join(", "),
+        reader
+    )
+}
+
 /// Charge tous les CSV d'un répertoire dans les tables du schéma.
 ///
-/// Enchaîne 10 `INSERT ... SELECT ... FROM read_csv_auto(...)` en réutilisant
-/// l'inférence de types de DuckDB. Les CAST explicites (BOOLEAN, INTEGER)
-/// concernent les colonnes que `read_csv_auto` peut mal inférer (typiquement
-/// `true`/`false` vus comme VARCHAR, ou les entiers courts).
+/// Itère sur [`CSV_MAPPINGS`] (registre déclaratif ordonné selon les FK) et
+/// exécute le SQL généré par [`build_insert_sql`]. Réutilise l'inférence de
+/// types de DuckDB ; les CAST explicites (BOOLEAN, INTEGER) couvrent les
+/// colonnes que `read_csv_auto` peut mal inférer.
 ///
 /// # Erreurs
 ///
 /// Toute erreur DuckDB (fichier manquant, type incompatible) remonte
 /// immédiatement et interrompt le chargement.
 pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
-    // Construit le chemin d'un fichier du répertoire `data_dir` sous forme de
-    // chaîne, pour injection dans la clause `read_csv_auto('...')`.
-    let csv_path = |file: &str| data_dir.join(file).display().to_string();
-
-    // --- Config applicative + catalogues v2 (dépendances amont) ---
-    // app_config : singleton clé/valeur (ex: pivot_currency=EUR).
-    con.execute(
-        &format!(
-            "INSERT INTO app_config \
-             SELECT key, value \
-             FROM read_csv_auto('{}')",
-            csv_path("app_config.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_scenario_category \
-             SELECT code, libelle \
-             FROM read_csv_auto('{}')",
-            csv_path("scenario_categories.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_variant \
-             SELECT code, libelle \
-             FROM read_csv_auto('{}')",
-            csv_path("variants.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_rate_set \
-             SELECT code, libelle \
-             FROM read_csv_auto('{}')",
-            csv_path("rate_sets.csv")
-        ),
-        [],
-    )?;
-
-    // --- Dimensions (master data) ---
-    // dim_scenario v2 : 9 colonnes (category, entry_period, presentation_currency,
-    // variant, ruleset_code nullable, rate_set, statut).
-    con.execute(
-        &format!(
-            "INSERT INTO dim_scenario \
-             SELECT code, libelle, category, entry_period, presentation_currency, \
-                    variant, ruleset_code, rate_set, statut \
-             FROM read_csv_auto('{}')",
-            csv_path("scenarios.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_entity \
-             SELECT code, libelle, devise_fonctionnelle, entite_parent, statut \
-             FROM read_csv_auto('{}')",
-            csv_path("entities.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_period \
-             SELECT code, libelle, type, date_debut, date_fin, statut \
-             FROM read_csv_auto('{}')",
-            csv_path("periods.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_sous_classe \
-             SELECT code, libelle, classe \
-             FROM read_csv_auto('{}')",
-            csv_path("sous_classes.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_account \
-             SELECT code, libelle, classe, sous_classe, technical_grouping, compte_parent \
-             FROM read_csv('{}', auto_detect=false, columns={{'code':'VARCHAR','libelle':'VARCHAR','classe':'VARCHAR','sous_classe':'VARCHAR','technical_grouping':'VARCHAR','compte_parent':'VARCHAR'}}, header=true, delim=',', null_padding=true)",
-            csv_path("accounts.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_flow \
-             SELECT code, libelle, taux_conversion, flux_ecart, flux_de_report \
-             FROM read_csv_auto('{}')",
-            csv_path("flows.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_currency \
-             SELECT code_iso, libelle, CAST(decimales AS INTEGER) \
-             FROM read_csv_auto('{}')",
-            csv_path("currencies.csv")
-        ),
-        [],
-    )?;
-    con.execute(
-        &format!(
-            "INSERT INTO dim_nature \
-             SELECT code, libelle, rules \
-             FROM read_csv_auto('{}')",
-            csv_path("natures.csv")
-        ),
-        [],
-    )?;
-
-    // --- Tables satellites (règles de consolidation) ---
-    con.execute(
-        &format!(
-            "INSERT INTO sat_perimeter \
-             SELECT entity, scenario, period, methode, pct_interet, pct_integration, \
-                    CAST(entree AS BOOLEAN), CAST(sortie AS BOOLEAN) \
-             FROM read_csv_auto('{}')",
-            csv_path("perimeter.csv")
-        ),
-        [],
-    )?;
-    // sat_exchange_rate v2 : `rate_set` en 1ère colonne (PK étendue).
-    con.execute(
-        &format!(
-            "INSERT INTO sat_exchange_rate \
-             SELECT rate_set, currency_source, period, taux_close, taux_moyen \
-             FROM read_csv_auto('{}')",
-            csv_path("rates.csv")
-        ),
-        [],
-    )?;
-
-    // --- Staging (saisie brute — liasses sociales) ---
-    con.execute(
-        &format!(
-            "INSERT INTO stg_entry \
-             SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
-                    partner, share, analysis, analysis2, amount \
-             FROM read_csv_auto('{}')",
-            csv_path("entries.csv")
-        ),
-        [],
-    )?;
-
+    for m in CSV_MAPPINGS {
+        let csv_path = data_dir.join(m.file).display().to_string();
+        let sql = build_insert_sql(m, &csv_path);
+        con.execute(&sql, [])?;
+    }
     Ok(())
 }
