@@ -23,13 +23,15 @@
 //! n'est interpolé depuis l'utilisateur. Les valeurs passent par des `?`
 //! paramétrés.
 //!
-//! Les whitelists `selection.dim` et `destination.<dim>` sont **dynamiques** :
-//! elles sont calculées depuis le registre central des dimensions
-//! ([`crate::dimensions`]) au début de chaque exécution d'un ruleset. Les
-//! dimensions built-in (12) et les dimensions custom (ajoutées par
-//! l'utilisateur via l'API) y figurent toutes. Les noms de colonnes custom
-//! proviennent du registre (créés via l'API et validés à la création), jamais
-//! du JSON de la règle → pas de risque d'injection SQL via ces noms.
+//! Les whitelists `selection.dim`, `destination.<dim>` et `scope.dim` sont
+//! **dynamiques** : elles sont calculées depuis le registre central des
+//! dimensions ([`crate::dimensions`]) pour les deux premières, et depuis
+//! `information_schema` (colonnes de `sat_perimeter`) pour la troisième, au
+//! début de chaque exécution d'un ruleset. Les dimensions built-in (12) et les
+//! dimensions custom (ajoutées par l'utilisateur via l'API) y figurent toutes.
+//! Les noms de colonnes custom proviennent du registre (créés via l'API et
+//! validés à la création), jamais du JSON de la règle → pas de risque
+//! d'injection SQL via ces noms.
 //!
 //! # Reconstruction des clôtures
 //!
@@ -52,13 +54,31 @@ use std::collections::BTreeSet;
 const ALLOWED_LEVELS: &[&str] = &["corporate", "reclassified", "converted", "consolidated"];
 
 /// Colonnes de `sat_perimeter` autorisées dans `scope.dim`.
-const ALLOWED_SCOPE_DIMS: &[&str] = &[
-    "methode",
-    "pct_interet",
-    "pct_integration",
-    "entree",
-    "sortie",
-];
+///
+/// Calculées dynamiquement depuis `information_schema` (voir
+/// [`RuleContext::from_registry`]). Fallback codé dur ci-dessous si la table
+/// n'existe pas encore ou est vide.
+fn allowed_scope_dims(con: &Connection) -> Vec<String> {
+    con.prepare(
+        "SELECT column_name \
+         FROM information_schema.columns \
+         WHERE table_name = 'sat_perimeter' \
+         ORDER BY ordinal_position",
+    )
+    .and_then(|mut stmt| {
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<duckdb::Result<Vec<_>>>()
+    })
+    .unwrap_or_else(|_| {
+        vec![
+            "methode".into(),
+            "pct_interet".into(),
+            "pct_integration".into(),
+            "entree".into(),
+            "sortie".into(),
+        ]
+    })
+}
 
 /// Cibles autorisées pour `scope.target`.
 const ALLOWED_TARGETS: &[&str] = &["entity", "partner"];
@@ -78,10 +98,14 @@ const ALLOWED_OPS: &[&str] = &["=", "!=", ">", "<", ">=", "<=", "IN", "IS NULL",
 ///   dynamiquement depuis [`dimensions::load_all`].
 /// - `pilotable_dims` : dimensions pilotables (Active + Analytical), cibles
 ///   autorisées pour `destination.<dim>`.
+/// - `scope_dims` : colonnes de `sat_perimeter` autorisées dans `scope.dim`.
+///   Construit dynamiquement depuis `information_schema` (cf.
+///   [`allowed_scope_dims`]).
 #[derive(Debug, Clone)]
 pub struct RuleContext {
     pub selection_dims: Vec<String>,
     pub pilotable_dims: Vec<String>,
+    pub scope_dims: Vec<String>,
 }
 
 impl RuleContext {
@@ -97,9 +121,11 @@ impl RuleContext {
             .into_iter()
             .map(String::from)
             .collect();
+        let scope_dims = allowed_scope_dims(con);
         Ok(Self {
             selection_dims,
             pilotable_dims,
+            scope_dims,
         })
     }
 }
@@ -210,7 +236,7 @@ fn parse_definition(json: &str, ctx: &RuleContext) -> RuleResult_<Definition> {
         None | Some(JsonValue::Null) => Vec::new(),
         Some(JsonValue::Array(a)) => a
             .iter()
-            .map(parse_scope_cond)
+            .map(|v| parse_scope_cond(v, ctx))
             .collect::<RuleResult_<Vec<_>>>()?,
         Some(_) => return Err("scope doit être un tableau".into()),
     };
@@ -228,7 +254,7 @@ fn parse_definition(json: &str, ctx: &RuleContext) -> RuleResult_<Definition> {
     Ok(Definition { scope, operations })
 }
 
-fn parse_scope_cond(v: &JsonValue) -> RuleResult_<ScopeCond> {
+fn parse_scope_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<ScopeCond> {
     let obj = v
         .as_object()
         .ok_or("each scope item doit être un objet")?;
@@ -239,9 +265,10 @@ fn parse_scope_cond(v: &JsonValue) -> RuleResult_<ScopeCond> {
         ));
     }
     let dim = expect_str(obj, "dim")?;
-    if !ALLOWED_SCOPE_DIMS.contains(&dim.as_str()) {
+    if !ctx.scope_dims.contains(&dim) {
         return Err(format!(
-            "scope.dim invalide : {dim} (attendu parmi {ALLOWED_SCOPE_DIMS:?})"
+            "scope.dim invalide : {dim} (attendu parmi {:?})",
+            ctx.scope_dims
         ));
     }
     let op = expect_str(obj, "op")?;

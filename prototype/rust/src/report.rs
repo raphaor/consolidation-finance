@@ -11,8 +11,31 @@ use duckdb::Connection;
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 
-/// Ordre d'affichage des flux.
-pub const FLOW_ORDER: &[&str] = &["F00", "F01", "F20", "F80", "F81", "F98", "F99"];
+/// Ordre d'affichage des flux, lu depuis `dim_flow` (catalogue F00–F99).
+///
+/// Retombe sur une liste codée dur si `dim_flow` est vide ou introuvable
+/// (ex. base non encore seedée). Tri lexicographique des codes : F00 < F01 <
+/// F20 < F80 < F81 < F98 < F99, conforme à l'ordre logique du catalogue.
+pub fn flow_order(con: &Connection) -> Vec<String> {
+    con.query_row(
+        "SELECT string_agg(code, ',' ORDER BY code) FROM dim_flow",
+        [],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .map(|s| s.split(',').map(String::from).collect())
+    .unwrap_or_else(|| {
+        vec![
+            "F00".into(),
+            "F01".into(),
+            "F20".into(),
+            "F80".into(),
+            "F81".into(),
+            "F98".into(),
+            "F99".into(),
+        ]
+    })
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers de mise en forme
@@ -98,16 +121,17 @@ pub fn bilan_par_flux(con: &Connection, level: &str) -> duckdb::Result<()> {
     println!("{}", "═".repeat(88));
 
     let col_w = 13;
+    let flow_order = flow_order(con);
     print!("  {:<22}", "Compte");
-    for fl in FLOW_ORDER {
+    for fl in &flow_order {
         print!("{:>width$}", fl, width = col_w);
     }
     println!();
-    println!("  {}", "─".repeat(22 + col_w * FLOW_ORDER.len()));
+    println!("  {}", "─".repeat(22 + col_w * flow_order.len()));
 
     for acc in accounts {
         print!("  {:<22}", acc);
-        for fl in FLOW_ORDER {
+        for fl in &flow_order {
             let val = grid
                 .get(&(acc.clone(), fl.to_string()))
                 .copied()
@@ -142,12 +166,13 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
     println!("{}", "═".repeat(88));
 
     let col_w = 13;
+    let flow_order = flow_order(con);
     print!("  {:<28}", "Niveau");
-    for fl in FLOW_ORDER {
+    for fl in &flow_order {
         print!("{:>width$}", fl, width = col_w);
     }
     println!();
-    println!("  {}", "─".repeat(28 + col_w * FLOW_ORDER.len()));
+    println!("  {}", "─".repeat(28 + col_w * flow_order.len()));
 
     for lvl in levels {
         let mut stmt = con.prepare(
@@ -169,9 +194,9 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
 
         let label = level_desc.iter().find(|(l, _)| *l == lvl).unwrap().1;
         print!("  {:<28}", label);
-        for fl in FLOW_ORDER {
+        for fl in &flow_order {
             let val = grid
-                .get(&fl.to_string())
+                .get(fl)
                 .copied()
                 .unwrap_or(Decimal::ZERO);
             print!("{:>width$}", fmt_amount(val), width = col_w);
