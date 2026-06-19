@@ -19,6 +19,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::dimensions;
 use crate::state::{lock_con, AppError, AppState};
 
 fn escape_csv_path(p: &str) -> String {
@@ -89,38 +90,65 @@ async fn import_entries(
     }
     let (header_line, _header_end) = split_first_line(&bytes)?;
     let header = parse_header_line(&header_line);
-    let required = &[
-        "scenario",
-        "entity",
-        "entry_period",
-        "period",
-        "account",
-        "flow",
-        "currency",
-        "nature",
-        "analysis2",
-        "amount",
-    ];
-    require_columns(&header, required)?;
-    let has = |name: &str| header.iter().any(|h| h == name);
-    let partner = if has("partner") { "partner" } else { "NULL" };
-    let share = if has("share") { "share" } else { "NULL" };
-    let analysis = if has("analysis") { "analysis" } else { "NULL" };
+    // Colonnes required minimales (Fixed + Active + amount). Les dimensions
+    // Analytical (partner, share, analysis, analysis2 et toutes les customs)
+    // sont optionnelles : absentes du header, elles seront insérées à NULL.
+    require_columns(
+        &header,
+        &[
+            "scenario",
+            "entity",
+            "entry_period",
+            "period",
+            "account",
+            "flow",
+            "currency",
+            "nature",
+            "amount",
+        ],
+    )?;
 
     let tmp = unique_tmp_path("csv");
-    std::fs::write(&tmp, &bytes).map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
+    std::fs::write(&tmp, &bytes)
+        .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
-    let sql = format!(
-        "INSERT INTO stg_entry \
-          (scenario, entity, entry_period, period, account, flow, currency, nature, \
-           partner, share, analysis, analysis2, amount) \
-          SELECT scenario, entity, entry_period, period, account, flow, currency, nature, \
-                 {partner}, {share}, {analysis}, analysis2, amount \
-         FROM read_csv_auto('{path}', header=true)"
-    );
 
     let imported = {
         let con = lock_con(&state)?;
+
+        // Colonnes connues de stg_entry = dimensions propagées (built-in +
+        // customs) + amount. Pas de `level` dans stg_entry.
+        let dims = dimensions::load_all(&con).map_err(|e| {
+            AppError::bad_request(format!("registre des dimensions illisible : {e}"))
+        })?;
+        let mut cols = dimensions::propagated_cols(&dims);
+        cols.push("amount");
+
+        // SELECT adaptatif : reprend la colonne si elle est dans le header du
+        // CSV, sinon émet `NULL AS <col>`. Généralise le pattern historique
+        // (partner/share/analysis) à toutes les dimensions optionnelles et
+        // custom — un CSV décrivant une dimension custom est ainsi propagé
+        // automatiquement plutôt que silencieusement ignoré.
+        let select_list = cols
+            .iter()
+            .map(|c| {
+                if header.iter().any(|h| h == *c) {
+                    (*c).to_string()
+                } else {
+                    format!("NULL AS {c}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let col_list = cols.join(", ");
+
+        let sql = format!(
+            "INSERT INTO stg_entry\n\
+              ({col_list})\n\
+              SELECT {select_list}\n\
+              FROM read_csv_auto('{path}', header=true, null_padding=true)"
+        );
+
         match con.execute(&sql, []) {
             Ok(n) => n,
             Err(e) => {
