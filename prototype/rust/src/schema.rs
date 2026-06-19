@@ -184,6 +184,22 @@ CREATE TABLE dim_nature (
     rules   TEXT
 );";
 
+/// 6c. dim_method : méthodes de consolidation (globale, proportionnelle,
+/// mise en équivalence…).
+///
+/// Le flag `consolidated` distingue les méthodes **intégrées** (true :
+/// l'écriture est reprise au niveau `consolidated`, pondérée par
+/// `pct_integration`) des méthodes **non intégrées** (false : mise en
+/// équivalence, exclue du MVP). L'étape D (cf. `pipeline::consolidate`)
+/// filtre par `JOIN dim_method m ON m.code = p.methode WHERE m.consolidated`.
+/// Ajouter une méthode consolidée = insérer une ligne ici, sans toucher au SQL.
+pub const DDL_DIM_METHOD: &str = "\
+CREATE TABLE dim_method (
+    code         TEXT PRIMARY KEY,
+    libelle      TEXT,
+    consolidated BOOLEAN
+);";
+
 // --- Tables satellites (règles de consolidation) ------------------------------
 
 /// 7. sat_perimeter : composition du périmètre par (entity, scenario, period).
@@ -340,6 +356,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_FLOW,
     DDL_DIM_CURRENCY,
     DDL_DIM_NATURE,
+    DDL_DIM_METHOD,
     DDL_SAT_PERIMETER,
     DDL_SAT_EXCHANGE_RATE,
     DDL_DIM_RULE,
@@ -363,6 +380,7 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS dim_rule;",
     "DROP TABLE IF EXISTS sat_exchange_rate;",
     "DROP TABLE IF EXISTS sat_perimeter;",
+    "DROP TABLE IF EXISTS dim_method;",
     "DROP TABLE IF EXISTS dim_nature;",
     "DROP TABLE IF EXISTS dim_currency;",
     "DROP TABLE IF EXISTS dim_flow;",

@@ -19,6 +19,7 @@
 //! | `flows.csv`                 | `dim_flow`               | lecture directe                    |
 //! | `currencies.csv`            | `dim_currency`           | CAST `decimales` AS INTEGER        |
 //! | `natures.csv`               | `dim_nature`             | lecture directe                    |
+//! | `methods.csv`               | `dim_method`             | CAST `consolidated` AS BOOLEAN     |
 //! | `perimeter.csv`             | `sat_perimeter`          | CAST `entree`/`sortie` AS BOOLEAN  |
 //! | `rates.csv`                 | `sat_exchange_rate`      | `rate_set` en 1ère colonne (v2)    |
 //! | `entries.csv`               | `stg_entry`              | lecture directe                    |
@@ -179,6 +180,16 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         table: "dim_nature",
         columns: &["code", "libelle", "rules"],
         casts: &[],
+        use_explicit_schema: false,
+    },
+    // 12b. dim_method : méthodes de consolidation (cf. pipeline::consolidate).
+    //      CAST consolidated AS BOOLEAN (sinon lu en VARCHAR/TINYINT par read_csv_auto).
+    //      Chargé avant sat_perimeter (qui référence dim_method.code logiquement).
+    CsvMapping {
+        file: "methods.csv",
+        table: "dim_method",
+        columns: &["code", "libelle", "consolidated"],
+        casts: &[("consolidated", "BOOLEAN")],
         use_explicit_schema: false,
     },
     // 13. sat_perimeter : périmètre de consolidation. CAST entree/sortie AS BOOLEAN.

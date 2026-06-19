@@ -119,6 +119,18 @@ const NATURES: &[(&str, &str, Option<&str>)] = &[
     ("1AJUST", "Ajustement", None),
 ];
 
+/// Méthodes de consolidation : (code, libelle, consolidated).
+///
+/// Le flag `consolidated` pilote l'étape D (cf. `pipeline::consolidate`) :
+/// seules les méthodes `consolidated = true` sont reprises au niveau
+/// `consolidated`. La mise en équivalence (`consolidated = false`) est exclue
+/// du MVP — l'ajouter consisterait à basculer le flag, sans toucher au SQL.
+const METHODS: &[(&str, &str, bool)] = &[
+    ("globale",         "Globale",                true),
+    ("proportionnelle", "Proportionnelle",        true),
+    ("equivalence",     "Mise en équivalence",    false),
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Tables satellites
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,6 +297,12 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute(
             "INSERT INTO dim_nature VALUES (?, ?, ?)",
             params![n.0, n.1, n.2],
+        )?;
+    }
+    for m in METHODS {
+        con.execute(
+            "INSERT INTO dim_method VALUES (?, ?, ?)",
+            params![m.0, m.1, m.2],
         )?;
     }
 

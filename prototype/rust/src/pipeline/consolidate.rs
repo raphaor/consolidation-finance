@@ -5,7 +5,11 @@
 //! Application des méthodes de consolidation (natif MVP) :
 //!   - globale         : copie à 100 % (`pct_integration = 1.0`)
 //!   - proportionnelle : `amount × pct_integration`
-//!   - équivalence     : EXCLUE du MVP (non traitée)
+//!   - équivalence     : EXCLUE du MVP (`dim_method.consolidated = false`)
+//!
+//! Le filtre des méthodes intégrées est piloté par `dim_method.consolidated`
+//! (table maître éditable) : ajouter une méthode consolidée = insérer une
+//! ligne dans `dim_method`, sans toucher au SQL de cette étape.
 //!
 //! **NB** : tous les flux sont consolidés, **clôtures (F99) comprises** : le
 //! `pct_integration` est appliqué à la clôture (indispensable pour la méthode
@@ -47,8 +51,10 @@ JOIN sat_perimeter p\n\
   ON p.entity = f.entity\n\
  AND p.scenario = f.scenario\n\
  AND p.period = f.entry_period\n\
+JOIN dim_method m\n\
+  ON m.code = p.methode\n\
 WHERE f.level = 'converted'\n\
-  AND p.methode IN ('globale', 'proportionnelle');  -- équivalence hors MVP"
+  AND m.consolidated = true;  -- équivalence et méthodes futures exclues par flag"
     );
     con.execute(&sql, [])?;
     count_level(con, "consolidated")
