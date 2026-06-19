@@ -24,6 +24,7 @@ import type {
   RulesetDetail,
   RulesetReport,
   RulesetSummary,
+  ScenarioSummary,
 } from './types';
 
 const BASE = '/api';
@@ -108,8 +109,14 @@ export const api = {
     getJson<BilanRow[]>(`/compte-resultat${buildQueryString({ level, ...filters })}`),
   entries: (params: { level: string; limit?: number; offset?: number } & ReportFilters) =>
     getJson<Entry[]>(`/entries${buildQueryString(params)}`),
-  run: () => postJson<PipelineCounts>('/run'),
+  run: (scenario?: string) =>
+    scenario && scenario.trim() !== ''
+      ? postJsonRaw<PipelineCounts>('/run', { scenario })
+      : postJson<PipelineCounts>('/run'),
   reset: () => postJson<{ status: string; entries: number }>('/reset'),
+  scenarios: {
+    list: () => getJson<ScenarioSummary[]>('/scenarios'),
+  },
   masterData: {
     list: (table: MasterTable) => getJson<unknown[]>(`/md/${table}`),
     create: (table: MasterTable, row: Record<string, unknown>) =>

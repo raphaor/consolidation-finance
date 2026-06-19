@@ -22,8 +22,29 @@ use rust_decimal::prelude::*;
 //  Master data
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Scénarios de test : (code, libelle, type, statut).
-const SCENARIOS: &[(&str, &str, &str, &str)] = &[("REEL", "Réel 2024", "réel", "ouvert")];
+/// Config applicative : (key, value). Une seule entrée — la devise pivot.
+/// Ici `pivot = EUR` : les taux de `sat_exchange_rate` convertissent tout vers EUR.
+const APP_CONFIG: &[(&str, &str)] = &[("pivot_currency", "EUR")];
+
+/// Catégories de scénario : (code, libelle).
+const SCENARIO_CATEGORIES: &[(&str, &str)] = &[("REEL", "Réel")];
+
+/// Variantes : (code, libelle).
+const VARIANTS: &[(&str, &str)] = &[("BASE", "Base")];
+
+/// Jeux de taux : (code, libelle).
+const RATE_SETS: &[(&str, &str)] = &[("RATES", "Taux réels")];
+
+/// Scénarios de test : (code, libelle, category, entry_period,
+/// presentation_currency, variant, ruleset_code, rate_set, statut).
+///
+/// Le scénario `REEL` agrège toutes les références nécessaires à un run. Avec
+/// `pivot = EUR` et `presentation_currency = EUR`, la conversion se comporte
+/// comme avant (cross-rate = taux direct). `ruleset_code = NULL` : pas de
+/// règles appliquées sur le scénario de base.
+const SCENARIOS: &[(&str, &str, &str, &str, &str, &str, Option<&str>, &str, &str)] = &[(
+    "REEL", "Réel 2024", "REEL", "2024", "EUR", "BASE", None, "RATES", "ouvert",
+)];
 
 /// Entités du groupe : (code, libelle, devise_fonctionnelle, entite_parent, statut).
 const ENTITIES: &[(&str, &str, &str, Option<&str>, &str)] = &[
@@ -110,15 +131,18 @@ const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] =
     (("B", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), false, true)),  // SORT en N
 ];
 
-/// Taux de change vers EUR.
+/// Taux de change vers le pivot (EUR).
 ///   - period '2023' : taux clôture N-1 (utilisé par close_n1)
 ///   - period '2024' : taux clôture N (close_n / terminal) et taux moyen (avg)
-/// (currency_source, period, taux_close, taux_moyen).
-const RATES: &[((&str, &str), (Option<Decimal>, Option<Decimal>))] = &[
-    (("USD", "2023"), (Some(dec!(0.92)), None)),
-    (("USD", "2024"), (Some(dec!(0.90)), Some(dec!(0.95)))), // close_n = 0.90, avg = 0.95
-    (("GBP", "2023"), (Some(dec!(1.15)), None)),
-    (("GBP", "2024"), (Some(dec!(1.12)), Some(dec!(1.18)))), // close_n = 1.12, avg = 1.18
+/// (rate_set, currency_source, period, taux_close, taux_moyen).
+///
+/// Tous rattachés au jeu `'RATES'` (cf. `dim_rate_set`). La PK est désormais
+/// `(rate_set, currency_source, period)`.
+const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>))] = &[
+    (("RATES", "USD", "2023"), (Some(dec!(0.92)), None)),
+    (("RATES", "USD", "2024"), (Some(dec!(0.90)), Some(dec!(0.95)))), // close_n = 0.90, avg = 0.95
+    (("RATES", "GBP", "2023"), (Some(dec!(1.15)), None)),
+    (("RATES", "GBP", "2024"), (Some(dec!(1.12)), Some(dec!(1.18)))), // close_n = 1.12, avg = 1.18
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,11 +210,39 @@ const RAW: &[RawRow] = &[
 ///
 /// Miroir de `conso/seed.py::seed_all`.
 pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
+    // --- Config applicative ---
+    for (k, v) in APP_CONFIG {
+        con.execute(
+            "INSERT INTO app_config VALUES (?, ?)",
+            params![k, v],
+        )?;
+    }
+
+    // --- Nouvelles dimensions référentielles (avant dim_scenario) ---
+    for c in SCENARIO_CATEGORIES {
+        con.execute(
+            "INSERT INTO dim_scenario_category VALUES (?, ?)",
+            params![c.0, c.1],
+        )?;
+    }
+    for v in VARIANTS {
+        con.execute(
+            "INSERT INTO dim_variant VALUES (?, ?)",
+            params![v.0, v.1],
+        )?;
+    }
+    for r in RATE_SETS {
+        con.execute(
+            "INSERT INTO dim_rate_set VALUES (?, ?)",
+            params![r.0, r.1],
+        )?;
+    }
+
     // --- Dimensions ---
     for s in SCENARIOS {
         con.execute(
-            "INSERT INTO dim_scenario VALUES (?, ?, ?, ?)",
-            params![s.0, s.1, s.2, s.3],
+            "INSERT INTO dim_scenario VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![s.0, s.1, s.2, s.3, s.4, s.5, s.6, s.7, s.8],
         )?;
     }
     for e in ENTITIES {
@@ -245,11 +297,13 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for (k, v) in RATES {
         con.execute(
-            "INSERT INTO sat_exchange_rate (currency_source, period, taux_close, taux_moyen) \
-             VALUES (?, ?, ?, ?)",
+            "INSERT INTO sat_exchange_rate \
+             (rate_set, currency_source, period, taux_close, taux_moyen) \
+             VALUES (?, ?, ?, ?, ?)",
             params![
                 k.0,
                 k.1,
+                k.2,
                 v.0.map(Money),
                 v.1.map(Money),
             ],

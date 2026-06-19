@@ -93,7 +93,13 @@ fn main() {
 
     // 3. Pipeline 4 étapes
     println!("\n▶ Exécution du pipeline (A→B→C→D)…");
-    let params = ConvertParams::default();
+    let params = match ConvertParams::load_params(&con, "REEL") {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\n✗ ERREUR load_params : {e}");
+            std::process::exit(1);
+        }
+    };
     let counts = match run_pipeline(&con, &params) {
         Ok(c) => c,
         Err(e) => {

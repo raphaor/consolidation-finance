@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "build": {
+      "permission": {
+        "external_directory": {
+          "/home/raph/.cargo/*": "allow",
+          "/home/raph/.rustup/*": "allow",
+          "/home/raph/.local/bin/*": "allow",
+          "/tmp/*": "allow"
+        }
+      }
+    }
+  }
+}

@@ -44,8 +44,27 @@ export interface HealthStatus {
 export interface Scenario {
   code: string;
   libelle: string;
-  type: string;
-  statut: string;
+  category: string | null;
+  entry_period: string | null;
+  presentation_currency: string | null;
+  variant: string | null;
+  ruleset_code: string | null;
+  rate_set: string | null;
+  statut: string | null;
+}
+
+// Réponse de GET /api/scenarios — scénario v2 « déplié » pour le dropdown
+// PipelinePage (cf. SPEC_SCENARIO_V2_TECH §4.6).
+export interface ScenarioSummary {
+  code: string;
+  libelle: string | null;
+  category: string | null;
+  entry_period: string | null;
+  presentation_currency: string | null;
+  variant: string | null;
+  ruleset_code: string | null;
+  rate_set: string | null;
+  statut: string | null;
 }
 
 export interface Period {
@@ -114,7 +133,10 @@ export type MasterTable =
   | 'natures'
   | 'perimeter'
   | 'rates'
-  | 'sous_classes';
+  | 'sous_classes'
+  | 'scenario_categories'
+  | 'variants'
+  | 'rate_sets';
 
 export interface ColumnDef {
   name: string;
@@ -134,12 +156,65 @@ export interface TableDef {
 
 export const MASTER_TABLES: TableDef[] = [
   {
+    table: 'scenario_categories',
+    label: 'Catégories de scénario',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+    ],
+  },
+  {
+    table: 'variants',
+    label: 'Variantes',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+    ],
+  },
+  {
+    table: 'rate_sets',
+    label: 'Jeux de taux',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+    ],
+  },
+  {
     table: 'scenarios',
     label: 'Scénarios',
     columns: [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
-      { name: 'type', label: 'Type', type: 'text' },
+      {
+        name: 'category',
+        label: 'Catégorie',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'scenario_categories', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'entry_period',
+        label: 'Période d\'entrée',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'periods', value: 'code' },
+      },
+      { name: 'presentation_currency', label: 'Devise présentation', type: 'text', nullable: true },
+      {
+        name: 'variant',
+        label: 'Variante',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'variants', value: 'code', label: 'libelle' },
+      },
+      { name: 'ruleset_code', label: 'Ruleset', type: 'text', nullable: true },
+      {
+        name: 'rate_set',
+        label: 'Jeu de taux',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'rate_sets', value: 'code', label: 'libelle' },
+      },
       { name: 'statut', label: 'Statut', type: 'text' },
     ],
   },
@@ -284,6 +359,13 @@ export const MASTER_TABLES: TableDef[] = [
     table: 'rates',
     label: 'Taux de change',
     columns: [
+      {
+        name: 'rate_set',
+        label: 'Jeu de taux',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'rate_sets', value: 'code', label: 'libelle' },
+      },
       {
         name: 'currency_source',
         label: 'Devise source',

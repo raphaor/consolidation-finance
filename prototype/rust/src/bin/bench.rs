@@ -93,7 +93,14 @@ fn main() {
 
     // --- 3. Exécution du pipeline mesuré ---
     println!("\n▶ Exécution du pipeline A→B→C→D…");
-    let report = match run_pipeline_timed(&con, &ConvertParams::default()) {
+    let params = match ConvertParams::load_params(&con, "REEL") {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\n✗ ERREUR load_params : {e}");
+            std::process::exit(1);
+        }
+    };
+    let report = match run_pipeline_timed(&con, &params) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("\n✗ ERREUR pipeline : {e}");
@@ -129,10 +136,23 @@ fn main() {
 fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
     con.execute_batch(&format!(
         "
+        -- Config applicative + nouvelles dimensions référentielles (SPEC v2).
+        INSERT INTO app_config VALUES ('pivot_currency', 'EUR');
+
+        INSERT INTO dim_scenario_category VALUES
+            ('REEL', 'Réel'),
+            ('BUDGET', 'Budget'),
+            ('PREV', 'Prévision');
+
+        INSERT INTO dim_variant VALUES ('BASE', 'Base');
+
+        INSERT INTO dim_rate_set VALUES ('RATES', 'Taux réels');
+
+        -- dim_scenario v2 : catégorie + période + devise + variante + ruleset + rate_set.
         INSERT INTO dim_scenario VALUES
-            ('REEL','Réel','réel','ouvert'),
-            ('BUDGET','Budget','budget','ouvert'),
-            ('PREV','Prévision','prévision','ouvert');
+            ('REEL','Réel','REEL','2024','EUR','BASE',NULL,'RATES','ouvert'),
+            ('BUDGET','Budget','BUDGET','2024','EUR','BASE',NULL,'RATES','ouvert'),
+            ('PREV','Prévision','PREV','2024','EUR','BASE',NULL,'RATES','ouvert');
 
         INSERT INTO dim_period VALUES
             ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
@@ -141,7 +161,7 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
         -- Entités : M (mère, EUR) + filiales réparties sur 5 devises.
         INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut)
         SELECT
-            CASE WHEN i = 0 THEN 'M' ELSE 'E' || LPAD(CAST(i AS VARCHAR), 2, '0') END,
+            CASE WHEN i = 0 THEN 'M' ELSE 'E' || LPAD(CAST(i AS VARCHAR), 02, '0') END,
             'Entite ' || CAST(i AS VARCHAR),
             CASE (i % 5)
                 WHEN 0 THEN 'EUR'
@@ -158,7 +178,7 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
         -- technical_grouping NULLABLE — laissés à NULL pour les comptes synthétiques).
         INSERT INTO dim_account (code, libelle, classe, sous_classe, technical_grouping, compte_parent)
         SELECT
-            'ACC_' || LPAD(CAST(i AS VARCHAR), 4, '0'),
+            'ACC_' || LPAD(CAST(i AS VARCHAR), 04, '0'),
             'Compte ' || CAST(i AS VARCHAR),
             CASE
                 WHEN i % 5 IN (0,1) THEN 'bilan'
@@ -213,16 +233,18 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
             FROM dim_entity ORDER BY code
         ) e;
 
-        -- Taux de change vers EUR : 4 devises non-EUR × 2 exercices.
-        INSERT INTO sat_exchange_rate (currency_source, period, taux_close, taux_moyen) VALUES
-            ('USD','2023', 0.92000000, NULL),
-            ('USD','2024', 0.90000000, 0.95000000),
-            ('GBP','2023', 1.15000000, NULL),
-            ('GBP','2024', 1.12000000, 1.18000000),
-            ('CHF','2023', 0.98000000, NULL),
-            ('CHF','2024', 1.05000000, 1.02000000),
-            ('JPY','2023', 0.00650000, NULL),
-            ('JPY','2024', 0.00620000, 0.00680000);
+        -- Taux de change vers le pivot EUR : 4 devises non-EUR × 2 exercices.
+        -- Tous rattachés au jeu 'RATES' (SPEC_SCENARIO_V2.md §2).
+        INSERT INTO sat_exchange_rate
+            (rate_set, currency_source, period, taux_close, taux_moyen) VALUES
+            ('RATES','USD','2023', 0.92000000, NULL),
+            ('RATES','USD','2024', 0.90000000, 0.95000000),
+            ('RATES','GBP','2023', 1.15000000, NULL),
+            ('RATES','GBP','2024', 1.12000000, 1.18000000),
+            ('RATES','CHF','2023', 0.98000000, NULL),
+            ('RATES','CHF','2024', 1.05000000, 1.02000000),
+            ('RATES','JPY','2023', 0.00650000, NULL),
+            ('RATES','JPY','2024', 0.00620000, 0.00680000);
         ",
     )?;
     Ok(())

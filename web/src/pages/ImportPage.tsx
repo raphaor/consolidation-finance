@@ -84,8 +84,8 @@ export function ImportPage() {
         />
         <UploadZone
           title="Taux de change"
-          description="Upsert dans la table rates (clé : currency_source + period)."
-          header="currency_source, period, taux_close, taux_moyen"
+          description="Upsert dans la table rates (clé : rate_set + currency_source + period)."
+          header="rate_set, currency_source, period, taux_close, taux_moyen"
           onImport={(f) => api.importRates(f)}
         />
         <UploadZone

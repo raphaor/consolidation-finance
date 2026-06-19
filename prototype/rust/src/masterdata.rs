@@ -1,4 +1,5 @@
-//! CRUD générique sur les 10 tables master data (8 dimensions + 2 satellites).
+//! CRUD générique sur les 13 tables master data (10 dimensions + 3 satellites
+//! + 3 catalogues scénario v2).
 //!
 //! Expose `router()` qui monte les routes `/api/md/{table}` (GET/POST/PUT/DELETE)
 //! sur le serveur Axum. La table est validée contre une whitelist statique
@@ -25,10 +26,41 @@ struct TableDef {
 }
 
 const TABLES: &[TableDef] = &[
+    // --- Catalogues v2 (dépendances amont de dim_scenario) ---
+    TableDef {
+        api_name: "scenario_categories",
+        sql_name: "dim_scenario_category",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+    },
+    TableDef {
+        api_name: "variants",
+        sql_name: "dim_variant",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+    },
+    TableDef {
+        api_name: "rate_sets",
+        sql_name: "dim_rate_set",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+    },
+    // --- Scénario v2 : category/entry_period/presentation_currency/variant/
+    //     ruleset_code(nullable)/rate_set/statut (cf. SPEC_SCENARIO_V2_TECH §1.2) ---
     TableDef {
         api_name: "scenarios",
         sql_name: "dim_scenario",
-        columns: &["code", "libelle", "type", "statut"],
+        columns: &[
+            "code",
+            "libelle",
+            "category",
+            "entry_period",
+            "presentation_currency",
+            "variant",
+            "ruleset_code",
+            "rate_set",
+            "statut",
+        ],
         pk: &["code"],
     },
     TableDef {
@@ -88,11 +120,13 @@ const TABLES: &[TableDef] = &[
         ],
         pk: &["entity", "scenario", "period"],
     },
+    // PK étendue v2 : (rate_set, currency_source, period). `rate_set` en 1ère
+    // position pour cohérence avec la PK (cf. SPEC_SCENARIO_V2_TECH §1.3).
     TableDef {
         api_name: "rates",
         sql_name: "sat_exchange_rate",
-        columns: &["currency_source", "period", "taux_close", "taux_moyen"],
-        pk: &["currency_source", "period"],
+        columns: &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
+        pk: &["rate_set", "currency_source", "period"],
     },
 ];
 

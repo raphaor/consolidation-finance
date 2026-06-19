@@ -32,7 +32,8 @@ fn setup() -> Connection {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    run_pipeline(&con, &ConvertParams::default()).expect("run_pipeline");
+    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    run_pipeline(&con, &params).expect("run_pipeline");
     con
 }
 
@@ -406,7 +407,8 @@ fn pipeline_reproductible_apres_reset() {
         .expect("DELETE fact_entry");
 
     // Re-run.
-    run_pipeline(&con, &ConvertParams::default()).expect("re-run pipeline");
+    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    run_pipeline(&con, &params).expect("re-run pipeline");
 
     let after: Vec<f64> = accounts.iter().map(|a| f99_consolidated(&con, a)).collect();
     let counts_after: [i64; 4] = [
@@ -750,7 +752,11 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
     )
     .expect("seed stg entries");
 
-    run_pipeline(&con, &ConvertParams::default()).expect("run_pipeline");
+    run_pipeline(
+        &con,
+        &ConvertParams::load_params(&con, "REEL").expect("load_params"),
+    )
+    .expect("run_pipeline");
 
     // Préfixe 2 : visible à reclassified, invisible à corporate
     let n2_corp: i64 = con

@@ -23,15 +23,73 @@
 /// Séquence d'identifiants auto-incrémentés pour la table de faits.
 pub const DDL_SEQ_ENTRY: &str = "CREATE SEQUENCE IF NOT EXISTS seq_entry START 1;";
 
+// --- Config applicative (singleton d'instance) --------------------------------
+
+/// 0. app_config : configuration de l'instance (clé/valeur).
+///
+/// Actuellement utilisée pour `pivot_currency` : la devise pivot unique de
+/// l'instance, vers laquelle tous les taux de `sat_exchange_rate` convertissent.
+/// Non exposée via masterdata CRUD (config système, pas une dimension éditable).
+pub const DDL_APP_CONFIG: &str = "\
+CREATE TABLE app_config (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);";
+
+// --- Nouvelles dimensions (référentiels pour dim_scenario) --------------------
+
+/// 1a. dim_scenario_category : catégorie du scénario (REEL, BUDGET, PREVISION).
+///
+/// Remplace l'ancien champ libre `type` de `dim_scenario` : la catégorie devient
+/// une véritable dimension référencée (cf. SPEC_SCENARIO_V2.md §4).
+pub const DDL_DIM_SCENARIO_CATEGORY: &str = "\
+CREATE TABLE dim_scenario_category (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
+/// 1b. dim_rate_set : jeux de taux (réels, budget…).
+///
+/// Un scénario référence un jeu de taux via `dim_scenario.rate_set`. Permet
+/// d'avoir des taux différents (réels vs budget) pour un même cadre
+/// (catégorie + période + devise). Cf. SPEC_SCENARIO_V2.md §2.
+pub const DDL_DIM_RATE_SET: &str = "\
+CREATE TABLE dim_rate_set (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
+/// 1c. dim_variant : variante d'un même cadre (BASE, OPT1, PESSIMIST…).
+///
+/// Déclinaison du scénario avec des hypothèses différentes, sans changer le
+/// cadre (catégorie + période + devise de présentation).
+/// Cf. SPEC_SCENARIO_V2.md §3.
+pub const DDL_DIM_VARIANT: &str = "\
+CREATE TABLE dim_variant (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
 // --- Dimensions (master data) -------------------------------------------------
 
-/// 1. dim_scenario : scénario de consolidation (réel / budget / prévision).
+/// 1. dim_scenario v2 : scénario de consolidation, objet composite.
+///
+/// Le scénario agrège toutes les références nécessaires à un run : catégorie,
+/// période d'entrée, devise de présentation, variante, ruleset (nullable) et
+/// jeu de taux. Le pivot, lui, est applicatif (`app_config.pivot_currency`).
+/// `prev_period` n'est pas stocké : dérivé à l'exécution depuis `dim_period`.
+/// Cf. SPEC_SCENARIO_V2.md §5.
 pub const DDL_DIM_SCENARIO: &str = "\
 CREATE TABLE dim_scenario (
-    code     TEXT PRIMARY KEY,
-    libelle  TEXT,
-    type     TEXT,        -- réel / budget / prévision
-    statut   TEXT         -- ouvert / verrouillé
+    code                  TEXT PRIMARY KEY,
+    libelle               TEXT,
+    category              TEXT,   -- FK dim_scenario_category ('REEL', 'BUDGET'…)
+    entry_period          TEXT,   -- FK dim_period ('2024')
+    presentation_currency TEXT,   -- FK dim_currency ('EUR')
+    variant               TEXT,   -- FK dim_variant ('BASE')
+    ruleset_code          TEXT,   -- FK dim_ruleset (NULL = pas de règles)
+    rate_set              TEXT,   -- FK dim_rate_set
+    statut                TEXT    -- 'ouvert' / 'verrouillé'
 );";
 
 /// 2. dim_entity : entité du groupe (hiérarchie, devise fonctionnelle).
@@ -146,14 +204,21 @@ CREATE TABLE sat_perimeter (
     PRIMARY KEY (entity, scenario, period)
 );";
 
-/// 8. sat_exchange_rate : taux de change vers la devise de présentation.
+/// 8. sat_exchange_rate : taux de change vers la devise **pivot**.
+///
+/// Tous les taux convertissent `currency_source` → `pivot_currency` (lue dans
+/// `app_config`). Pour passer en devise de présentation, l'étape C calcule un
+/// cross-rate : `taux(fonctionnelle → pivot) / taux(présentation → pivot)`.
+/// La PK inclut `rate_set` : un même couple (source, période) peut exister
+/// dans plusieurs jeux de taux (réels vs budget). Cf. SPEC_SCENARIO_V2.md §1, §2.
 pub const DDL_SAT_EXCHANGE_RATE: &str = "\
 CREATE TABLE sat_exchange_rate (
-    currency_source TEXT,   -- devise source (à convertir vers la présentation)
+    rate_set        TEXT,        -- FK dim_rate_set
+    currency_source TEXT,        -- devise source (convertie vers le pivot)
     period          TEXT,
     taux_close      DECIMAL(18,8),
     taux_moyen      DECIMAL(18,8),
-    PRIMARY KEY (currency_source, period)
+    PRIMARY KEY (rate_set, currency_source, period)
 );";
 
 // --- Règles de consolidation (bibliothèque + jeux) -----------------------------
@@ -256,8 +321,17 @@ CREATE TABLE fact_entry (
 /// `DDL_DIM_CUSTOM_DIMENSION` précède `DDL_STG_ENTRY` / `DDL_FACT_ENTRY` : il
 /// faut que la table registre existe quand `create_schema` exécute les
 /// `ALTER TABLE ADD COLUMN` pour ré-appliquer les customs survivantes.
+///
+/// Ordre des nouvelles tables (SPEC_SCENARIO_V2.md §8.1) :
+/// - `app_config` et `dim_rate_set` **avant** `sat_exchange_rate` (FK logique).
+/// - `dim_scenario_category`, `dim_variant`, `dim_ruleset` **avant**
+///   `dim_scenario`.
 pub const ALL_DDL: &[&str] = &[
     DDL_SEQ_ENTRY,
+    DDL_APP_CONFIG,
+    DDL_DIM_SCENARIO_CATEGORY,
+    DDL_DIM_RATE_SET,
+    DDL_DIM_VARIANT,
     DDL_DIM_SCENARIO,
     DDL_DIM_ENTITY,
     DDL_DIM_PERIOD,
@@ -297,6 +371,10 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS dim_period;",
     "DROP TABLE IF EXISTS dim_entity;",
     "DROP TABLE IF EXISTS dim_scenario;",
+    "DROP TABLE IF EXISTS dim_variant;",
+    "DROP TABLE IF EXISTS dim_rate_set;",
+    "DROP TABLE IF EXISTS dim_scenario_category;",
+    "DROP TABLE IF EXISTS app_config;",
     "DROP SEQUENCE IF EXISTS seq_entry;",
 ];
 

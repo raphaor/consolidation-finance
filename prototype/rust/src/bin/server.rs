@@ -111,6 +111,13 @@ struct PipelineResult {
     reclassified: usize,
     converted: usize,
     consolidated: usize,
+    /// Code du scénario utilisé pour le run (explicite dans le body ou
+    /// premier scénario `'ouvert'` trouvé).
+    scenario: String,
+    /// Ruleset exécuté après le pipeline (NULL si le scénario n'en référence pas).
+    ruleset: Option<String>,
+    /// Rapport du ruleset, présent si `ruleset` est `Some`.
+    ruleset_report: Option<RulesetReport>,
 }
 
 /// Réponse `/api/reset` : statut + nombre d'écritures brutes rechargées.
@@ -415,21 +422,141 @@ async fn get_entries(
     Ok(Json(rows))
 }
 
-/// POST /api/run — déclenche le pipeline 4 étapes et renvoie les comptes.
+/// Corps accepté par `POST /api/run`.
+///
+/// `scenario` est optionnel : s'il est absent (body `{}` ou `{}`), le handler
+/// sélectionne le premier scénario de statut `'ouvert'`. C'est l'amorti de
+/// rétro-compatibilité pendant le développement.
+#[derive(Deserialize, Default)]
+struct RunBody {
+    #[serde(default)]
+    scenario: Option<String>,
+}
+
+/// GET /api/scenarios — liste des scénarios avec leurs paramètres dépliés.
+///
+/// Sert le dropdown UI de `PipelinePage`. Une entrée par scénario ; les FK
+/// (category, variant, rate_set, ruleset_code) sont ramenées telles quelles
+/// (leurs libellés sont récupérés côté UI via les tables master data).
+#[derive(Serialize)]
+struct ScenarioSummary {
+    code: String,
+    libelle: Option<String>,
+    category: Option<String>,
+    entry_period: Option<String>,
+    presentation_currency: Option<String>,
+    variant: Option<String>,
+    ruleset_code: Option<String>,
+    rate_set: Option<String>,
+    statut: Option<String>,
+}
+
+/// GET /api/scenarios — liste de tous les scénarios avec leurs paramètres.
+async fn list_scenarios(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ScenarioSummary>>, AppError> {
+    let rows = {
+        let con = lock_con(&state)?;
+        let mut stmt = con
+            .prepare(
+                "SELECT code, libelle, category, entry_period, presentation_currency,
+                        variant, ruleset_code, rate_set, statut
+                 FROM dim_scenario
+                 ORDER BY code",
+            )
+            .map_err(db_err)?;
+        let iter = stmt
+            .query_map([], |row| {
+                Ok(ScenarioSummary {
+                    code: row.get(0)?,
+                    libelle: row.get(1)?,
+                    category: row.get(2)?,
+                    entry_period: row.get(3)?,
+                    presentation_currency: row.get(4)?,
+                    variant: row.get(5)?,
+                    ruleset_code: row.get(6)?,
+                    rate_set: row.get(7)?,
+                    statut: row.get(8)?,
+                })
+            })
+            .map_err(db_err)?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r.map_err(db_err)?);
+        }
+        out
+    };
+    Ok(Json(rows))
+}
+
+/// POST /api/run — déclenche le pipeline 4 étapes (sur le scénario du body,
+/// sinon le 1er scénario `'ouvert'`) et, si le scénario référence un ruleset,
+/// exécute celui-ci après le pipeline.
+///
+/// Workflow (cf. SPEC_SCENARIO_V2.md §7) :
+/// 1. Résolution du code scénario (body ou défaut `'ouvert'`).
+/// 2. `ConvertParams::load_params(con, scenario_code)`.
+/// 3. `DELETE FROM fact_entry` (reset avant run, sinon accumulation).
+/// 4. `run_pipeline(con, &params)`.
+/// 5. Si `scenario.ruleset_code` non NULL : `run_ruleset(con, ruleset_code)`.
+/// 6. Retourne `{ counts, scenario, ruleset?, ruleset_report? }`.
 async fn run_pipeline_handler(
     State(state): State<Arc<AppState>>,
+    body: Option<Json<RunBody>>,
 ) -> Result<Json<PipelineResult>, AppError> {
     let result = {
         let con = lock_con(&state)?;
-        // Vider les résultats du pipeline avant de relancer (sinon accumulation).
+        // 1. Résolution du scénario : explicite dans le body, sinon 1er 'ouvert'.
+        let scenario_code: String = match body.and_then(|b| b.0.scenario) {
+            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
+            _ => con
+                .query_row(
+                    "SELECT code FROM dim_scenario \
+                     WHERE statut = 'ouvert' OR statut IS NULL \
+                     ORDER BY code LIMIT 1",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(|e| {
+                    AppError::bad_request(format!(
+                        "aucun scénario 'ouvert' trouvé (précisez {{\"scenario\":\"...\"}}) : {e}"
+                    ))
+                })?,
+        };
+
+        // 2. Chargement des params depuis dim_scenario + app_config.
+        let params = ConvertParams::load_params(&con, &scenario_code)
+            .map_err(db_err)?;
+
+        // 3. Lecture du ruleset_code (NULL si le scénario n'en référence pas).
+        let ruleset_code: Option<String> = con
+            .query_row(
+                "SELECT ruleset_code FROM dim_scenario WHERE code = ?",
+                [&scenario_code],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .map_err(db_err)?;
+
+        // 4. Vider les résultats du pipeline avant de relancer (sinon accumulation).
         con.execute("DELETE FROM fact_entry", []).map_err(db_err)?;
-        let params = ConvertParams::default();
+
+        // 5. Pipeline.
         let counts = run_pipeline(&con, &params).map_err(db_err)?;
+
+        // 6. Ruleset optionnel.
+        let ruleset_report = match &ruleset_code {
+            Some(code) => Some(run_ruleset(&con, code).map_err(db_err)?),
+            None => None,
+        };
+
         PipelineResult {
             corporate: counts[0],
             reclassified: counts[1],
             converted: counts[2],
             consolidated: counts[3],
+            scenario: scenario_code,
+            ruleset: ruleset_code,
+            ruleset_report,
         }
     };
     Ok(Json(result))
@@ -628,7 +755,7 @@ struct RulesetItemIn {
 
 /// Corps accepté par `POST /api/rules/run`.
 #[derive(Deserialize)]
-struct RunBody {
+struct RunRulesetBody {
     ruleset: String,
 }
 
@@ -953,7 +1080,7 @@ async fn delete_ruleset(
 /// POST /api/rules/run — exécute un ruleset.
 async fn run_ruleset_handler(
     State(state): State<Arc<AppState>>,
-    Json(body): Json<RunBody>,
+    Json(body): Json<RunRulesetBody>,
 ) -> Result<Json<RulesetReport>, AppError> {
     let report = {
         let con = lock_con(&state)?;
@@ -1094,15 +1221,38 @@ async fn main() {
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
-        match run_pipeline(&con, &ConvertParams::default()) {
-            Ok(counts) => {
-                println!(
-                    "   Pipeline initial : corporate={}, reclassified={}, converted={}, consolidated={}",
-                    counts[0], counts[1], counts[2], counts[3]
-                );
-            }
-            Err(e) => {
-                eprintln!("⚠ Pipeline initial échoué (le serveur démarre quand même) : {e}");
+        // On sélectionne le 1er scénario 'ouvert' (post-SPEC_SCENARIO_V2 : plus
+        // de ConvertParams::default(), les params viennent du scénario).
+        let initial_scenario: Option<String> = con
+            .query_row(
+                "SELECT code FROM dim_scenario \
+                 WHERE statut = 'ouvert' OR statut IS NULL \
+                 ORDER BY code LIMIT 1",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .ok();
+        match initial_scenario {
+            Some(code) => match ConvertParams::load_params(&con, &code) {
+                Ok(params) => match run_pipeline(&con, &params) {
+                    Ok(counts) => {
+                        println!(
+                            "   Pipeline initial (scénario {code}) : corporate={}, reclassified={}, converted={}, consolidated={}",
+                            counts[0], counts[1], counts[2], counts[3]
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("⚠ Pipeline initial échoué (le serveur démarre quand même) : {e}");
+                    }
+                },
+                Err(e) => {
+                    eprintln!(
+                        "⚠ load_params initial échoué pour {code} (le serveur démarre quand même) : {e}"
+                    );
+                }
+            },
+            None => {
+                eprintln!("⚠ Aucun scénario 'ouvert' trouvé — pipeline initial sauté.");
             }
         }
     }
@@ -1133,6 +1283,7 @@ async fn main() {
         .route("/api/entries", get(get_entries))
         .route("/api/run", post(run_pipeline_handler))
         .route("/api/reset", post(reset_handler))
+        .route("/api/scenarios", get(list_scenarios))
         // Dimensions — registre central (built-in + custom)
         .route(
             "/api/meta/dimensions",

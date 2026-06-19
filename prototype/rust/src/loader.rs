@@ -5,21 +5,29 @@
 //!
 //! # Tables attendues et leurs fichiers
 //!
-//! | Fichier             | Table cible          | Remarques                          |
-//! |---------------------|----------------------|------------------------------------|
-//! | `scenarios.csv`     | `dim_scenario`       | lecture directe                    |
-//! | `entities.csv`      | `dim_entity`         | lecture directe                    |
-//! | `periods.csv`       | `dim_period`         | lecture directe                    |
-//! | `sous_classes.csv`  | `dim_sous_classe`    | lecture directe                    |
-//! | `accounts.csv`      | `dim_account`        | lecture directe                    |
-//! | `flows.csv`         | `dim_flow`           | lecture directe                    |
-//! | `currencies.csv`    | `dim_currency`       | CAST `decimales` AS INTEGER        |
-//! | `natures.csv`       | `dim_nature`         | lecture directe                    |
-//! | `perimeter.csv`     | `sat_perimeter`      | CAST `entree`/`sortie` AS BOOLEAN  |
-//! | `rates.csv`         | `sat_exchange_rate`  | lecture directe                    |
-//! | `entries.csv`       | `stg_entry`          | lecture directe                    |
+//! | Fichier                     | Table cible              | Remarques                          |
+//! |-----------------------------|--------------------------|------------------------------------|
+//! | `app_config.csv`            | `app_config`             | singleton clé/valeur               |
+//! | `scenario_categories.csv`   | `dim_scenario_category`  | lecture directe                    |
+//! | `variants.csv`              | `dim_variant`            | lecture directe                    |
+//! | `rate_sets.csv`             | `dim_rate_set`           | lecture directe                    |
+//! | `scenarios.csv`             | `dim_scenario`           | 9 colonnes v2                      |
+//! | `entities.csv`              | `dim_entity`             | lecture directe                    |
+//! | `periods.csv`               | `dim_period`             | lecture directe                    |
+//! | `sous_classes.csv`          | `dim_sous_classe`        | lecture directe                    |
+//! | `accounts.csv`              | `dim_account`            | lecture directe                    |
+//! | `flows.csv`                 | `dim_flow`               | lecture directe                    |
+//! | `currencies.csv`            | `dim_currency`           | CAST `decimales` AS INTEGER        |
+//! | `natures.csv`               | `dim_nature`             | lecture directe                    |
+//! | `perimeter.csv`             | `sat_perimeter`          | CAST `entree`/`sortie` AS BOOLEAN  |
+//! | `rates.csv`                 | `sat_exchange_rate`      | `rate_set` en 1ère colonne (v2)    |
+//! | `entries.csv`               | `stg_entry`              | lecture directe                    |
 //!
 //! Les cellules vides sont lues comme NULL par `read_csv_auto`.
+//!
+//! L'ordre d'insertion respecte les FK logiques (cf. schema.rs commentaire
+//! `ALL_DDL`) : `app_config` et `dim_rate_set` avant `sat_exchange_rate` ;
+//! `dim_scenario_category`, `dim_variant` avant `dim_scenario`.
 
 use duckdb::Connection;
 use std::path::Path;
@@ -40,11 +48,53 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
     // chaîne, pour injection dans la clause `read_csv_auto('...')`.
     let csv_path = |file: &str| data_dir.join(file).display().to_string();
 
+    // --- Config applicative + catalogues v2 (dépendances amont) ---
+    // app_config : singleton clé/valeur (ex: pivot_currency=EUR).
+    con.execute(
+        &format!(
+            "INSERT INTO app_config \
+             SELECT key, value \
+             FROM read_csv_auto('{}')",
+            csv_path("app_config.csv")
+        ),
+        [],
+    )?;
+    con.execute(
+        &format!(
+            "INSERT INTO dim_scenario_category \
+             SELECT code, libelle \
+             FROM read_csv_auto('{}')",
+            csv_path("scenario_categories.csv")
+        ),
+        [],
+    )?;
+    con.execute(
+        &format!(
+            "INSERT INTO dim_variant \
+             SELECT code, libelle \
+             FROM read_csv_auto('{}')",
+            csv_path("variants.csv")
+        ),
+        [],
+    )?;
+    con.execute(
+        &format!(
+            "INSERT INTO dim_rate_set \
+             SELECT code, libelle \
+             FROM read_csv_auto('{}')",
+            csv_path("rate_sets.csv")
+        ),
+        [],
+    )?;
+
     // --- Dimensions (master data) ---
+    // dim_scenario v2 : 9 colonnes (category, entry_period, presentation_currency,
+    // variant, ruleset_code nullable, rate_set, statut).
     con.execute(
         &format!(
             "INSERT INTO dim_scenario \
-             SELECT code, libelle, type, statut \
+             SELECT code, libelle, category, entry_period, presentation_currency, \
+                    variant, ruleset_code, rate_set, statut \
              FROM read_csv_auto('{}')",
             csv_path("scenarios.csv")
         ),
@@ -125,10 +175,11 @@ pub fn load_all(con: &Connection, data_dir: &Path) -> duckdb::Result<()> {
         ),
         [],
     )?;
+    // sat_exchange_rate v2 : `rate_set` en 1ère colonne (PK étendue).
     con.execute(
         &format!(
             "INSERT INTO sat_exchange_rate \
-             SELECT currency_source, period, taux_close, taux_moyen \
+             SELECT rate_set, currency_source, period, taux_close, taux_moyen \
              FROM read_csv_auto('{}')",
             csv_path("rates.csv")
         ),

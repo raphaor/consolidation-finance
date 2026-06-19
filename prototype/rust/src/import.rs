@@ -145,7 +145,7 @@ async fn import_rates(
     let header = parse_header_line(&header_line);
     require_columns(
         &header,
-        &["currency_source", "period", "taux_close", "taux_moyen"],
+        &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
     )?;
 
     let tmp = unique_tmp_path("csv");
@@ -153,10 +153,10 @@ async fn import_rates(
     let path = escape_csv_path(&tmp.display().to_string());
     let sql = format!(
         "INSERT INTO sat_exchange_rate \
-         (currency_source, period, taux_close, taux_moyen) \
-         SELECT currency_source, period, taux_close, taux_moyen \
+         (rate_set, currency_source, period, taux_close, taux_moyen) \
+         SELECT rate_set, currency_source, period, taux_close, taux_moyen \
          FROM read_csv_auto('{path}', header=true) \
-         ON CONFLICT(currency_source, period) DO UPDATE SET \
+         ON CONFLICT(rate_set, currency_source, period) DO UPDATE SET \
             taux_close = excluded.taux_close, \
             taux_moyen = excluded.taux_moyen"
     );
