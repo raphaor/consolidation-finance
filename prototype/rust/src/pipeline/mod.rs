@@ -123,44 +123,76 @@ impl ConvertParams {
     }
 }
 
-/// Enchaîne les 4 étapes et renvoie le nombre de lignes par niveau.
+// ─────────────────────────────────────────────────────────────────────────────
+//  Trait Step — uniformisation des 4 étapes du pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Un trait pour unifier les 4 étapes du pipeline (A→B→C→D).
 ///
-/// Miroir de `conso/pipeline.py::run_pipeline`.
+/// Chaque étape : (1) exécute sa transformation principale ([`Step::run`]),
+/// (2) injecte d'éventuels flux de staging (préfixe 2/3/4), (3) reconstruit
+/// les clôtures. L'orchestration commune est dans [`run_steps`].
 ///
-/// Ordre des éléments de `LevelCounts` :
-/// `[corporate, reclassified, converted, consolidated]`.
-///
-/// Après chacune des étapes B, C et D, on materialise les flux de clôture
-/// (flux auto-référentiels de `dim_flow.flux_de_report`) = Σ des flux qui y
-/// reportent — en écrasant la clôture portée par l'étape (les clôtures
-/// transitent comme n'importe quel flux, puis sont reconstruites de façon
-/// autoritaire à chaque niveau). Le validateur [`crate::validate`] compare
-/// ensuite la clôture stockée à cette somme (data-driven).
-pub fn run_pipeline(
-    con: &Connection,
-    params: &ConvertParams,
-) -> duckdb::Result<LevelCounts> {
-    let corporate = aggregate::step_a(con)?;
-    let reclassified = {
-        reclassify::step_b(con)?;
-        staging::inject_by_prefix(con, "reclassified", "2")?;
-        materialize_closures::materialize_closures(con, "reclassified")?;
-        count_level(con, "reclassified")?
-    };
-    let converted = {
-        convert::step_c(con, params)?;
-        staging::inject_by_prefix(con, "converted", "3")?;
-        materialize_closures::materialize_closures(con, "converted")?;
-        count_level(con, "converted")?
-    };
-    let consolidated = {
-        consolidate::step_d(con)?;
-        staging::inject_by_prefix(con, "consolidated", "4")?;
-        materialize_closures::materialize_closures(con, "consolidated")?;
-        count_level(con, "consolidated")?
-    };
-    Ok([corporate, reclassified, converted, consolidated])
+/// Le SQL réellement exécuté est strictement le même qu'avant le refactor :
+/// les impls délèguent aux fonctions `step_a`/`step_b`/`step_c`/`step_d`
+/// existantes, dans le même ordre.
+pub trait Step: Send + Sync {
+    /// Nom court pour les logs ("agrégation", "reclassification"…).
+    fn name(&self) -> &'static str;
+    /// Niveau produit en sortie ("corporate", "reclassified"…).
+    fn output_level(&self) -> &'static str;
+    /// Préfixe de staging injecté après cette étape ("2", "3", "4", ou "" si aucun).
+    fn staging_prefix(&self) -> &'static str { "" }
+    /// Exécute la transformation principale (sans staging ni clôtures).
+    fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()>;
 }
+
+/// Étape A — agrégation `stg_entry` → `fact_entry [corporate]`.
+pub struct AggregateStep;
+impl Step for AggregateStep {
+    fn name(&self) -> &'static str { "agrégation" }
+    fn output_level(&self) -> &'static str { "corporate" }
+    fn run(&self, con: &Connection, _params: &ConvertParams) -> duckdb::Result<()> {
+        aggregate::step_a(con).map(|_| ())
+    }
+}
+
+/// Étape B — reclassification `corporate` → `fact_entry [reclassified]`.
+pub struct ReclassifyStep;
+impl Step for ReclassifyStep {
+    fn name(&self) -> &'static str { "reclassification" }
+    fn output_level(&self) -> &'static str { "reclassified" }
+    fn staging_prefix(&self) -> &'static str { "2" }
+    fn run(&self, con: &Connection, _params: &ConvertParams) -> duckdb::Result<()> {
+        reclassify::step_b(con).map(|_| ())
+    }
+}
+
+/// Étape C — conversion multi-devises `reclassified` → `fact_entry [converted]`.
+pub struct ConvertStep;
+impl Step for ConvertStep {
+    fn name(&self) -> &'static str { "conversion" }
+    fn output_level(&self) -> &'static str { "converted" }
+    fn staging_prefix(&self) -> &'static str { "3" }
+    fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
+        convert::step_c(con, params).map(|_| ())
+    }
+}
+
+/// Étape D — consolidation `converted` → `fact_entry [consolidated]`.
+pub struct ConsolidateStep;
+impl Step for ConsolidateStep {
+    fn name(&self) -> &'static str { "consolidation" }
+    fn output_level(&self) -> &'static str { "consolidated" }
+    fn staging_prefix(&self) -> &'static str { "4" }
+    fn run(&self, con: &Connection, _params: &ConvertParams) -> duckdb::Result<()> {
+        consolidate::step_d(con).map(|_| ())
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Rapport d'exécution
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Temps d'exécution mesuré pour une étape du pipeline.
 #[derive(Debug, Clone)]
@@ -199,58 +231,80 @@ impl PipelineReport {
     }
 }
 
-/// Variante de [`run_pipeline`] instrumentée : mêmes effets, renvoie en plus
-/// la durée (wall-clock) de chaque étape.
+// ─────────────────────────────────────────────────────────────────────────────
+//  Orchestration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Enchaîne les étapes fournies et renvoie le rapport d'exécution (avec timings
+/// par étape).
 ///
-/// Pensée pour le benchmark gros volumes — ne change rien à la logique.
-pub fn run_pipeline_timed(
+/// Pour chaque étape :
+/// 1. Exécute la transformation principale ([`Step::run`]).
+/// 2. Si [`Step::staging_prefix`] est non vide : injection des flux de staging
+///    ([`staging::inject_by_prefix`]) **puis** reconstruction autoritaire des
+///    clôtures ([`materialize_closures::materialize_closures`]). Les étapes
+///    sans staging (étape A) ne touchent pas aux clôtures — fidèle au
+///    comportement d'origine (les F99 n'apparaissent qu'à partir de B).
+/// 3. Comptage des lignes produites + mesure du temps écoulé.
+///
+/// Le tableau renvoyé contient toujours exactement 4 entrées (les 4 étapes
+/// du pipeline canonique) — `try_into` panic sinon (cf. [`run_pipeline`]).
+fn run_steps(
+    con: &Connection,
+    params: &ConvertParams,
+    steps: &[Box<dyn Step>],
+) -> duckdb::Result<PipelineReport> {
+    let wall = Instant::now();
+    let mut timings: Vec<StepTiming> = Vec::with_capacity(steps.len());
+    for step in steps {
+        let t = Instant::now();
+        step.run(con, params)?;
+        if !step.staging_prefix().is_empty() {
+            staging::inject_by_prefix(con, step.output_level(), step.staging_prefix())?;
+            materialize_closures::materialize_closures(con, step.output_level())?;
+        }
+        let rows = count_level(con, step.output_level())?;
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        timings.push(StepTiming { level: step.output_level(), rows, ms });
+    }
+    let total_ms = wall.elapsed().as_secs_f64() * 1000.0;
+    let steps_arr: [StepTiming; 4] = timings
+        .try_into()
+        .expect("run_steps attend exactement 4 étapes");
+    Ok(PipelineReport { steps: steps_arr, total_ms })
+}
+
+/// Enchaîne les 4 étapes et renvoie le rapport d'exécution (avec timings).
+///
+/// Miroir de `conso/pipeline.py::run_pipeline`.
+///
+/// Ordre A→B→C→D :
+/// ```text
+/// A. Agrégation      stg_entry        → fact_entry [corporate]
+/// B. Reclassification corporate       → fact_entry [reclassified]
+/// C. Conversion      reclassified     → fact_entry [converted]
+/// D. Consolidation   converted        → fact_entry [consolidated]
+/// ```
+///
+/// Après chacune des étapes B, C et D, on matérialise les flux de clôture
+/// (flux auto-référentiels de `dim_flow.flux_de_report`) = Σ des flux qui y
+/// reportent — en écrasant la clôture portée par l'étape (les clôtures
+/// transitent comme n'importe quel flux, puis sont reconstruites de façon
+/// autoritaire à chaque niveau). Le validateur [`crate::validate`] compare
+/// ensuite la clôture stockée à cette somme (data-driven).
+///
+/// Pour récupérer uniquement les comptes par niveau : [`PipelineReport::counts`].
+pub fn run_pipeline(
     con: &Connection,
     params: &ConvertParams,
 ) -> duckdb::Result<PipelineReport> {
-    let wall = Instant::now();
-
-    let t = Instant::now();
-    let corporate = aggregate::step_a(con)?;
-    let ms_a = t.elapsed().as_secs_f64() * 1000.0;
-
-    let t = Instant::now();
-    let reclassified = {
-        reclassify::step_b(con)?;
-        staging::inject_by_prefix(con, "reclassified", "2")?;
-        materialize_closures::materialize_closures(con, "reclassified")?;
-        count_level(con, "reclassified")?
-    };
-    let ms_b = t.elapsed().as_secs_f64() * 1000.0;
-
-    let t = Instant::now();
-    let converted = {
-        convert::step_c(con, params)?;
-        staging::inject_by_prefix(con, "converted", "3")?;
-        materialize_closures::materialize_closures(con, "converted")?;
-        count_level(con, "converted")?
-    };
-    let ms_c = t.elapsed().as_secs_f64() * 1000.0;
-
-    let t = Instant::now();
-    let consolidated = {
-        consolidate::step_d(con)?;
-        staging::inject_by_prefix(con, "consolidated", "4")?;
-        materialize_closures::materialize_closures(con, "consolidated")?;
-        count_level(con, "consolidated")?
-    };
-    let ms_d = t.elapsed().as_secs_f64() * 1000.0;
-
-    let total_ms = wall.elapsed().as_secs_f64() * 1000.0;
-
-    Ok(PipelineReport {
-        steps: [
-            StepTiming { level: "corporate", rows: corporate, ms: ms_a },
-            StepTiming { level: "reclassified", rows: reclassified, ms: ms_b },
-            StepTiming { level: "converted", rows: converted, ms: ms_c },
-            StepTiming { level: "consolidated", rows: consolidated, ms: ms_d },
-        ],
-        total_ms,
-    })
+    let steps: Vec<Box<dyn Step>> = vec![
+        Box::new(AggregateStep),
+        Box::new(ReclassifyStep),
+        Box::new(ConvertStep),
+        Box::new(ConsolidateStep),
+    ];
+    run_steps(con, params, &steps)
 }
 
 /// Compte les lignes d'un niveau de stockage donné.

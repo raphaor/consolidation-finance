@@ -100,13 +100,14 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let counts = match run_pipeline(&con, &params) {
-        Ok(c) => c,
+    let report = match run_pipeline(&con, &params) {
+        Ok(r) => r,
         Err(e) => {
             eprintln!("\n✗ ERREUR pipeline : {e}");
             std::process::exit(1);
         }
     };
+    let counts = report.counts();
     let labels = ["corporate", "reclassified", "converted", "consolidated"];
     for (label, n) in labels.iter().zip(counts.iter()) {
         println!("   étape → {label:<13} {n:>4} lignes produites");

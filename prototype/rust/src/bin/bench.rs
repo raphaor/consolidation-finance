@@ -21,7 +21,7 @@
 //! ```
 
 use conso_engine::{
-    create_schema, pipeline::run_pipeline_timed, validate::validate_consolidated, ConvertParams,
+    create_schema, pipeline::run_pipeline, validate::validate_consolidated, ConvertParams,
 };
 use duckdb::Connection;
 use std::time::{Duration, Instant};
@@ -100,7 +100,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let report = match run_pipeline_timed(&con, &params) {
+    let report = match run_pipeline(&con, &params) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("\n✗ ERREUR pipeline : {e}");

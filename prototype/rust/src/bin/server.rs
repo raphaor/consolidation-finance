@@ -541,7 +541,7 @@ async fn run_pipeline_handler(
         con.execute("DELETE FROM fact_entry", []).map_err(db_err)?;
 
         // 5. Pipeline.
-        let counts = run_pipeline(&con, &params).map_err(db_err)?;
+        let counts = run_pipeline(&con, &params).map_err(db_err)?.counts();
 
         // 6. Ruleset optionnel.
         let ruleset_report = match &ruleset_code {
@@ -1235,7 +1235,8 @@ async fn main() {
         match initial_scenario {
             Some(code) => match ConvertParams::load_params(&con, &code) {
                 Ok(params) => match run_pipeline(&con, &params) {
-                    Ok(counts) => {
+                    Ok(report) => {
+                        let counts = report.counts();
                         println!(
                             "   Pipeline initial (scénario {code}) : corporate={}, reclassified={}, converted={}, consolidated={}",
                             counts[0], counts[1], counts[2], counts[3]
