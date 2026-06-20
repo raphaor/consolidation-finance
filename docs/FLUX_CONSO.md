@@ -175,7 +175,19 @@ La reconstruction est **autoritaire** : pour un grain dimensionnel donné, elle 
 
 ### Grain de reconstruction
 
-Grain actuel : `(scenario, entity, entry_period, period, account, currency, nature)` — les dimensions `partner` / `share` / `analysis` sont volontairement hors grain (une clôture est un solde agrégé, pas une écriture détaillée). **`Nature` entre dans le grain** (décision 2026-06-17) : deux clôtures différant seulement par la nature sont des soldes distincts. Détail et marqueurs `GRAIN` dans `prototype/rust/src/pipeline/materialize_closures.rs`.
+Grain : **toutes les dimensions propagées** (built-in + custom) **sauf `flow`** — la clôture est identifiée par `dim_flow.flux_de_report`, pas par le flux source. Cela inclut **`Nature`** (Active ; décision 2026-06-17) **et les dimensions analytiques** (`partner` / `share` / `analysis` / `analysis2` + custom) : chaque **« dont »** obtient **sa propre clôture** (ex. la F99 `partner = B` = Σ de ses seuls constituants `partner = B`), la clôture **principale** (analytiques NULL) ne sommant que les constituants principaux → **pas de double compte**. Les **totaux** (bilan, CR) excluent ensuite les « dont » en filtrant `<analytique> IS NULL` (cf. [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §4 bis « of which »). Détail et marqueurs `GRAIN` dans `prototype/rust/src/pipeline/materialize_closures.rs`.
+
+> Corollaire : une **ligne principale ne doit jamais porter de valeur analytique** (sinon elle devient un « dont » et disparaît des totaux). Une trace de provenance se met dans le champ non-dimensionnel `Source`, pas dans `analysis2`.
+
+### F99 et les règles de consolidation
+
+Le F99 appartient aux **transitions de niveau** : il est reconstruit par `materialize_closures` à la fin de chaque étape — la **conversion** en fixe la valeur autoritaire (avec les écarts F80/F81). **Les règles ne reconstruisent pas les clôtures** (le hook historique post-règle est débranché — flag `rules::RECONSTRUCT_CLOSURES_AFTER_RULE`, conservé/réactivable). Une règle traite donc le F99 **comme tout autre flux** :
+
+- elle s'exécute **après** la transition qui possède le flux ciblé (ex. élimination interco au niveau **converti**, après le calcul des écarts de conversion) ;
+- elle **sélectionne et génère chaque flux présent** sur les lignes ciblées — F00, F20, F80, F81 **et F99** — **flux à flux** ;
+- l'identité `F99 = Σ constituants` reste vérifiée **sans** reconstruction post-règle, car la règle élimine F99 de la somme exacte des constituants qu'elle élimine.
+
+**Exemple (élimination interco au converti)** : la règle reclasse la part interco d'un compte de tiers vers un **compte de liaison**, en reprenant pour chaque flux son montant — y compris l'**écart de conversion F81** de l'interco, qui suit ainsi l'élimination vers le compte de liaison. (La justesse comptable d'une règle d'interco donnée relève de la **configuration/recette**, hors moteur — cf. tests Python.)
 
 ## 4. À-nouveau
 

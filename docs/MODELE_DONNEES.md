@@ -20,7 +20,8 @@ Sémantique des champs du CSV et caractéristiques *master data* de chaque dimen
 | `Partner*` | Dimension | Contrepartie (interco si dans le périmètre, sinon tiers lié / externe) |
 | `Share*` | Dimension | Participation visée par l'écriture (A détient B → `Share` identifie la relation et la cible B) |
 | `Analysis*` | Dimension | Axe analytique libre (centre de coût, projet…) |
-| `Analysis2*` | Dimension | Second axe analytique libre. **Ex-`Audit_id`** : cette dimension avait été créée pour la traçabilité, mais ce rôle est tenu par `Nature` ; `analysis2` est donc un axe analytique générique, aujourd'hui libre/inutilisé. Il n'existe **pas** de colonne `audit_id` dédiée. |
+| `Analysis2*` | Dimension | Second axe analytique libre. **Ex-`Audit_id`** : cette dimension avait été créée pour la traçabilité, mais ce rôle n'est **pas** le sien — `analysis2` est un axe analytique générique (soumis à la sémantique « of which », cf. §4 bis). La trace de provenance d'une ligne vit dans `Source` (ci-dessous), **jamais** ici (l'y mettre ferait de chaque ligne un « dont »). |
+| `Source*` | Métadonnée (non-dimensionnelle) | Référence de **provenance** d'une ligne (ex. réf. de liasse source `S-M-001`, plus tard règle/import générateur). **Hors registre des dimensions** : non propagée par le pipeline, hors grain de clôture, hors « of which ». Portée par `stg_entry` (colonne `source`). Il n'existe pas de colonne `audit_id` : c'est `Source` qui tient ce rôle. |
 | `Amount` | Mesure | Montant |
 
 `*` = optionnel.
