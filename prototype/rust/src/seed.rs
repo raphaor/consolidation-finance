@@ -83,6 +83,10 @@ const ACCOUNTS: &[(&str, &str, &str, &str, Option<&str>, Option<&str>)] = &[
     ("640", "Dotations aux amort.",   "resultat", "charges",  None,                     None),
     ("700", "Ventes",                 "resultat", "produits", None,                     None),
     ("705", "Prestations",            "resultat", "produits", None,                     None),
+    // Comptes de tiers (PCG) pour la modélisation interco bilan.
+    ("467",  "Divers comptes débiteurs et produits à recevoir",  "bilan", "actif",  None, None),
+    ("468",  "Divers comptes créditeurs et charges à payer",     "bilan", "passif", None, None),
+    ("471L", "Liaison élimination intragroupe",                  "bilan", "passif", None, None),
 ];
 
 /// Catalogue des flux — cf. docs/FLUX_CONSO.md §6.

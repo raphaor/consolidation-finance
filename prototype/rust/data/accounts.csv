@@ -8,3 +8,6 @@ code,libelle,classe,sous_classe,technical_grouping,compte_parent
 640,Dotations aux amort.,resultat,charges,,
 700,Ventes,resultat,produits,,
 705,Prestations,resultat,produits,,
+467,Divers comptes débiteurs et produits à recevoir,bilan,actif,,
+468,Divers comptes créditeurs et charges à payer,bilan,passif,,
+471L,Liaison élimination intragroupe,bilan,passif,,
