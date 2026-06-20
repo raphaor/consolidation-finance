@@ -149,7 +149,9 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
         INSERT INTO dim_rate_set VALUES ('RATES', 'Taux réels');
 
         -- dim_scenario v2 : catégorie + période + devise + variante + ruleset + rate_set.
-        INSERT INTO dim_scenario VALUES
+        INSERT INTO dim_scenario
+            (code, libelle, category, entry_period, presentation_currency,
+             variant, ruleset_code, rate_set, statut) VALUES
             ('REEL','Réel','REEL','2024','EUR','BASE',NULL,'RATES','ouvert'),
             ('BUDGET','Budget','BUDGET','2024','EUR','BASE',NULL,'RATES','ouvert'),
             ('PREV','Prévision','PREV','2024','EUR','BASE',NULL,'RATES','ouvert');
@@ -188,7 +190,8 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             NULL, NULL, NULL
         FROM range(0, {N_ACCOUNTS}) t(i);
 
-        INSERT INTO dim_flow VALUES
+        INSERT INTO dim_flow
+            (code, libelle, taux_conversion, flux_ecart, flux_de_report) VALUES
             ('F00','Ouverture','close_n1','F80','F99'),
             ('F01','Entrée périmètre','close_n1','F80','F99'),
             ('F20','Variation','avg','F81','F99'),

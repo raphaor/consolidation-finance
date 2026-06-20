@@ -114,6 +114,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
             "ruleset_code",
             "rate_set",
             "statut",
+            "a_nouveau_scenario",
         ],
         casts: &[],
         use_explicit_schema: false,
@@ -162,7 +163,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
     CsvMapping {
         file: "flows.csv",
         table: "dim_flow",
-        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report"],
+        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
         casts: &[],
         use_explicit_schema: false,
     },

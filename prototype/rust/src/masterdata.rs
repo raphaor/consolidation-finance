@@ -61,6 +61,7 @@ const TABLES: &[TableDef] = &[
             "ruleset_code",
             "rate_set",
             "statut",
+            "a_nouveau_scenario",
         ],
         pk: &["code"],
     },
@@ -91,7 +92,7 @@ const TABLES: &[TableDef] = &[
     TableDef {
         api_name: "flows",
         sql_name: "dim_flow",
-        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report"],
+        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
         pk: &["code"],
     },
     TableDef {

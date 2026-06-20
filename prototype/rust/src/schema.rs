@@ -89,7 +89,8 @@ CREATE TABLE dim_scenario (
     variant               TEXT,   -- FK dim_variant ('BASE')
     ruleset_code          TEXT,   -- FK dim_ruleset (NULL = pas de règles)
     rate_set              TEXT,   -- FK dim_rate_set
-    statut                TEXT    -- 'ouvert' / 'verrouillé'
+    statut                TEXT,   -- 'ouvert' / 'verrouillé'
+    a_nouveau_scenario    TEXT    -- FK dim_scenario : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2
 );";
 
 /// 2. dim_entity : entité du groupe (hiérarchie, devise fonctionnelle).
@@ -161,7 +162,8 @@ CREATE TABLE dim_flow (
     libelle          TEXT,
     taux_conversion  TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n', 'terminal')),
     flux_ecart       TEXT,           -- flux d'écart de conversion associé (NULL pour les terminaux)
-    flux_de_report   TEXT DEFAULT 'F99'   -- flux dans lequel ce flux se reporte ; auto-référence = clôture reconstruite
+    flux_de_report   TEXT DEFAULT 'F99',  -- flux dans lequel ce flux se reporte ; auto-référence = clôture reconstruite
+    flux_a_nouveau   TEXT             -- flux d'ouverture qui reçoit ce solde à l'exercice suivant (F99 → F00) ; NULL sinon. Cf. docs/A_NOUVEAU.md §2.1
 );";
 
 /// 6. dim_currency : devise référentielle (code ISO, décimales).

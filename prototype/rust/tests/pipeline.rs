@@ -446,7 +446,8 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
 
     // dim_flow : F99 (clôture auto-réf) ← F20 ; F88 (clôture auto-réf) ← F10.
     con.execute_batch(
-        "INSERT INTO dim_flow VALUES
+        "INSERT INTO dim_flow
+            (code, libelle, taux_conversion, flux_ecart, flux_de_report) VALUES
             ('F20','Variation','avg',NULL,'F99'),
             ('F99','Clôture','close_n',NULL,'F99'),
             ('F10','Intermédiaire','avg',NULL,'F88'),

@@ -11,12 +11,14 @@
 
 ## État des phases
 
-- [ ] **Phase 0 — Schéma & seed** (additif, ne casse rien)
-  - [ ] `schema.rs` : `dim_flow.flux_a_nouveau`, `dim_scenario.a_nouveau_scenario`
-  - [ ] `loader.rs` : colonnes flows + scenarios
-  - [ ] `masterdata.rs` : colonnes flows + scenarios
-  - [ ] CSV `data/` + `data_golden/` : flows (F99→F00), scenarios (vide)
-  - [ ] build + test verts
+- [x] **Phase 0 — Schéma & seed** (additif, ne casse rien) ✅ commit
+  - [x] `schema.rs` : `dim_flow.flux_a_nouveau`, `dim_scenario.a_nouveau_scenario`
+  - [x] `loader.rs` : colonnes flows + scenarios
+  - [x] `masterdata.rs` : colonnes flows + scenarios
+  - [x] `seed.rs` + `bench.rs` + `tests/pipeline.rs` : INSERT positionnels → listes de colonnes explicites (sinon cassés par la nouvelle colonne)
+  - [x] CSV `data/` flows (F99→F00) + scenarios (a_nouveau vide) ; `data_golden/flows.csv` idem
+  - [x] build + 26 tests Rust verts
+  - ⚠️ `data_golden/scenarios.csv` est en schéma **v1 (4 colonnes)**, déjà désaligné du loader v2 **avant** ce chantier → golden serveur déjà cassé sur scenarios (recette, Phase 7). Non touché.
 - [ ] **Phase 1 — Suppression `reclassified`** (refactor 3 niveaux) ⚠️ casse golden + retire périmètre natif
   - [ ] `pipeline/mod.rs` (retrait ReclassifyStep, arrays →3), `convert.rs` (lit `corporate`)
   - [ ] suppr. `pipeline/reclassify.rs`
@@ -49,4 +51,5 @@
 
 ## Journal
 
-- _(rien encore — voir git log)_
+- **Phase 0 faite** : schéma (2 colonnes nullables) + loader + masterdata + seed/bench/test (listes de colonnes explicites) + CSV. `cargo build` + `cargo test` (16+10) verts. Aucun impact pipeline (colonnes inertes tant que la Phase 3 ne les lit pas).
+- **NEXT → Phase 1** : suppression de `reclassified`. ⚠️ Casse golden serveur (déjà partiellement cassé) et retire le périmètre natif (F00→F01, F98) → résultats divergents tant que les règles utilisateur n'existent pas. Prévoir MAJ des tests Rust `tests/pipeline.rs` (assertions sur `reclassified`, F01/F98) en même temps.

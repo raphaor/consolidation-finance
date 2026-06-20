@@ -260,7 +260,10 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     // --- Dimensions ---
     for s in SCENARIOS {
         con.execute(
-            "INSERT INTO dim_scenario VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO dim_scenario
+                (code, libelle, category, entry_period, presentation_currency,
+                 variant, ruleset_code, rate_set, statut)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![s.0, s.1, s.2, s.3, s.4, s.5, s.6, s.7, s.8],
         )?;
     }
@@ -290,7 +293,9 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for f in FLOWS {
         con.execute(
-            "INSERT INTO dim_flow VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO dim_flow
+                (code, libelle, taux_conversion, flux_ecart, flux_de_report)
+             VALUES (?, ?, ?, ?, ?)",
             params![f.0, f.1, f.2, f.3, f.4],
         )?;
     }
