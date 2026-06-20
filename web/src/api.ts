@@ -23,7 +23,6 @@ import type {
   RuleDetail,
   RuleSummary,
   RulesetDetail,
-  RulesetReport,
   RulesetSummary,
   ScenarioSummary,
 } from './types';
@@ -196,8 +195,6 @@ export const api = {
     ) => putJson<RulesetDetail>(`/rulesets/${code}`, { code, ...body }),
     remove: (code: string) =>
       deleteJson<{ deleted: number }>(`/rulesets/${code}`),
-    run: (ruleset: string) =>
-      postJsonRaw<RulesetReport>('/rules/run', { ruleset }),
   },
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.

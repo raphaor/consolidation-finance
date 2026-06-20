@@ -46,7 +46,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
     create_schema, dimensions, export, import, load_all, masterdata, money::Money, run_pipeline,
-    run_pipeline_with_hook, run_ruleset, ConvertParams,
+    run_pipeline_with_hook, ConvertParams,
 };
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
@@ -738,12 +738,6 @@ struct RulesetItemIn {
     rule_code: String,
 }
 
-/// Corps accepté par `POST /api/rules/run`.
-#[derive(Deserialize)]
-struct RunRulesetBody {
-    ruleset: String,
-}
-
 /// Sérialise une `JsonValue` en chaîne compacte pour stockage TEXT.
 fn definition_to_text(def: &JsonValue) -> Result<String, AppError> {
     serde_json::to_string(def)
@@ -1064,18 +1058,6 @@ async fn delete_ruleset(
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
-/// POST /api/rules/run — exécute un ruleset.
-async fn run_ruleset_handler(
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<RunRulesetBody>,
-) -> Result<Json<RulesetReport>, AppError> {
-    let report = {
-        let con = lock_con(&state)?;
-        run_ruleset(&con, &body.ruleset).map_err(db_err)?
-    };
-    Ok(Json(report))
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers rulesets (locales au module binaire)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1281,12 +1263,13 @@ async fn main() {
             "/api/meta/dimensions/{name}",
             delete(delete_dimension),
         )
-        // Règles de consolidation (CRUD + exécution)
+        // Règles de consolidation (CRUD). L'exécution des règles passe par le
+        // pipeline (/api/run applique le ruleset du scénario), pas par une route
+        // standalone.
         .route(
             "/api/rules",
             get(list_rules).post(create_rule),
         )
-        .route("/api/rules/run", post(run_ruleset_handler))
         .route(
             "/api/rules/{code}",
             get(get_rule).put(update_rule).delete(delete_rule),

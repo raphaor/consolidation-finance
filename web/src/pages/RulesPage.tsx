@@ -29,11 +29,9 @@ import type {
   Operation,
   ReferenceInfo,
   RuleDefinition,
-  RuleResult,
   RuleSummary,
   RulesetDetail,
   RulesetItem,
-  RulesetReport,
   RulesetSummary,
   ScopeCond,
   SelectionCond,
@@ -1438,8 +1436,6 @@ function JeuxTab() {
     | { mode: 'edit'; draft: RulesetDraft }
     | null
   >(null);
-  const [report, setReport] = useState<RulesetReport | null>(null);
-  const [running, setRunning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1497,23 +1493,6 @@ function JeuxTab() {
     [load],
   );
 
-  const handleRun = useCallback(async (code: string) => {
-    setRunning(code);
-    setReport(null);
-    try {
-      const r = await api.rulesets.run(code);
-      setReport(r);
-      setNotice({
-        kind: 'success',
-        text: `Exécution terminée : ${r.total_generated} ligne(s) générée(s).`,
-      });
-    } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
-    } finally {
-      setRunning(null);
-    }
-  }, []);
-
   async function handleSubmit(draft: RulesetDraft) {
     const payloadItems = draft.items.map((it) => ({
       ordre: it.ordre,
@@ -1569,20 +1548,12 @@ function JeuxTab() {
               >
                 Supprimer
               </button>
-              <button
-                type="button"
-                className="btn btn--sm btn--primary"
-                onClick={() => void handleRun(code)}
-                disabled={running !== null}
-              >
-                {running === code ? 'Exécution…' : 'Exécuter'}
-              </button>
             </div>
           );
         },
       },
     ],
-    [openEdit, handleDelete, handleRun, running],
+    [openEdit, handleDelete],
   );
 
   const table = useReactTable({
@@ -1673,42 +1644,6 @@ function JeuxTab() {
           </tbody>
         </table>
       </div>
-
-      {report !== null && (
-        <div className="rule-report">
-          <h3 className="rule-report__title">
-            Rapport d'exécution — {report.ruleset}
-          </h3>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>Règle</th>
-                <th>Niveau</th>
-                <th>Lignes générées</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.rules.length === 0 && (
-                <tr>
-                  <td className="grid__empty" colSpan={3}>
-                    Aucune ligne générée.
-                  </td>
-                </tr>
-              )}
-              {report.rules.map((r: RuleResult, i) => (
-                <tr key={`${r.rule_code}-${r.level}-${i}`}>
-                  <td className="grid__rowhead">{r.rule_code}</td>
-                  <td>{r.level}</td>
-                  <td className="num">{r.generated}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="rule-report__total">
-            Total : {report.total_generated} ligne(s)
-          </p>
-        </div>
-      )}
 
       {form !== null && (
         <RulesetFormModal
