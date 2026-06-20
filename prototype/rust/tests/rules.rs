@@ -1,459 +1,375 @@
-//! Tests d'intégration du moteur de règles de consolidation.
+//! Tests **mécaniques** de l'interpréteur de règles (`run_ruleset`).
 //!
-//! Ces tests valident l'exécution de `run_ruleset` sur une DuckDB en mémoire
-//! (pattern identique à `tests/pipeline.rs`). Ils complètent `rules_test.py`
-//! (test black-box HTTP sur le dataset golden) en :
+//! Objectif (Sujet 1 — près du moteur) : vérifier que, *étant donné une
+//! définition de règle*, l'interpréteur écrit **exactement les bonnes
+//! écritures**. On teste la mécanique, pas une politique comptable :
 //!
-//! - **reproduisant** le scénario d'élimination interco sur le seed Rust
-//!   (M/A/B), sans dépendre d'un binaire release ni d'un serveur démarré ;
-//! - **couvrant des branches** que l'exemple interco n'exerce pas : coefficient
-//!   `constant`, opérateur `IN`, idempotence intra-règle via les snapshots ;
-//! - **rendant explicite** la reconstruction des clôtures F99 après règle.
+//! - **sélection** : les bonnes lignes sont matchées (`=`, `IN`, `IS NOT NULL`),
+//!   et il y a **une ligne de sortie par ligne source** (donc une par flux) ;
+//! - **coefficient × multiplicateur** : `montant_sortie = source × coeff × mult`
+//!   (constant, `pct_integration` lu depuis `sat_perimeter`) ;
+//! - **destination** : `inherit` / `override` / `null` par dimension (compte,
+//!   nature, partner) ;
+//! - **isolation par snapshot** : une opération ne lit pas la sortie d'une autre ;
+//! - **scope** : filtrage via `sat_perimeter` (méthode de l'entité).
 //!
-//! # Cohérence avec `rules_test.py`
+//! La justesse comptable d'une règle réelle (ex. élimination interco) relève de
+//! la **recette/config** et se teste hors moteur (smoke tests Python).
 //!
-//! | Assertion Python (rules_test.py)          | Contrepartie Rust (ci-dessous)            |
-//! |-------------------------------------------|-------------------------------------------|
-//! | 7a.  lignes 2ELI au consolidé             | `run_ruleset_interco_genere_lignes_2eli`  |
-//! | 7a'. tag analysis2 = RULE:code:seq        | `tag_analysis2_au_format_rule_code_seq`   |
-//! | 7b.  solde interco extourné à 0           | `solde_interco_extourne_a_zero`           |
-//! | 7c.  bilan agrégé inchangé                | `solde_interco_extourne_a_zero` (total)   |
-//! | —    (idempotence inter-ruleset uniquement)| `idempotence_intra_reglet_via_snapshot`   |
-//! | —    (pas de coefficient constant)         | `coefficient_constant_et_multiplicateur`  |
-//! | —    (reconstruction F99 implicite)        | `reconstruction_f99_apres_regle`          |
+//! Méthode : on part du schéma + `seed_all` (registre des dimensions, flux,
+//! comptes, périmètre M/A/B), on **vide `fact_entry`**, on injecte des lignes
+//! contrôlées au niveau voulu, on exécute la règle, et on asserte les sorties.
 
-use conso_engine::{
-    create_schema,
-    pipeline::{materialize_closures::materialize_closures, run_pipeline},
-    run_ruleset, seed_all, ConvertParams,
-};
+use conso_engine::{create_schema, run_ruleset, seed_all};
 use duckdb::Connection;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helpers locaux (SQL) — propres à ce fichier de test.
-// ─────────────────────────────────────────────────────────────────────────────
+const TOL: f64 = 0.001;
 
-/// Ouvre une connexion en mémoire, crée le schéma, charge le seed (groupe
-/// M/A/B), lance le pipeline A→B→C→D. Renvoie la connexion dans l'état
-/// consolidé (prête pour exécution d'un ruleset).
-fn setup() -> Connection {
+/// Connexion prête pour un test mécanique : schéma + dimensions/périmètre seedés,
+/// `fact_entry` vidé (on contrôle entièrement les lignes sources).
+fn engine() -> Connection {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
-    run_pipeline(&con, &params).expect("run_pipeline");
+    con.execute("DELETE FROM fact_entry", []).expect("clear fact_entry");
     con
 }
 
-/// Tolérance f64 (le moteur stocke en DECIMAL(18,2), la lecture se fait en f64).
-const TOL: f64 = 0.01;
-
-/// Insère des écritures interco au niveau `consolidated` (post-pipeline).
-///
-/// Le seed M/A/B n'a aucune écriture partenaire (toutes `partner = NULL`).
-/// Pour exercer une règle d'élimination interco, on injecte 2 lignes au niveau
-/// consolidated :
-///   - M vend 100 EUR à A sur le compte 700 (F20, nature 0LIASS) ;
-///   - A vend  80 EUR à M sur le compte 600 (F20, nature 0LIASS).
-///
-/// M et A sont toutes deux en méthode `globale` dans le seed → le scope croisé
-/// `(entity.methode = globale) AND (partner.methode = globale)` les sélectionne.
-fn seed_interco(con: &Connection) {
-    con.execute_batch(
+/// Injecte une ligne source dans `fact_entry`. Scénario/exercice/période/devise
+/// fixés (REEL/2024/2024/EUR) pour matcher le périmètre seedé.
+#[allow(clippy::too_many_arguments)]
+fn put(
+    con: &Connection,
+    entity: &str,
+    account: &str,
+    flow: &str,
+    partner: Option<&str>,
+    nature: &str,
+    amount: f64,
+    level: &str,
+) {
+    con.execute(
         "INSERT INTO fact_entry \
             (scenario, entity, entry_period, period, account, flow, currency, \
              nature, partner, share, analysis, analysis2, level, amount) \
-         VALUES \
-            ('REEL','M','2024','2024','700','F20','EUR','0LIASS','A',NULL,NULL,'S-M-INT','consolidated','100.00'), \
-            ('REEL','A','2024','2024','600','F20','EUR','0LIASS','M',NULL,NULL,'S-A-INT','consolidated','80.00');",
+         VALUES ('REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?)",
+        duckdb::params![entity, account, flow, nature, partner, level, amount],
     )
-    .expect("seed_interco");
-    // Les F20 interco ont été injectés après le pipeline : les F99 du niveau
-    // consolidated ne les intègrent pas encore. On reconstruit les clôtures
-    // pour partir d'un état cohérent (sinon la règle, en déclenchant
-    // `materialize_closures`, ferait apparaître un Δ artificiel = montant des
-    // F20 injectés, en plus de son propre effet).
-    materialize_closures(con, "consolidated").expect("materialize_closures post-seed_interco");
+    .unwrap_or_else(|e| panic!("put({entity},{account},{flow}): {e}"));
 }
 
 /// Crée une règle dans `dim_rule`.
-fn create_rule(con: &Connection, code: &str, libelle: &str, definition_json: &str) {
+fn create_rule(con: &Connection, code: &str, definition_json: &str) {
     con.execute(
         "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
-        duckdb::params![code, libelle, definition_json],
+        duckdb::params![code, code, definition_json],
     )
-    .unwrap_or_else(|e| panic!("create_rule({code}) : {e}"));
+    .unwrap_or_else(|e| panic!("create_rule({code}): {e}"));
 }
 
-/// Crée un ruleset à un seul item (ordre 1) référençant une règle.
-fn create_ruleset_one(con: &Connection, rs_code: &str, libelle: &str, rule_code: &str) {
+/// Crée un ruleset à un seul item (ordre 1) référençant une règle, et l'exécute.
+fn run_one(con: &Connection, rule_code: &str) -> usize {
     con.execute(
-        "INSERT INTO dim_ruleset (code, libelle) VALUES (?, ?)",
-        duckdb::params![rs_code, libelle],
+        "INSERT INTO dim_ruleset (code, libelle) VALUES ('RS', 'rs')",
+        [],
     )
-    .unwrap_or_else(|e| panic!("create_ruleset({rs_code}) : {e}"));
+    .expect("create ruleset");
     con.execute(
-        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES (?, 1, ?)",
-        duckdb::params![rs_code, rule_code],
+        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES ('RS', 1, ?)",
+        duckdb::params![rule_code],
     )
-    .unwrap_or_else(|e| panic!("create_ruleset_item({rs_code}) : {e}"));
+    .expect("create ruleset item");
+    run_ruleset(con, "RS").expect("run_ruleset").total_generated
 }
 
-/// SUM(amount) au niveau consolidated avec un filtre SQL libre (appliqué après
-/// `level='consolidated'`). Renvoie 0.0 si aucune ligne.
-fn sum_consol(con: &Connection, filter: &str) -> f64 {
-    let sql = format!(
-        "SELECT COALESCE(SUM(amount), 0) FROM fact_entry \
-         WHERE level='consolidated' AND {filter}"
-    );
+/// SUM(amount) sur `fact_entry` filtré par une clause SQL libre.
+fn ssum(con: &Connection, filter: &str) -> f64 {
+    let sql = format!("SELECT COALESCE(SUM(amount), 0) FROM fact_entry WHERE {filter}");
     con.query_row(&sql, [], |r| r.get::<_, f64>(0))
-        .unwrap_or_else(|e| panic!("sum_consol({filter}) : {e}"))
+        .unwrap_or_else(|e| panic!("ssum({filter}): {e}"))
 }
 
-/// Nombre de lignes au niveau consolidated avec un filtre SQL libre.
-fn count_consol(con: &Connection, filter: &str) -> i64 {
-    let sql = format!(
-        "SELECT COUNT(*) FROM fact_entry \
-         WHERE level='consolidated' AND {filter}"
-    );
+/// COUNT(*) sur `fact_entry` filtré.
+fn scount(con: &Connection, filter: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) FROM fact_entry WHERE {filter}");
     con.query_row(&sql, [], |r| r.get::<_, i64>(0))
-        .unwrap_or_else(|e| panic!("count_consol({filter}) : {e}"))
-}
-
-/// Définition JSON d'une règle d'élimination interco à 2 opérations sur le
-/// compte 700 (extourne + contrepartie). Plus courte que la règle 4-op du test
-/// Python (qui couvre 700 + 600) — suffisante pour valider la mécanique.
-fn elim_700_json() -> &'static str {
-    r#"{
-        "scope": [
-            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
-            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
-        ],
-        "operations": [
-            {
-                "seq": 1, "level": "consolidated",
-                "selection": [
-                    {"dim": "account", "op": "=", "val": "700"},
-                    {"dim": "partner", "op": "IS NOT NULL"}
-                ],
-                "coefficient": {"type": "pct_integration"},
-                "multiplicateur": -1,
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2ELI"},
-                    "partner": {"mode": "inherit"}
-                }
-            },
-            {
-                "seq": 2, "level": "consolidated",
-                "selection": [
-                    {"dim": "account", "op": "=", "val": "700"},
-                    {"dim": "partner", "op": "IS NOT NULL"}
-                ],
-                "coefficient": {"type": "pct_integration"},
-                "multiplicateur": 1,
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2ELI"},
-                    "partner": {"mode": "null"}
-                }
-            }
-        ]
-    }"#
+        .unwrap_or_else(|e| panic!("scount({filter}): {e}"))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  1. Exécution d'un ruleset d'élimination interco (2 ops sur 700)
-//     — miroir de rules_test.py §7a/7c sur le seed Rust.
-//
-//     La règle sélectionne les lignes interco (partner NOT NULL) du compte 700
-//     au niveau consolidated, extourne (op 1, partner hérité) et pose une
-//     contrepartie (op 2, partner vidé). Toutes deux en nature 2ELI.
+//  1. Sélection + multiplicateur : une ligne de sortie, montant négocié, flux
+//     et dimensions non surchargées hérités.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn run_ruleset_interco_genere_lignes_2eli() {
-    let con = setup();
-    seed_interco(&con);
-    create_rule(&con, "ELI_700", "Élimination interco 700", elim_700_json());
-    create_ruleset_one(&con, "RS_TEST", "Ruleset test", "ELI_700");
+fn op_genere_une_ligne_par_source_montant_et_heritage() {
+    let con = engine();
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted");
 
-    // Avant règle : pas de 2ELI au consolidé.
-    assert_eq!(count_consol(&con, "nature='2ELI'"), 0, "baseline sans 2ELI");
-
-    let report = run_ruleset(&con, "RS_TEST").expect("run_ruleset");
-    assert_eq!(report.ruleset, "RS_TEST");
-    assert!(report.total_generated > 0, "doit générer des lignes : {report:?}");
-    // Exactement 2 lignes générées (1 par opération, 1 ligne source sur 700/M→A).
-    assert_eq!(
-        report.total_generated, 2,
-        "2 ops × 1 ligne source = 2 lignes générées, eu {}",
-        report.total_generated
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":-1,
+             "destination":{"nature":{"mode":"override","value":"TST"}}}]}"#,
     );
+    assert_eq!(run_one(&con, "R"), 1, "1 ligne source matchée → 1 sortie");
 
-    // Après règle : des lignes 2ELI sont présentes.
-    let n_2eli = count_consol(&con, "nature='2ELI'");
-    assert!(n_2eli >= 2, "au moins 2 lignes 2ELI (extourne + contrepartie), eu {n_2eli}");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  2. Tag analysis2 = "RULE:<code>:<seq>" sur les lignes générées
-//     — miroir de rules_test.py §7a'.
-//
-//     Les F99 reconstruits par materialize_closures portent analysis2=NULL
-//     (le tag n'est appliqué qu'aux lignes directement générées par la règle).
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[test]
-fn tag_analysis2_au_format_rule_code_seq() {
-    let con = setup();
-    seed_interco(&con);
-    create_rule(&con, "ELI_700", "Élimination interco 700", elim_700_json());
-    create_ruleset_one(&con, "RS_TEST", "Ruleset test", "ELI_700");
-
-    run_ruleset(&con, "RS_TEST").expect("run_ruleset");
-
-    // Toutes les lignes 2ELI non-F99 portent analysis2 = 'RULE:ELI_700:<seq>'.
-    let bad: Vec<(String, Option<String>)> = con
-        .prepare(
-            "SELECT flow, analysis2 FROM fact_entry \
-             WHERE level='consolidated' AND nature='2ELI' AND flow <> 'F99'",
-        )
-        .unwrap()
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|(_, a2)| !matches!(a2, Some(s) if s.starts_with("RULE:ELI_700:")))
-        .collect();
-    assert!(bad.is_empty(), "analysis2 non conformes (doivent commencer par 'RULE:ELI_700:') : {bad:?}");
-
-    // Les F99 2ELI reconstruits portent analysis2=NULL (régénérés par materialize).
-    let bad_f99: i64 = con
-        .query_row(
-            "SELECT COUNT(*) FROM fact_entry \
-             WHERE level='consolidated' AND nature='2ELI' AND flow='F99' \
-               AND analysis2 IS NOT NULL",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(bad_f99, 0, "les F99 2ELI reconstruits doivent avoir analysis2=NULL");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  3. Solde interco extourné à 0 — miroir de rules_test.py §7b/7c.
-//
-//     Après exécution, la somme des montants au niveau consolidated avec
-//     partner IS NOT NULL doit être ≈ 0 (extourne). Le total consolidated
-//     (toutes lignes) doit être inchangé (équilibre : pour chaque -X généré,
-//     un +X est aussi généré).
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[test]
-fn solde_interco_extourne_a_zero() {
-    let con = setup();
-    seed_interco(&con);
-
-    let total_before = sum_consol(&con, "1=1");
-    let interco_before = sum_consol(&con, "partner IS NOT NULL");
-    // Interco injectée : 100 (M→A) + 80 (A→M) = 180. La règle 700 ne couvre que
-    // le compte 700 → seule l'interco 100 (M→A) sera extournée. On le vérifie
-    // ci-dessous (solde 700/M partner NOT NULL = 0).
-    assert!((interco_before - 180.0).abs() < TOL, "baseline interco = 180, eu {interco_before}");
-
-    create_rule(&con, "ELI_700", "Élimination interco 700", elim_700_json());
-    create_ruleset_one(&con, "RS_TEST", "Ruleset test", "ELI_700");
-    run_ruleset(&con, "RS_TEST").expect("run_ruleset");
-
-    // Solde 700 partner NOT NULL extourné à 0 (op 1 extourne les 100 initiaux).
-    let interco_700 = sum_consol(&con, "account='700' AND partner IS NOT NULL");
+    // Sortie : compte 200 (hérité), flux F20 (hérité), partner NULL (hérité),
+    // nature TST (override), montant 100 × 1 × (−1) = −100.
     assert!(
-        interco_700.abs() < TOL,
-        "solde interco 700 (partner NOT NULL) doit être ~0 après extourne, eu {interco_700}"
+        (ssum(&con, "level='converted' AND nature='TST'") - (-100.0)).abs() < TOL,
+        "montant = source × coeff × mult"
     );
-
-    // Total consolidated inchangé (extourne −100 + contrepartie +100 = 0 net).
-    let total_after = sum_consol(&con, "1=1");
-    assert!(
-        (total_after - total_before).abs() < TOL,
-        "total consolidated doit être inchangé par la règle (équilibrée) : avant={total_before}, après={total_after}"
+    assert_eq!(
+        scount(
+            &con,
+            "level='converted' AND nature='TST' AND account='200' AND flow='F20' AND partner IS NULL"
+        ),
+        1,
+        "flux et compte hérités, partner non surchargé reste NULL"
     );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  4. Idempotence intra-règle via snapshot — non couvert par rules_test.py.
-//
-//     Une règle avec 2 opérations identiques (même sélection) sur le même
-//     niveau doit générer exactement 2×N lignes (N = lignes matchant la
-//     sélection à l'état initial), pas 3×N (cas d'une cascade sans snapshot,
-//     où l'op 2 lirait les écritures générées par l'op 1).
-//
-//     Le moteur crée un `CREATE TEMP TABLE _rule_snap_<level>` avant l'exécution
-//     des opérations : toutes les opérations lisent le snapshot, jamais l'état
-//     en cours de modification.
+//  2. Une sortie PAR ligne source : sans filtre de flux, chaque flux matché
+//     produit sa propre sortie (mécanique pure — pas une politique sur F99).
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn idempotence_intra_reglet_via_snapshot() {
-    let con = setup();
-    seed_interco(&con);
+fn une_sortie_par_flux_matche() {
+    let con = engine();
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted");
+    put(&con, "M", "200", "F99", None, "0LIASS", 100.0, "converted");
 
-    // Règle à 2 opérations identiques (seq 1 et 2) : copie à l'identique de
-    // l'interco 700 (coefficient 1, multiplicateur 1, nature surchargée).
-    let json = r#"{
-        "scope": [
-            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
-            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
-        ],
-        "operations": [
-            {
-                "seq": 1, "level": "consolidated",
-                "selection": [{"dim": "account", "op": "=", "val": "700"},
-                              {"dim": "partner", "op": "IS NOT NULL"}],
-                "destination": {"nature": {"mode": "override", "value": "2CPY"}}
-            },
-            {
-                "seq": 2, "level": "consolidated",
-                "selection": [{"dim": "account", "op": "=", "val": "700"},
-                              {"dim": "partner", "op": "IS NOT NULL"}],
-                "destination": {"nature": {"mode": "override", "value": "2CPY"}}
-            }
-        ]
-    }"#;
-    create_rule(&con, "CPY_2OPS", "Copie 2 ops identiques", json);
-    create_ruleset_one(&con, "RS_TEST", "Ruleset test", "CPY_2OPS");
-
-    let report = run_ruleset(&con, "RS_TEST").expect("run_ruleset");
-
-    // La sélection matche exactement 1 ligne source (M→A 700 100 EUR).
-    // Avec snapshot : chaque op génère 1 ligne → total = 2.
-    // Sans snapshot (cascade intra-règle) : op 1 génère 1 ligne, op 2 lirait
-    // l'originale + la générée de l'op 1 → 2 lignes → total = 3.
-    assert_eq!(
-        report.total_generated, 2,
-        "snapshot doit isoler les opérations : attendu 2 lignes (2 ops × 1 source), eu {}",
-        report.total_generated
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":-1,
+             "destination":{"nature":{"mode":"override","value":"TST"}}}]}"#,
     );
+    assert_eq!(run_one(&con, "R"), 2, "2 lignes sources (F20, F99) → 2 sorties");
 
-    // Vérification par requête : exactement 2 lignes 2CPY non-F99 sur 700.
-    let n = count_consol(&con, "nature='2CPY' AND flow<>'F99'");
-    assert_eq!(n, 2, "2 lignes 2CPY générées (hors F99 reconstruits), eu {n}");
+    assert!((ssum(&con, "nature='TST' AND flow='F20'") - (-100.0)).abs() < TOL);
+    assert!((ssum(&con, "nature='TST' AND flow='F99'") - (-100.0)).abs() < TOL);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  5. Coefficient constant × multiplicateur — branche non couverte par
-//     l'exemple interco (qui utilise pct_integration = 1.0 sur le seed).
-//
-//     Une opération coefficient=Constant(0.5), multiplicateur=2 sur une ligne
-//     source de montant 100 doit produire une ligne de montant 100 × 0.5 × 2 = 100.
-//     Une opération coefficient=Constant(0.25), multiplicateur=-1 produit
-//     100 × 0.25 × -1 = -25.
+//  3. Destination override : compte + nature redirigés ; pas de sortie sur le
+//     compte source.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn destination_override_compte_et_nature() {
+    let con = engine();
+    put(&con, "M", "468", "F20", None, "0LIASS", 100.0, "converted");
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"468"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"account":{"mode":"override","value":"471L"},
+                            "nature":{"mode":"override","value":"TST"}}}]}"#,
+    );
+    assert_eq!(run_one(&con, "R"), 1);
+
+    assert!((ssum(&con, "nature='TST' AND account='471L' AND flow='F20'") - 100.0).abs() < TOL);
+    assert_eq!(
+        scount(&con, "nature='TST' AND account='468'"),
+        0,
+        "aucune sortie sur le compte source (compte redirigé)"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  4. Destination partner : `inherit` conserve le partenaire, `null` le vide.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn destination_partner_inherit_et_null() {
+    let con = engine();
+    put(&con, "M", "200", "F20", Some("A"), "0LIASS", 100.0, "converted");
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"DONT"},
+                            "partner":{"mode":"inherit"}}},
+            {"seq":2,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"MAIN"},
+                            "partner":{"mode":"null"}}}]}"#,
+    );
+    assert_eq!(run_one(&con, "R"), 2);
+
+    assert_eq!(
+        scount(&con, "nature='DONT' AND partner='A'"),
+        1,
+        "partner inherit conserve A"
+    );
+    assert_eq!(
+        scount(&con, "nature='MAIN' AND partner IS NULL"),
+        1,
+        "partner null vide le partenaire"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  5. Coefficient constant × multiplicateur : montant = source × coeff × mult.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn coefficient_constant_et_multiplicateur() {
-    let con = setup();
-    seed_interco(&con);
+    let con = engine();
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted");
 
-    // Deux opérations indépendantes sur la même sélection (interco 700/M→A = 100).
-    let json = r#"{
-        "operations": [
-            {
-                "seq": 1, "level": "consolidated",
-                "selection": [{"dim": "account", "op": "=", "val": "700"},
-                              {"dim": "partner", "op": "IS NOT NULL"}],
-                "coefficient": {"type": "constant", "value": 0.5},
-                "multiplicateur": 2,
-                "destination": {"nature": {"mode": "override", "value": "2A"}}
-            },
-            {
-                "seq": 2, "level": "consolidated",
-                "selection": [{"dim": "account", "op": "=", "val": "700"},
-                              {"dim": "partner", "op": "IS NOT NULL"}],
-                "coefficient": {"type": "constant", "value": 0.25},
-                "multiplicateur": -1,
-                "destination": {"nature": {"mode": "override", "value": "2B"}}
-            }
-        ]
-    }"#;
-    create_rule(&con, "CST", "Coefficients constants", json);
-    create_ruleset_one(&con, "RS_TEST", "Ruleset test", "CST");
-
-    let report = run_ruleset(&con, "RS_TEST").expect("run_ruleset");
-    assert_eq!(report.total_generated, 2, "2 ops × 1 source = 2 lignes");
-
-    // Op 1 : 100 × 0.5 × 2 = 100.
-    let amt_a = sum_consol(&con, "nature='2A' AND flow<>'F99'");
-    assert!(
-        (amt_a - 100.0).abs() < TOL,
-        "op 1 : 100 × 0.5 × 2 doit donner 100, eu {amt_a}"
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":0.5},"multiplicateur":2,
+             "destination":{"nature":{"mode":"override","value":"2A"}}},
+            {"seq":2,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":0.25},"multiplicateur":-1,
+             "destination":{"nature":{"mode":"override","value":"2B"}}}]}"#,
     );
-    // Op 2 : 100 × 0.25 × -1 = -25.
-    let amt_b = sum_consol(&con, "nature='2B' AND flow<>'F99'");
+    assert_eq!(run_one(&con, "R"), 2);
+
+    assert!((ssum(&con, "nature='2A'") - 100.0).abs() < TOL, "100 × 0,5 × 2 = 100");
+    assert!((ssum(&con, "nature='2B'") - (-25.0)).abs() < TOL, "100 × 0,25 × −1 = −25");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  6. Coefficient `pct_integration` : lu depuis `sat_perimeter` (ici forcé à 0,5
+//     sur B). montant = source × 0,5.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn coefficient_pct_integration_lit_le_perimetre() {
+    let con = engine();
+    con.execute(
+        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND scenario = 'REEL'",
+        [],
+    )
+    .expect("set pct_integration B");
+    put(&con, "B", "200", "F20", None, "0LIASS", 100.0, "converted");
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"pct_integration"},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"TST"}}}]}"#,
+    );
+    assert_eq!(run_one(&con, "R"), 1);
+
     assert!(
-        (amt_b - (-25.0)).abs() < TOL,
-        "op 2 : 100 × 0.25 × -1 doit donner -25, eu {amt_b}"
+        (ssum(&con, "nature='TST' AND entity='B'") - 50.0).abs() < TOL,
+        "100 × pct_integration(0,5) = 50"
     );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  6. Reconstruction F99 après règle — explicite ce que rules_test.py vérifie
-//     indirectement (via l'absence de fuite).
-//
-//     Une règle génère un flux constitutif (F20) en nature 2CLO au niveau
-//     consolidated. Après `materialize_closures`, le F99 correspondant doit
-//     être reconstruit à ce même grain (scenario, entity, entry_period,
-//     period, account, currency, nature) en intégrant le flux généré.
-//
-//     Concrètement : F99@700/M/2CLO = 100 (le F20 2CLO généré), car la nature
-//     est une dimension `Active` qui entre dans le grain de reconstruction.
+//  7. Isolation par snapshot : 2 opérations identiques sur la même sélection
+//     produisent 2×N lignes (pas 3×N) — l'op 2 lit le snapshot initial, pas la
+//     sortie de l'op 1.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Débranché : ce test valide la reconstruction des clôtures APRÈS une règle
-// (R2), désormais désactivée (cf. `rules::RECONSTRUCT_CLOSURES_AFTER_RULE`). Le
-// F99 relève maintenant de la transition de niveau, pas d'un rebuild post-règle ;
-// une règle gère ses flux (F99 compris) flux à flux. Conservé en `#[ignore]` car
-// le mécanisme R2 reste réactivable et pourra resservir.
 #[test]
-#[ignore = "R2 (reconstruction des clôtures post-règle) débranchée — voir RECONSTRUCT_CLOSURES_AFTER_RULE"]
-fn reconstruction_f99_apres_regle() {
-    let con = setup();
-    seed_interco(&con);
+fn snapshot_isole_les_operations() {
+    let con = engine();
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted");
 
-    // Avant règle : aucun F99 en nature 2CLO au niveau consolidated.
-    let f99_2clo_before = sum_consol(&con, "nature='2CLO' AND flow='F99'");
-    assert!(f99_2clo_before.abs() < TOL, "baseline : pas de F99 2CLO");
-
-    // Règle : copie l'interco 700 en F20 nature 2CLO partner vidé (1 ligne, +100).
-    let json = r#"{
-        "operations": [
-            {
-                "seq": 1, "level": "consolidated",
-                "selection": [{"dim": "account", "op": "=", "val": "700"},
-                              {"dim": "partner", "op": "IS NOT NULL"}],
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2CLO"},
-                    "partner": {"mode": "null"}
-                }
-            }
-        ]
-    }"#;
-    create_rule(&con, "CLO", "Génère F20 2CLO", json);
-    create_ruleset_one(&con, "RS_TEST", "Ruleset test", "CLO");
-
-    run_ruleset(&con, "RS_TEST").expect("run_ruleset");
-
-    // Le F20 2CLO a bien été généré (partner NULL, account 700).
-    let f20_2clo = sum_consol(&con, "nature='2CLO' AND flow='F20'");
-    assert!(
-        (f20_2clo - 100.0).abs() < TOL,
-        "F20 2CLO généré = 100, eu {f20_2clo}"
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"2CPY"}}},
+            {"seq":2,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"2CPY"}}}]}"#,
     );
+    // 1 source × 2 ops = 2 (et non 3 : l'op 2 ne voit pas la sortie de l'op 1).
+    assert_eq!(run_one(&con, "R"), 2);
+    assert_eq!(scount(&con, "nature='2CPY'"), 2);
+}
 
-    // Le F99 2CLO a été reconstruit par materialize_closures après la règle.
-    // Puisque la nature est Active (entre dans le grain), F99@2CLO est un grain
-    // distinct de F99@0LIASS, et sa valeur = Σ(F20 2CLO) = 100.
-    let f99_2clo_after = sum_consol(&con, "nature='2CLO' AND flow='F99'");
-    assert!(
-        (f99_2clo_after - 100.0).abs() < TOL,
-        "F99 2CLO reconstruit après règle = 100 (intégration du F20 généré), eu {f99_2clo_after}"
+// ─────────────────────────────────────────────────────────────────────────────
+//  8. Sélection `IN` + `IS NOT NULL` : matche le bon sous-ensemble.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn selection_in_et_is_not_null() {
+    let con = engine();
+    put(&con, "M", "200", "F20", Some("A"), "0LIASS", 100.0, "converted"); // match
+    put(&con, "M", "300", "F20", Some("A"), "0LIASS", 100.0, "converted"); // hors IN
+    put(&con, "M", "705", "F20", None, "0LIASS", 100.0, "converted"); // partner NULL
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"IN","val":["200","705"]},
+                          {"dim":"partner","op":"IS NOT NULL"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"TST"}}}]}"#,
     );
+    // Seul 200 (dans IN ET partner non NULL) matche : 705 a partner NULL, 300 hors IN.
+    assert_eq!(run_one(&con, "R"), 1);
+    assert_eq!(scount(&con, "nature='TST' AND account='200'"), 1);
+    assert_eq!(scount(&con, "nature='TST' AND account IN ('300','705')"), 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  9. Scope : filtrage par la méthode de l'entité (via `sat_perimeter`). Seules
+//     les lignes des entités `globale` produisent une sortie.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn scope_filtre_sur_methode_entite() {
+    let con = engine();
+    con.execute(
+        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND scenario = 'REEL'",
+        [],
+    )
+    .expect("set methode B");
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // M globale → match
+    put(&con, "B", "200", "F20", None, "0LIASS", 100.0, "converted"); // B proportionnelle → exclue
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[{"target":"entity","dim":"methode","op":"=","val":"globale"}],
+            "operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","op":"=","val":"200"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"TST"}}}]}"#,
+    );
+    assert_eq!(run_one(&con, "R"), 1, "seule l'entité globale produit");
+    assert!((ssum(&con, "nature='TST' AND entity='M'") - 100.0).abs() < TOL);
+    assert_eq!(scount(&con, "nature='TST' AND entity='B'"), 0);
 }
