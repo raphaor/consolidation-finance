@@ -7,11 +7,15 @@ import { buildPivot, buildNaturePivot } from '../utils/pivot';
 import { formatAmount } from '../utils/format';
 import { usePersistentState } from '../utils/usePersistentState';
 
-type ReportType = 'bilan' | 'cr' | 'bilan-detaille';
+type ReportType = 'bilan' | 'cr';
 
 export function RapportsPage() {
   // Filtres persistés (survivent au changement d'onglet et au rechargement).
   const [reportType, setReportType] = usePersistentState<ReportType>('rapports.reportType', 'bilan');
+  // « Détail par nature » : dimension orthogonale au type de rapport — s'applique
+  // au Bilan comme au Compte de résultat (les deux endpoints renvoient le grain
+  // account × flux × nature).
+  const [detailed, setDetailed] = usePersistentState('rapports.detailed', false);
   const [level, setLevel] = usePersistentState<Level>('rapports.level', 'consolidated');
   const [scenario, setScenario] = usePersistentState('rapports.scenario', '');
   const [entity, setEntity] = usePersistentState('rapports.entity', '');
@@ -24,7 +28,15 @@ export function RapportsPage() {
   // Comptes dépliés dans le rapport détaillé (état éphémère, par code compte).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const detailed = reportType === 'bilan-detaille';
+  // Migration : ancienne valeur persistée « bilan-detaille » (avant que le
+  // détail ne devienne une case à cocher) → Bilan + détail coché.
+  useEffect(() => {
+    if ((reportType as string) === 'bilan-detaille') {
+      setReportType('bilan');
+      setDetailed(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,8 +102,16 @@ export function RapportsPage() {
             >
               <option value="bilan">Bilan</option>
               <option value="cr">Compte de résultat</option>
-              <option value="bilan-detaille">Bilan détaillé par nature</option>
             </select>
+          </label>
+          <label className="field field--check">
+            <span>Détail par nature</span>
+            <input
+              type="checkbox"
+              checked={detailed}
+              onChange={(e) => setDetailed(e.target.checked)}
+              disabled={loading}
+            />
           </label>
           <Filters
             scenario={scenario}

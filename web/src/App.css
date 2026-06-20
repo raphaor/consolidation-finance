@@ -173,6 +173,21 @@
   border-color: var(--primary);
 }
 
+/* Case à cocher inline (ex. « Détail par nature » dans Rapports) : libellé au-
+   dessus, case alignée à gauche et dimensionnée à son contenu. */
+.field--check {
+  justify-content: flex-end;
+}
+
+.field--check input[type='checkbox'] {
+  min-width: 0;
+  width: 18px;
+  height: 18px;
+  align-self: flex-start;
+  margin: 4px 0;
+  cursor: pointer;
+}
+
 /* Champ invalide (validation multiplicateur, etc.) */
 .field input.field--invalid {
   border-color: var(--danger, #c0392b);
