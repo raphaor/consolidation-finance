@@ -285,6 +285,35 @@ CREATE TABLE IF NOT EXISTS dim_custom_dimension (
     label TEXT NOT NULL
 );";
 
+/// 8f. dim_characteristic : registre des **caractéristiques N1** (regroupements).
+///
+/// Une caractéristique N1 classe les membres d'une dimension de base (ex.
+/// `comportement` sur les comptes). Sa création crée une table de valeurs
+/// `car_<code>` et ajoute une colonne `<code>` sur la master data de la
+/// dimension de base (cf. `crate::characteristics`). Comme
+/// `dim_custom_dimension`, ce registre **survit au reset** (CREATE IF NOT EXISTS,
+/// hors `ALL_DROP`) ; `create_schema` ré-applique ensuite les colonnes perdues.
+pub const DDL_DIM_CHARACTERISTIC: &str = "\
+CREATE TABLE IF NOT EXISTS dim_characteristic (
+    code           TEXT PRIMARY KEY,
+    libelle        TEXT,
+    base_dimension TEXT NOT NULL
+);";
+
+/// 8g. dim_characteristic_attribute : registre des **attributs N2** d'une N1.
+///
+/// Chaque attribut N2 est une colonne de la table de valeurs `car_<char>`,
+/// déclarée comme référence vers la dimension `target_dimension`. Survit au
+/// reset comme le registre N1.
+pub const DDL_DIM_CHARACTERISTIC_ATTRIBUTE: &str = "\
+CREATE TABLE IF NOT EXISTS dim_characteristic_attribute (
+    characteristic_code TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    libelle             TEXT,
+    target_dimension    TEXT NOT NULL,
+    PRIMARY KEY (characteristic_code, name)
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — mêmes dimensions que fact_entry sans `level`,
@@ -368,6 +397,8 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_RULESET,
     DDL_DIM_RULESET_ITEM,
     DDL_DIM_CUSTOM_DIMENSION,
+    DDL_DIM_CHARACTERISTIC,
+    DDL_DIM_CHARACTERISTIC_ATTRIBUTE,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];
@@ -427,6 +458,11 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
 
     // 4. Ré-appliquer les colonnes custom survivantes.
     crate::dimensions::apply_custom_columns(con, &saved_customs)?;
+
+    // 5. Ré-appliquer les colonnes de rattachement des caractéristiques N1
+    //    (perdues au DROP des tables de dimension de base ; les tables de
+    //    valeurs `car_<code>` survivent au reset, donc ne sont pas recréées).
+    crate::characteristics::reapply(con)?;
 
     Ok(())
 }

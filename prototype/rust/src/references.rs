@@ -99,6 +99,125 @@ pub const REFERENCES: &[Reference] = &[
     rq("dim_ruleset_item", "rule_code", "dim_rule", "code"),
 ];
 
+/// Version **possédée** d'une [`Reference`] — nécessaire pour les références
+/// **dynamiques** (caractéristiques N1/N2) dont les noms de tables/colonnes ne
+/// sont pas `'static` (ex. `car_<code>`, colonnes d'attributs).
+#[derive(Clone, Debug)]
+pub struct OwnedReference {
+    pub table: String,
+    pub column: String,
+    pub target_table: String,
+    pub target_column: String,
+    pub required: bool,
+}
+
+impl OwnedReference {
+    fn from_static(r: &Reference) -> Self {
+        OwnedReference {
+            table: r.table.to_string(),
+            column: r.column.to_string(),
+            target_table: r.target_table.to_string(),
+            target_column: r.target_column.to_string(),
+            required: r.required,
+        }
+    }
+}
+
+/// Master data (table, colonne clé) d'une dimension d'écriture, si elle en a une.
+/// Dérivé du graphe statique : `account → (dim_account, code)`,
+/// `currency → (dim_currency, code_iso)`, `nature → (dim_nature, code)`, etc.
+/// `None` pour les dimensions sans master data (analysis, analysis2, custom).
+pub fn dimension_master(dim: &str) -> Option<(&'static str, &'static str)> {
+    entry_dimension_target(dim).map(|r| (r.target_table, r.target_column))
+}
+
+/// `true` si les registres des caractéristiques existent (faux au tout premier
+/// démarrage, avant exécution du DDL).
+fn characteristic_registries_exist(con: &Connection) -> bool {
+    con.query_row(
+        "SELECT COUNT(*) = 2 FROM information_schema.tables \
+         WHERE table_schema = 'main' \
+           AND table_name IN ('dim_characteristic', 'dim_characteristic_attribute')",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap_or(false)
+}
+
+/// Références **dynamiques** induites par les caractéristiques N1/N2 :
+/// - `dim_<base>.<code> → car_<code>.code` (rattachement de la valeur N1) ;
+/// - `car_<code>.<attr> → dim_<cible>.<clé>` (chaque attribut N2 typé).
+///
+/// Lues directement depuis les registres `dim_characteristic` /
+/// `dim_characteristic_attribute` (tolère leur absence au premier démarrage).
+/// Toutes nullables (`required = false`) : un membre peut ne pas être classé, un
+/// attribut peut ne pas être renseigné.
+pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
+    if !characteristic_registries_exist(con) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+
+    // N1 : colonne de rattachement sur la dimension de base → car_<code>.code
+    if let Ok(mut stmt) =
+        con.prepare("SELECT code, base_dimension FROM dim_characteristic ORDER BY code")
+    {
+        if let Ok(rows) =
+            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        {
+            for (code, base) in rows.flatten() {
+                if let Some((base_table, _)) = dimension_master(&base) {
+                    out.push(OwnedReference {
+                        table: base_table.to_string(),
+                        column: code.clone(),
+                        target_table: format!("car_{code}"),
+                        target_column: "code".to_string(),
+                        required: false,
+                    });
+                }
+            }
+        }
+    }
+
+    // N2 : chaque attribut car_<char>.<name> → master data de la dimension cible
+    if let Ok(mut stmt) = con.prepare(
+        "SELECT characteristic_code, name, target_dimension \
+         FROM dim_characteristic_attribute ORDER BY characteristic_code, name",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        }) {
+            for (char_code, name, target) in rows.flatten() {
+                if let Some((tt, tc)) = dimension_master(&target) {
+                    out.push(OwnedReference {
+                        table: format!("car_{char_code}"),
+                        column: name,
+                        target_table: tt.to_string(),
+                        target_column: tc.to_string(),
+                        required: false,
+                    });
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Toutes les références : statiques (`REFERENCES`) + dynamiques (caractéristiques).
+/// Source unique pour la validation à l'écriture, la santé des données et les
+/// dropdowns dès lors que les caractéristiques entrent en jeu.
+pub fn all_references(con: &Connection) -> Vec<OwnedReference> {
+    let mut out: Vec<OwnedReference> =
+        REFERENCES.iter().map(OwnedReference::from_static).collect();
+    out.extend(dynamic_references(con));
+    out
+}
+
 /// Les références portées par une table donnée.
 pub fn references_for(table: &str) -> impl Iterator<Item = &'static Reference> {
     // `table` est copié (owned) pour ne pas faire fuiter sa lifetime dans le

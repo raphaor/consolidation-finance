@@ -45,8 +45,8 @@ use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
-    create_schema, dimensions, export, import, load_all, masterdata, money::Money, run_pipeline,
-    run_pipeline_with_hook, seed_demo_rules, ConvertParams,
+    characteristics, create_schema, dimensions, export, import, load_all, masterdata, money::Money,
+    run_pipeline, run_pipeline_with_hook, seed_demo_rules, ConvertParams,
 };
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
@@ -1285,6 +1285,7 @@ async fn main() {
             get(get_ruleset).put(update_ruleset).delete(delete_ruleset),
         )
         .merge(masterdata::router())
+        .merge(characteristics::router())
         .merge(import::router())
         .merge(export::router())
         .fallback_service(serve_dir)

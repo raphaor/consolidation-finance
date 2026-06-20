@@ -26,6 +26,7 @@ pub struct AppState {
 
 /// Erreur applicative sérialisée en JSON `{ "error": "<message>" }` avec un
 /// code HTTP explicite (`(StatusCode, String)`).
+#[derive(Debug)]
 pub struct AppError(pub StatusCode, pub String);
 
 impl AppError {

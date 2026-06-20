@@ -559,33 +559,38 @@ async fn remove(
 #[derive(serde::Serialize)]
 struct ReferenceDto {
     table: String,
-    column: &'static str,
+    column: String,
     target_table: String,
-    target_column: &'static str,
+    target_column: String,
     required: bool,
 }
 
 /// GET /api/meta/references — graphe des références (source de vérité unique pour
 /// les dropdowns contextuels du front, en remplacement des miroirs codés en dur).
-async fn get_references() -> Json<Vec<ReferenceDto>> {
+/// Inclut les références **dynamiques** des caractéristiques N1/N2 (cf.
+/// [`references::all_references`]).
+async fn get_references(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ReferenceDto>>, AppError> {
     // Traduit un nom de table SQL en nom d'API master data, en conservant le nom
-    // SQL pour les tables sans équivalent CRUD (stg_entry, dim_ruleset…).
-    let to_api = |sql: &'static str| {
+    // SQL pour les tables sans équivalent CRUD (stg_entry, dim_ruleset, car_…).
+    let to_api = |sql: &str| {
         api_name_for_sql(sql)
             .map(str::to_string)
             .unwrap_or_else(|| sql.to_string())
     };
-    let out = references::REFERENCES
-        .iter()
+    let con = lock_con(&state)?;
+    let out = references::all_references(&con)
+        .into_iter()
         .map(|r| ReferenceDto {
-            table: to_api(r.table),
+            table: to_api(&r.table),
             column: r.column,
-            target_table: to_api(r.target_table),
+            target_table: to_api(&r.target_table),
             target_column: r.target_column,
             required: r.required,
         })
         .collect();
-    Json(out)
+    Ok(Json(out))
 }
 
 /// Une anomalie d'intégrité : des valeurs de `table.column` n'existent pas dans
