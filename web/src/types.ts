@@ -503,3 +503,15 @@ export interface DimensionInfo {
   label: string;
   pilotable: boolean;
 }
+
+// ---------- Références (graphe de jointures, GET /api/meta/references) ----------
+// Source de vérité serveur (engine/src/references.rs). `table` est en nom SQL
+// (ex. stg_entry, sat_perimeter, dim_*) ; `target_table` est traduit en nom de
+// table master data (MasterTable) quand la cible en a un.
+export interface ReferenceInfo {
+  table: string;
+  column: string;
+  target_table: string;
+  target_column: string;
+  required: boolean;
+}

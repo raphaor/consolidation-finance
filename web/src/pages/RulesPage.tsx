@@ -8,7 +8,9 @@
 
 import {
   type FormEvent,
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -25,6 +27,7 @@ import type {
   DimensionInfo,
   MasterTable,
   Operation,
+  ReferenceInfo,
   RuleDefinition,
   RuleResult,
   RuleSummary,
@@ -121,11 +124,15 @@ function parseMultiplicateur(raw: string): number {
 }
 
 // Mapping dimension → table master data pour les listes déroulantes contextuelles.
-// Miroir du graphe de références serveur (`engine/src/references.rs`) : toute
-// dimension référentielle y figure → saisie par dropdown. Les dimensions libres
-// (analysis, analysis2, custom) en sont absentes → saisie texte.
-// `partner` et `share` sont des rôles sur la liste des entités (cf. MODELE_DONNEES §2.2).
-const DIM_TO_TABLE: Record<string, { table: MasterTable; pkCol: string }> = {
+type DimToTable = Record<string, { table: MasterTable; pkCol: string }>;
+
+// Fallback mode-dégradé si `GET /api/meta/references` est injoignable (serveur
+// obsolète, réseau en panne) : miroir codé en dur du graphe de références
+// serveur (`engine/src/references.rs`). En fonctionnement normal, ce mapping est
+// **dérivé de l'API** (cf. RulesPage / DimRefContext) et non de cette constante.
+// Les dimensions libres (analysis, analysis2, custom) sont absentes → saisie
+// texte. `partner` / `share` sont des rôles sur la liste des entités.
+const DIM_TO_TABLE_FALLBACK: DimToTable = {
   scenario: { table: 'scenarios', pkCol: 'code' },
   entity: { table: 'entities', pkCol: 'code' },
   entry_period: { table: 'periods', pkCol: 'code' },
@@ -139,6 +146,28 @@ const DIM_TO_TABLE: Record<string, { table: MasterTable; pkCol: string }> = {
   methode: { table: 'methods', pkCol: 'code' },
 };
 
+// Construit le mapping dimension → table depuis le graphe de références exposé
+// par l'API. On ne garde que les sources `stg_entry` (dimensions d'écriture) et
+// `sat_perimeter` (scope des règles, dont `methode`) : ce sont les colonnes
+// pilotables dans l'éditeur. `target_table` est déjà un nom de table master data.
+function buildDimToTable(refs: ReferenceInfo[]): DimToTable {
+  const out: DimToTable = {};
+  for (const r of refs) {
+    if (r.table === 'stg_entry' || r.table === 'sat_perimeter') {
+      out[r.column] = {
+        table: r.target_table as MasterTable,
+        pkCol: r.target_column,
+      };
+    }
+  }
+  return out;
+}
+
+// Contexte fournissant le mapping dimension → table aux champs de saisie
+// (`useDimValues`), évitant de threader la prop à travers toute la hiérarchie.
+// Défaut = fallback, pour rester fonctionnel avant le chargement / en échec.
+const DimRefContext = createContext<DimToTable>(DIM_TO_TABLE_FALLBACK);
+
 // Cache module-level des valeurs de dimensions (évite les refetchs à chaque
 // ouverture de modale). Clé = nom de dimension.
 const dimValuesCache = new Map<string, string[]>();
@@ -146,13 +175,14 @@ const dimValuesCache = new Map<string, string[]>();
 /// Hook : charge les valeurs possibles d'une dimension depuis la master data.
 /// Retourne `values = []` si la dimension n'a pas de table associée (saisie libre).
 function useDimValues(dim: string): { values: string[]; loading: boolean } {
+  const dimToTable = useContext(DimRefContext);
   const [values, setValues] = useState<string[]>(
     dimValuesCache.get(dim) ?? [],
   );
   const [loading, setLoading] = useState(!dimValuesCache.has(dim));
 
   useEffect(() => {
-    const mapping = DIM_TO_TABLE[dim];
+    const mapping = dimToTable[dim];
     if (!mapping) {
       setValues([]);
       setLoading(false);
@@ -188,7 +218,7 @@ function useDimValues(dim: string): { values: string[]; loading: boolean } {
     return () => {
       cancelled = true;
     };
-  }, [dim]);
+  }, [dim, dimToTable]);
 
   return { values, loading };
 }
@@ -1927,6 +1957,26 @@ export function RulesPage() {
   const [subtab, setSubtab] = useState<Subtab>('biblio');
   const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [dimsError, setDimsError] = useState<string | null>(null);
+  // Mapping dimension → table master data, dérivé du graphe de références
+  // serveur (`GET /api/meta/references`). Fallback codé en dur si injoignable.
+  const [dimToTable, setDimToTable] = useState<DimToTable>(DIM_TO_TABLE_FALLBACK);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const refs = await api.references();
+        if (!cancelled) setDimToTable(buildDimToTable(refs));
+      } catch {
+        // Mode dégradé : on conserve le fallback (les dropdowns restent
+        // fonctionnels sur les dimensions built-in).
+        if (!cancelled) setDimToTable(DIM_TO_TABLE_FALLBACK);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Charge les dimensions une fois pour toutes (Bibliothèque en a besoin pour
   // construire les listes dynamiques pilotableDims / selectionDims).
@@ -1959,6 +2009,7 @@ export function RulesPage() {
   }, []);
 
   return (
+    <DimRefContext.Provider value={dimToTable}>
     <section className="page">
       <div className="page__header">
         <h1 className="page__title">Règles de consolidation</h1>
@@ -1998,5 +2049,6 @@ export function RulesPage() {
       {subtab === 'jeux' && <JeuxTab />}
       {subtab === 'dims' && <DimensionsTab />}
     </section>
+    </DimRefContext.Provider>
   );
 }

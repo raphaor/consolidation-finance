@@ -141,6 +141,13 @@ fn find_table(api: &str) -> Option<&'static TableDef> {
     TABLES.iter().find(|t| t.api_name == api)
 }
 
+/// Nom d'API (master data) correspondant à une table SQL, s'il en existe un.
+/// Sert à traduire les cibles du graphe de références (`references.rs` raisonne
+/// en noms SQL) vers les identifiants que le front consomme (`/api/md/{table}`).
+fn api_name_for_sql(sql: &str) -> Option<&'static str> {
+    TABLES.iter().find(|t| t.sql_name == sql).map(|t| t.api_name)
+}
+
 fn quote_ident(col: &str) -> String {
     format!("\"{col}\"")
 }
@@ -542,9 +549,45 @@ async fn remove(
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
+/// Ligne renvoyée par `GET /api/meta/references` : une référence du graphe.
+///
+/// `target_table` est traduit en nom d'API master data quand la cible en a un
+/// (ex. `dim_scenario` → `scenarios`) ; sinon le nom SQL est conservé (ex.
+/// `dim_ruleset` / `dim_rule`, qui ne sont pas des tables master data CRUD).
+/// `table` (source) reste en nom SQL : le front filtre sur `stg_entry` /
+/// `sat_perimeter` pour dériver le mapping dimension → table.
+#[derive(serde::Serialize)]
+struct ReferenceDto {
+    table: &'static str,
+    column: &'static str,
+    target_table: String,
+    target_column: &'static str,
+    required: bool,
+}
+
+/// GET /api/meta/references — graphe des références (source de vérité unique pour
+/// les dropdowns contextuels du front, en remplacement des miroirs codés en dur).
+async fn get_references() -> Json<Vec<ReferenceDto>> {
+    let out = references::REFERENCES
+        .iter()
+        .map(|r| ReferenceDto {
+            table: r.table,
+            column: r.column,
+            target_table: api_name_for_sql(r.target_table)
+                .map(str::to_string)
+                .unwrap_or_else(|| r.target_table.to_string()),
+            target_column: r.target_column,
+            required: r.required,
+        })
+        .collect();
+    Json(out)
+}
+
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route(
-        "/api/md/{table}",
-        get(list).post(create).put(update).delete(remove),
-    )
+    Router::new()
+        .route(
+            "/api/md/{table}",
+            get(list).post(create).put(update).delete(remove),
+        )
+        .route("/api/meta/references", get(get_references))
 }

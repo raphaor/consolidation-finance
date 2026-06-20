@@ -17,6 +17,7 @@ import type {
   LevelCount,
   MasterTable,
   PipelineCounts,
+  ReferenceInfo,
   ReportFilters,
   RuleDetail,
   RuleSummary,
@@ -197,6 +198,9 @@ export const api = {
     run: (ruleset: string) =>
       postJsonRaw<RulesetReport>('/rules/run', { ruleset }),
   },
+  // Graphe des références (source de vérité serveur), pour les dropdowns
+  // contextuels — remplace les miroirs codés en dur côté front.
+  references: () => getJson<ReferenceInfo[]>('/meta/references'),
   dimensions: {
     list: () => getJson<DimensionInfo[]>('/meta/dimensions'),
     create: (body: { name: string; label: string }) =>
