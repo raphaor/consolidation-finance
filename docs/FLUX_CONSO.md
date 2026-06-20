@@ -69,6 +69,13 @@ Stockage          Traitement
 
 ## Staging — Injection par nature (Q29, post-MVP)
 
+> ⚠️ **Redéfinition en cours** (à-nouveau, 2026-06-20) : avec la suppression du
+> niveau `reclassified`, le mapping passe à 3 niveaux — `0`,`1`→corporate ;
+> `2`→converti (avant écarts) ; `3`→consolidé (avant %) ; `4`→consolidé (après %).
+> Schéma intérimaire (le préfixe de nature comme support est fragile). Détail et
+> filtre de scope corporate : [`A_NOUVEAU.md`](./A_NOUVEAU.md) §4 bis. La table
+> ci-dessous décrit l'état **actuel** (4 niveaux), pas la cible.
+
 La dimension `Nature` porte un **préfixe `0`→`4`** qui indique à quelle étape du pipeline une écriture doit être injectée (cf. [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) §3 `Nature`). Aujourd'hui tout entre dans `stg_entry` puis passe A→B→C→D d'un bloc. Le staging **restructurera** le pipeline en points d'injection distincts.
 
 ### Points d'injection
@@ -192,6 +199,18 @@ Le F99 appartient aux **transitions de niveau** : il est reconstruit par `materi
 ## 4. À-nouveau
 
 À la clôture, **F99 (clôture N) se reporte sur F00 (ouverture N+1)**.
+
+Le report est piloté par les données (`dim_flow.flux_a_nouveau` : F99 → F00,
+générique — jamais en dur). Il colle le F99 N-1 **figé** (snapshot) sur le F00 N
+**au niveau corporate** (montant autoritaire, écrase la liasse) — d'où sont
+calculés l'écart F80 et le report sur F99 — puis **au niveau consolidé** (qui
+fige le % d'intégration N-1). Le niveau **converti se déduit par conversion
+normale** (la conversion du F00 corporate reproduit le F99 converti N-1, écart
+F80 compris). Seule la **consolidation** exempte le F00 du `× pct`.
+Les traitements de périmètre (F00→F01, miroir F98) et la variation de %
+d'intégration (F90/F95) passent en **règles** ; le niveau natif *reclassifié*
+disparaît (pipeline corporate → converti). **Spec complète :
+[`A_NOUVEAU.md`](./A_NOUVEAU.md)** (décisions 2026-06-20).
 
 ## 5. Principe « consolidation par les flux »
 
