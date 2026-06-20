@@ -5,17 +5,19 @@ import { FLOW_COLUMNS, LEVELS } from '../types';
 import { Filters } from '../components/Filters';
 import { buildPivot } from '../utils/pivot';
 import { formatAmount } from '../utils/format';
+import { usePersistentState } from '../utils/usePersistentState';
 
 type ReportType = 'bilan' | 'cr';
 
 export function RapportsPage() {
-  const [reportType, setReportType] = useState<ReportType>('bilan');
-  const [level, setLevel] = useState<Level>('consolidated');
-  const [scenario, setScenario] = useState('');
-  const [entity, setEntity] = useState('');
-  const [entryPeriod, setEntryPeriod] = useState('');
-  const [period, setPeriod] = useState('');
-  const [nature, setNature] = useState('');
+  // Filtres persistés (survivent au changement d'onglet et au rechargement).
+  const [reportType, setReportType] = usePersistentState<ReportType>('rapports.reportType', 'bilan');
+  const [level, setLevel] = usePersistentState<Level>('rapports.level', 'consolidated');
+  const [scenario, setScenario] = usePersistentState('rapports.scenario', '');
+  const [entity, setEntity] = usePersistentState('rapports.entity', '');
+  const [entryPeriod, setEntryPeriod] = usePersistentState('rapports.entryPeriod', '');
+  const [period, setPeriod] = usePersistentState('rapports.period', '');
+  const [nature, setNature] = usePersistentState('rapports.nature', '');
   const [rows, setRows] = useState<BilanRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

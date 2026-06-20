@@ -1147,6 +1147,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
   const [form, setForm] = useState<
     | { mode: 'create' }
     | { mode: 'edit'; draft: RuleDraft }
+    | { mode: 'duplicate'; draft: RuleDraft }
     | null
   >(null);
 
@@ -1199,20 +1200,43 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
     }
   }, []);
 
-  async function handleSubmit(draft: RuleDraft) {
-    if (form?.mode === 'create') {
-      await api.rules.create({
-        code: draft.code,
-        libelle: draft.libelle,
-        definition: draft.definition,
+  // Duplication : on récupère la définition source et on ouvre la modale en mode
+  // création (code éditable → pas de collision de PK) pré-remplie, avec un code
+  // suggéré `{code}_COPIE`. L'utilisateur ajuste code/libellé puis enregistre.
+  const openDuplicate = useCallback(async (code: string) => {
+    try {
+      const detail = await api.rules.get(code);
+      setForm({
+        mode: 'duplicate',
+        draft: {
+          code: `${detail.code}_COPIE`,
+          libelle: `${detail.libelle} (copie)`,
+          definition: asDefinition(detail.definition),
+        },
       });
-      setNotice({ kind: 'success', text: 'Règle créée.' });
-    } else {
+    } catch (err) {
+      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+    }
+  }, []);
+
+  async function handleSubmit(draft: RuleDraft) {
+    // create et duplicate créent une nouvelle règle ; seul edit met à jour.
+    if (form?.mode === 'edit') {
       await api.rules.update(draft.code, {
         libelle: draft.libelle,
         definition: draft.definition,
       });
       setNotice({ kind: 'success', text: 'Règle mise à jour.' });
+    } else {
+      await api.rules.create({
+        code: draft.code,
+        libelle: draft.libelle,
+        definition: draft.definition,
+      });
+      setNotice({
+        kind: 'success',
+        text: form?.mode === 'duplicate' ? 'Règle dupliquée.' : 'Règle créée.',
+      });
     }
     setForm(null);
     await load();
@@ -1237,6 +1261,13 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
             </button>
             <button
               type="button"
+              className="btn btn--sm"
+              onClick={() => void openDuplicate(info.row.original.code)}
+            >
+              Dupliquer
+            </button>
+            <button
+              type="button"
               className="btn btn--sm btn--danger"
               onClick={() => void handleDelete(info.row.original.code)}
             >
@@ -1246,7 +1277,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         ),
       },
     ],
-    [openEdit, handleDelete],
+    [openEdit, openDuplicate, handleDelete],
   );
 
   const table = useReactTable({
@@ -1346,9 +1377,9 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
       {form !== null && (
         <RuleFormModal
           initial={
-            form.mode === 'edit'
-              ? form.draft
-              : { code: '', libelle: '', definition: emptyDefinition() }
+            form.mode === 'create'
+              ? { code: '', libelle: '', definition: emptyDefinition() }
+              : form.draft
           }
           isEdit={form.mode === 'edit'}
           pilotableDims={pilotableDims}

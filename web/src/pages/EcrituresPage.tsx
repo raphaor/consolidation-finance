@@ -19,6 +19,7 @@ import { Filters } from '../components/Filters';
 import type { DimensionInfo } from '../types';
 import { LEVELS } from '../types';
 import { formatAmount, formatInt } from '../utils/format';
+import { usePersistentState } from '../utils/usePersistentState';
 
 // Une écriture = objet générique (colonnes dynamiques : dimensions built-in +
 // custom + level + amount), cf. /api/entries.
@@ -31,12 +32,13 @@ const ENTRY_LEVELS = ['raw', ...LEVELS] as const;
 type EntryLevel = (typeof ENTRY_LEVELS)[number];
 
 export function EcrituresPage() {
-  const [level, setLevel] = useState<EntryLevel>('consolidated');
-  const [scenario, setScenario] = useState('');
-  const [entity, setEntity] = useState('');
-  const [entryPeriod, setEntryPeriod] = useState('');
-  const [period, setPeriod] = useState('');
-  const [nature, setNature] = useState('');
+  // Filtres persistés (survivent au changement d'onglet et au rechargement).
+  const [level, setLevel] = usePersistentState<EntryLevel>('ecritures.level', 'consolidated');
+  const [scenario, setScenario] = usePersistentState('ecritures.scenario', '');
+  const [entity, setEntity] = usePersistentState('ecritures.entity', '');
+  const [entryPeriod, setEntryPeriod] = usePersistentState('ecritures.entryPeriod', '');
+  const [period, setPeriod] = usePersistentState('ecritures.period', '');
+  const [nature, setNature] = usePersistentState('ecritures.nature', '');
   const [data, setData] = useState<EntryRow[]>([]);
   const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [loading, setLoading] = useState(false);
