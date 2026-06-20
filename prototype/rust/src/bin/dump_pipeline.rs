@@ -5,7 +5,7 @@
 //! Lancer depuis `prototype/rust/` :
 //!   cargo run --release --bin dump_pipeline
 //! Produit `dump_pipeline.csv` dans le répertoire courant. Affiche aussi un
-//! résumé des décomptes (total par niveau, et au reclassified : par entité et
+//! résumé des décomptes (total par niveau, et au corporate : par entité et
 //! par flux) sur la sortie standard.
 
 use conso_engine::{create_schema, run_pipeline, seed_all, ConvertParams};
@@ -47,8 +47,8 @@ fn main() {
                 analysis, analysis2, currency, amount \
          FROM fact_entry \
          ORDER BY CASE level \
-             WHEN 'corporate' THEN 1 WHEN 'reclassified' THEN 2 \
-             WHEN 'converted' THEN 3 WHEN 'consolidated' THEN 4 END, \
+             WHEN 'corporate' THEN 1 \
+             WHEN 'converted' THEN 2 WHEN 'consolidated' THEN 3 END, \
              entity, account, flow, nature, partner",
     );
     w.flush().unwrap();
@@ -59,29 +59,29 @@ fn main() {
     print_counts(
         &con,
         "SELECT level, COUNT(*) FROM fact_entry GROUP BY level \
-         ORDER BY CASE level WHEN 'corporate' THEN 1 WHEN 'reclassified' THEN 2 \
-             WHEN 'converted' THEN 3 WHEN 'consolidated' THEN 4 END",
+         ORDER BY CASE level WHEN 'corporate' THEN 1 \
+             WHEN 'converted' THEN 2 WHEN 'consolidated' THEN 3 END",
     );
 
-    println!("\nReclassified — par entité :");
+    println!("\nCorporate — par entité :");
     print_counts(
         &con,
-        "SELECT entity, COUNT(*) FROM fact_entry WHERE level='reclassified' \
+        "SELECT entity, COUNT(*) FROM fact_entry WHERE level='corporate' \
          GROUP BY entity ORDER BY entity",
     );
 
-    println!("\nReclassified — par flux (F99 = clôtures reconstruites) :");
+    println!("\nCorporate — par flux (F99 = clôtures reconstruites) :");
     print_counts(
         &con,
-        "SELECT flow, COUNT(*) FROM fact_entry WHERE level='reclassified' \
+        "SELECT flow, COUNT(*) FROM fact_entry WHERE level='corporate' \
          GROUP BY flow ORDER BY flow",
     );
 
-    println!("\nReclassified — par (entité, flux) :");
+    println!("\nCorporate — par (entité, flux) :");
     print_counts(
         &con,
         "SELECT entity || ' / ' || flow, COUNT(*) FROM fact_entry \
-         WHERE level='reclassified' GROUP BY entity, flow ORDER BY entity, flow",
+         WHERE level='corporate' GROUP BY entity, flow ORDER BY entity, flow",
     );
 }
 

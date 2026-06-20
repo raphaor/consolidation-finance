@@ -67,7 +67,7 @@ const RECONSTRUCT_CLOSURES_AFTER_RULE: bool = false;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Niveaux de stockage autorisés pour la sélection / l'écriture.
-const ALLOWED_LEVELS: &[&str] = &["corporate", "reclassified", "converted", "consolidated"];
+const ALLOWED_LEVELS: &[&str] = &["corporate", "converted", "consolidated"];
 
 /// Colonnes de `sat_perimeter` autorisées dans `scope.dim`.
 ///
@@ -1206,7 +1206,7 @@ mod tests {
         // Une opération minimale : coefficient implicite = Constant(1.0),
         // multiplicateur implicite = 1.0, destination vide.
         let ctx = ctx_fixture();
-        let json = r#"{ "operations": [ { "seq": 1, "level": "reclassified" } ] }"#;
+        let json = r#"{ "operations": [ { "seq": 1, "level": "converted" } ] }"#;
         let def = parse_definition(json, &ctx).expect("définition minimale valide");
         assert!(def.scope.is_empty(), "scope par défaut = vide");
         let op = &def.operations[0];

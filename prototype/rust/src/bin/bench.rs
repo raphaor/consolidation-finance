@@ -315,9 +315,8 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Vérifie les identités de clôture (via le validateur du crate) et un invariant
-/// réel : les écarts F80/F81 doivent être absents des niveaux en devise
-/// fonctionnelle (corporate / reclassified). Ces écarts n'existent qu'après
-/// l'étape C.
+/// réel : les écarts F80/F81 doivent être absents du niveau en devise
+/// fonctionnelle (corporate). Ces écarts n'existent qu'après l'étape C.
 fn check_identity(con: &Connection) -> duckdb::Result<bool> {
     // (a) validateur du crate — tous les comptes doivent passer.
     let checks = validate_consolidated(con)?;
@@ -327,8 +326,8 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
         eprintln!("\n✗ Identité de clôture en échec pour : {}", failed.join(", "));
     }
 
-    // (b) invariant structurel : F80/F81 absents des niveaux fonctionnels.
-    for lvl in &["corporate", "reclassified"] {
+    // (b) invariant structurel : F80/F81 absents du niveau fonctionnel.
+    for lvl in &["corporate"] {
         let n: i64 = con.query_row(
             "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND flow IN ('F80','F81')",
             [lvl],

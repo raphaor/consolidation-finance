@@ -108,7 +108,7 @@ fn main() {
         }
     };
     let counts = report.counts();
-    let labels = ["corporate", "reclassified", "converted", "consolidated"];
+    let labels = ["corporate", "converted", "consolidated"];
     for (label, n) in labels.iter().zip(counts.iter()) {
         println!("   étape → {label:<13} {n:>4} lignes produites");
     }

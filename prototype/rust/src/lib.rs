@@ -6,12 +6,9 @@
 //!
 //! ```text
 //! staging (stg_entry)
-//!     │  A. agrégation
+//!     │  A. agrégation (+ reconstruction des clôtures)
 //!     ▼
 //! fact_entry [corporate]       — devise fonctionnelle
-//!     │  B. reclassification de périmètre
-//!     ▼
-//! fact_entry [reclassified]    — devise fonctionnelle
 //!     │  C. conversion multi-devises (+ écarts F80/F81)
 //!     ▼
 //! fact_entry [converted]       — devise de présentation
@@ -19,6 +16,10 @@
 //!     ▼
 //! fact_entry [consolidated]    — devise de présentation
 //! ```
+//!
+//! L'étape B (reclassification de périmètre) et le niveau `reclassified` ont été
+//! supprimés : le périmètre (F00→F01, miroir F98) passe par des règles au niveau
+//! corporate (cf. docs/A_NOUVEAU.md §4).
 //!
 //! # Modèle de flux (cf. docs/FLUX_CONSO.md)
 //!

@@ -55,7 +55,7 @@ use duckdb::Connection;
 
 /// # Reconstruction des clôtures (DELETE ciblé puis INSERT).
 ///
-/// `level` = niveau de stockage où reconstruire (`reclassified`, `consolidated`).
+/// `level` = niveau de stockage où reconstruire (`corporate`, `converted`, `consolidated`).
 /// Renvoie le nombre de lignes de clôture présentes à ce niveau après l'opération.
 ///
 /// Deux requêtes paramétrées par `level` :

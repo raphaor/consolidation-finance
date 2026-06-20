@@ -19,7 +19,7 @@
 //!   (comportement historique EUR — invariant de nos tests golden)
 //! - `fonctionnelle = pivot`        → taux_func = 1.0, cross = 1 / taux_pres
 //!
-//! Pour chaque ligne reclassifiée en devise ≠ présentation :
+//! Pour chaque ligne corporate en devise ≠ présentation :
 //!   1. taux du flux via `dim_flow.taux_conversion` :
 //!        - `close_n1` → taux_close N-1 (cross-rate)
 //!        - `avg`      → taux_moyen N  (cross-rate)
@@ -165,7 +165,7 @@ conv AS (\n\
            ON r_pres_n1.rate_set        = p.rate_set\n\
           AND r_pres_n1.currency_source = p.presentation\n\
           AND r_pres_n1.period          = p.prev_period\n\
-    WHERE f.level = 'reclassified'\n\
+    WHERE f.level = 'corporate'\n\
 )\n\
 INSERT INTO fact_entry\n\
     ({insert_col_list}, level, amount)\n\

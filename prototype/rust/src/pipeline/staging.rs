@@ -1,12 +1,16 @@
 //! Injection des écritures par préfixe de nature (staging).
 //!
-//! Les écritures dont le préfixe de nature est `2`, `3` ou `4` sont injectées
+//! Les écritures dont le préfixe de nature est `3` ou `4` sont injectées
 //! directement au niveau correspondant du pipeline, en sautant les étapes
 //! précédentes. Voir `docs/FLUX_CONSO.md` « Staging — Injection par nature ».
 //!
-//! - Préfixe `2` → injecté au niveau `reclassified` (saute A + B)
-//! - Préfixe `3` → injecté au niveau `converted` (saute A + B + C)
-//! - Préfixe `4` → injecté au niveau `consolidated` (saute A + B + C + D)
+//! - Préfixe `3` → injecté au niveau `converted` (saute A + C)
+//! - Préfixe `4` → injecté au niveau `consolidated` (saute A + C + D)
+//!
+//! Le préfixe `2` n'est **plus routé** depuis la suppression du niveau
+//! `reclassified` (cf. docs/A_NOUVEAU.md §4). Sa redéfinition cible (injection au
+//! `converted`, en devise fonctionnelle, avant écarts) est prévue en Phase 4
+//! (cf. docs/A_NOUVEAU.md §4 bis) — non implémentée ici.
 //!
 //! Les écritures injectées sont supposées déjà traitées pour les étapes
 //! qu'elles sautent. L'agrégation se fait par le grain standard.

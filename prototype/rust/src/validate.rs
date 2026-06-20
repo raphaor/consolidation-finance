@@ -23,7 +23,7 @@
 //! carte {clôture → constituants} est lue dans `dim_flow` au début de chaque
 //! vérification. Ajouter un flux dans `dim_flow` l'intègre automatiquement.
 //!
-//! Au niveau `reclassified` (devise fonctionnelle), les écarts F80/F81 sont
+//! Au niveau `corporate` (devise fonctionnelle), les écarts F80/F81 sont
 //! absents (ils n'existent qu'après conversion) et valent donc 0 dans la somme :
 //! la même identité tient aux deux niveaux sans configuration spéciale.
 
@@ -178,10 +178,12 @@ pub fn validate_consolidated(con: &Connection) -> duckdb::Result<Vec<CheckResult
     check_closures(con, "consolidated")
 }
 
-/// Validation des identités de clôture au niveau reclassified (devise
-/// fonctionnelle, écarts absents).
+/// Validation des identités de clôture au niveau **corporate** (devise
+/// fonctionnelle, écarts absents). Depuis la suppression du niveau
+/// `reclassified`, c'est le corporate qui porte la 1ʳᵉ reconstruction de clôture
+/// (cf. docs/A_NOUVEAU.md §4).
 pub fn validate_functional(con: &Connection) -> duckdb::Result<Vec<CheckResult>> {
-    check_closures(con, "reclassified")
+    check_closures(con, "corporate")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

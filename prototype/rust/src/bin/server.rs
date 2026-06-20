@@ -85,7 +85,6 @@ struct BilanRow {
 #[derive(Serialize)]
 struct PipelineResult {
     corporate: usize,
-    reclassified: usize,
     converted: usize,
     consolidated: usize,
     /// Code du scénario utilisé pour le run (explicite dans le body ou
@@ -210,9 +209,8 @@ async fn get_levels(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Level
                  GROUP BY level
                  ORDER BY CASE level
                      WHEN 'corporate'    THEN 1
-                     WHEN 'reclassified' THEN 2
-                     WHEN 'converted'    THEN 3
-                     WHEN 'consolidated' THEN 4
+                     WHEN 'converted'    THEN 2
+                     WHEN 'consolidated' THEN 3
                  END",
             )
             .map_err(db_err)?;
@@ -536,9 +534,8 @@ async fn run_pipeline_handler(
 
         PipelineResult {
             corporate: counts[0],
-            reclassified: counts[1],
-            converted: counts[2],
-            consolidated: counts[3],
+            converted: counts[1],
+            consolidated: counts[2],
             scenario: scenario_code,
             ruleset: ruleset_code,
             ruleset_report,
@@ -1209,8 +1206,8 @@ async fn main() {
                     Ok(report) => {
                         let counts = report.counts();
                         println!(
-                            "   Pipeline initial (scénario {code}) : corporate={}, reclassified={}, converted={}, consolidated={}",
-                            counts[0], counts[1], counts[2], counts[3]
+                            "   Pipeline initial (scénario {code}) : corporate={}, converted={}, consolidated={}",
+                            counts[0], counts[1], counts[2]
                         );
                     }
                     Err(e) => {

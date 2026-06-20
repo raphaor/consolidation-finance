@@ -154,22 +154,20 @@ pub fn bilan_par_flux(con: &Connection, level: &str) -> duckdb::Result<()> {
 //  2. Comparaison des 4 niveaux pour un compte donné
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Affiche, pour un compte, le détail par flux aux 4 niveaux de stockage.
+/// Affiche, pour un compte, le détail par flux aux 3 niveaux de stockage.
 ///
-/// Met en évidence l'effet de chaque étape : agrégation → reclassification
-/// (F00→F01 / collapse→F98) → conversion (écarts F80/F81, passage en EUR)
-/// → consolidation (% d'intégration).
+/// Met en évidence l'effet de chaque étape : agrégation → conversion (écarts
+/// F80/F81, passage en EUR) → consolidation (% d'intégration).
 pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
-    let levels = ["corporate", "reclassified", "converted", "consolidated"];
+    let levels = ["corporate", "converted", "consolidated"];
     let level_desc = [
         ("corporate", "Agrégation (fonctionnel)"),
-        ("reclassified", "Reclassification (fonctionnel)"),
         ("converted", "Conversion (EUR)"),
         ("consolidated", "Consolidation (EUR)"),
     ];
 
     println!("\n{}", "═".repeat(88));
-    println!("  COMPARAISON DES 4 NIVEAUX  —  compte « {} »", account);
+    println!("  COMPARAISON DES 3 NIVEAUX  —  compte « {} »", account);
     println!("{}", "═".repeat(88));
 
     let col_w = 13;
@@ -257,8 +255,8 @@ pub fn print_validation(con: &Connection) -> duckdb::Result<bool> {
         print_check_row(&r);
     }
 
-    // --- b) Côté fonctionnel (reclassified, écarts = 0) ---
-    println!("\n  (b) Niveau RECLASSIFIÉ (devise fonctionnelle, écarts = 0)");
+    // --- b) Côté fonctionnel (corporate, écarts = 0) ---
+    println!("\n  (b) Niveau CORPORATE (devise fonctionnelle, écarts = 0)");
     println!(
         "  {:<18}{:<8}{:>14}{:>18}{:>12}   statut",
         "Compte", "Clôt.", "Clôture", "Σ composantes", "écart"
@@ -296,9 +294,8 @@ pub fn print_level_counts(con: &Connection) -> duckdb::Result<()> {
          GROUP BY level
          ORDER BY CASE level
              WHEN 'corporate' THEN 1
-             WHEN 'reclassified' THEN 2
-             WHEN 'converted' THEN 3
-             WHEN 'consolidated' THEN 4
+             WHEN 'converted' THEN 2
+             WHEN 'consolidated' THEN 3
          END",
     )?;
     let rows = stmt.query_map([], |row| {

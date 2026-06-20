@@ -8,9 +8,12 @@
 //! | level        | devisé         | étape de production         |
 //! |-------------|----------------|-----------------------------|
 //! | corporate    | fonctionnelle  | A. agrégation               |
-//! | reclassified | fonctionnelle  | B. reclassification         |
 //! | converted    | présentation   | C. conversion multi-devises |
 //! | consolidated | présentation   | D. consolidation (méthodes) |
+//!
+//! Le niveau `reclassified` (ex-étape B, reclassification de périmètre) a été
+//! supprimé : le périmètre passe par des règles au niveau corporate
+//! (cf. docs/A_NOUVEAU.md §4). `fact_entry.level` n'accepte plus que 3 valeurs.
 //!
 //! Une table de staging `stg_entry` reçoit la saisie brute (liasses CSV).
 //! L'étape A lit cette table et produit le niveau *corporate*.
@@ -359,7 +362,7 @@ CREATE TABLE fact_entry (
     share        TEXT,
     analysis     TEXT,
     analysis2    TEXT,
-    level        TEXT CHECK (level IN ('corporate', 'reclassified', 'converted', 'consolidated')),
+    level        TEXT CHECK (level IN ('corporate', 'converted', 'consolidated')),
     amount       DECIMAL(18,2),
     PRIMARY KEY (id)
 );";
