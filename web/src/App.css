@@ -329,6 +329,34 @@
   padding: 24px;
 }
 
+/* ---------- Rapport détaillé (arbre compte → natures) ---------- */
+
+.tree-toggle {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree-toggle:hover {
+  color: var(--primary);
+}
+
+.grid tr.tree-child {
+  background: var(--header-bg);
+}
+
+.grid__rowhead--child {
+  font-weight: 400;
+  color: var(--text-muted);
+  padding-left: 28px;
+}
+
 .th-sort {
   appearance: none;
   background: transparent;
