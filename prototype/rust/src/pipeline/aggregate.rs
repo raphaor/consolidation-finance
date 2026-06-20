@@ -14,6 +14,13 @@
 //! par l'étape A. Les préfixes `2`, `3`, `4` sont injectés directement à leur
 //! niveau cible par le module `staging`. Voir `docs/FLUX_CONSO.md` « Staging ».
 //!
+//! **Isolation par scénario + filtre de scope** (cf. docs/A_NOUVEAU.md §4 bis.2) :
+//! l'agrégation ne reprend que les écritures du **scénario du run** et des
+//! **entités présentes dans le périmètre** (`sat_perimeter`, toutes méthodes ;
+//! entrantes/sortantes incluses via l'INNER JOIN). Les autres scénarios (ex.
+//! snapshot d'à-nouveau figé) et les entités hors scope ne polluent pas le
+//! corporate du run courant.
+//!
 //! Aucun filtre sur les flux : la saisie (mode écriture ou formulaire bilan)
 //! est agrégée telle quelle. En mode écriture, les liasses ne contiennent que
 //! F00/F20 ; en mode bilan, le F99 (clôture) saisi sera agrégé ici puis
@@ -33,23 +40,38 @@ use duckdb::Connection;
 /// built-in, le SQL produit est identique au SQL statique historique (test
 /// golden inchangé).
 ///
+/// `scenario` = code du scénario du run : seules ses écritures sont agrégées
+/// (isolation des autres scénarios, ex. snapshot d'à-nouveau figé).
+///
 /// Renvoie le nombre de lignes produites au niveau `corporate`.
-pub fn step_a(con: &Connection) -> duckdb::Result<usize> {
+pub fn step_a(con: &Connection, scenario: &str) -> duckdb::Result<usize> {
     let dims = dimensions::load_all(con)?;
     let cols = dimensions::propagated_cols(&dims);
     let col_list = cols.join(", ");
+    // Colonnes préfixées `s.` pour lever l'ambiguïté avec la jointure
+    // `sat_perimeter` (qui porte aussi entity/scenario/period).
+    let s_cols = cols
+        .iter()
+        .map(|c| format!("s.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     let sql = format!(
         "INSERT INTO fact_entry\n\
          ({col_list}, level, amount)\n\
          SELECT\n\
-             {col_list},\n\
+             {s_cols},\n\
              'corporate' AS level,\n\
-             SUM(amount) AS amount\n\
-         FROM stg_entry\n\
-         WHERE substr(nature, 1, 1) IN ('0', '1')\n\
-         GROUP BY {col_list};"
+             SUM(s.amount) AS amount\n\
+         FROM stg_entry s\n\
+         JOIN sat_perimeter p\n\
+           ON p.entity   = s.entity\n\
+          AND p.scenario = s.scenario\n\
+          AND p.period   = s.entry_period\n\
+         WHERE substr(s.nature, 1, 1) IN ('0', '1')\n\
+           AND s.scenario = ?\n\
+         GROUP BY {s_cols};"
     );
-    con.execute(&sql, [])?;
+    con.execute(&sql, [scenario])?;
     count_level(con, "corporate")
 }

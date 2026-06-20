@@ -156,8 +156,8 @@ pub struct AggregateStep;
 impl Step for AggregateStep {
     fn name(&self) -> &'static str { "agrégation" }
     fn output_level(&self) -> &'static str { "corporate" }
-    fn run(&self, con: &Connection, _params: &ConvertParams) -> duckdb::Result<()> {
-        aggregate::step_a(con).map(|_| ())
+    fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
+        aggregate::step_a(con, &params.scenario_code).map(|_| ())
     }
 }
 

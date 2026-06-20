@@ -462,7 +462,8 @@ async fn list_scenarios(
 /// Workflow (cf. SPEC_SCENARIO_V2.md §7) :
 /// 1. Résolution du code scénario (body ou défaut `'ouvert'`).
 /// 2. `ConvertParams::load_params(con, scenario_code)`.
-/// 3. `DELETE FROM fact_entry` (reset avant run, sinon accumulation).
+/// 3. `DELETE FROM fact_entry WHERE scenario = ?` (reset du scénario courant ;
+///    les autres scénarios — snapshot d'à-nouveau figé — sont préservés).
 /// 4. `run_pipeline(con, &params)`.
 /// 5. Si `scenario.ruleset_code` non NULL : `run_ruleset(con, ruleset_code)`.
 /// 6. Retourne `{ counts, scenario, ruleset?, ruleset_report? }`.
@@ -503,8 +504,11 @@ async fn run_pipeline_handler(
             )
             .map_err(db_err)?;
 
-        // 4. Vider les résultats du pipeline avant de relancer (sinon accumulation).
-        con.execute("DELETE FROM fact_entry", []).map_err(db_err)?;
+        // 4. Vider les résultats du pipeline du SCÉNARIO COURANT avant de relancer
+        //    (isolation par scénario : les autres scénarios — ex. snapshot
+        //    d'à-nouveau figé — sont préservés). Cf. docs/A_NOUVEAU.md §2.3 / §3.
+        con.execute("DELETE FROM fact_entry WHERE scenario = ?", [&scenario_code])
+            .map_err(db_err)?;
 
         // 5. Pipeline. Si le scénario référence un ruleset, on **intercale** ses
         //    règles au niveau qu'elles ciblent (hook post-étape) : une règle

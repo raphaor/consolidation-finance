@@ -27,9 +27,10 @@
   - [x] **closures au corporate OUI** (révisé vs guide) : run_steps matérialise après chaque étape → `validate_functional` repointé sur corporate, reste vivant
   - [x] MAJ tests Rust : 14 passed + 2 `#[ignore]` (montants & sortie périmètre = Phase 7) ; rules 10/10. Build OK.
   - ⚠️ **Phase 6** : `web/src` référence `reclassified` (PipelinePage.tsx, RulesPage.tsx, types.ts) + le champ `reclassified` retiré de la réponse `/api/run` → à traiter avec l'UI.
-- [ ] **Phase 2 — Isolation scénario + filtre scope corporate**
-  - [ ] `server.rs` DELETE fact_entry WHERE scenario
-  - [ ] `aggregate::step_a` filtre scénario + jointure sat_perimeter
+- [x] **Phase 2 — Isolation scénario + filtre scope corporate** ✅ commit
+  - [x] `server.rs` DELETE fact_entry WHERE scenario (préserve snapshots figés)
+  - [x] `aggregate::step_a(con, scenario)` : filtre `s.scenario = ?` + INNER JOIN `sat_perimeter` (scope, toutes méthodes, entrantes/sortantes incluses) ; colonnes préfixées `s.`
+  - [x] build + tests verts (no-op sur seed mono-scénario : toutes entités dans périmètre REEL)
 - [ ] **Phase 3 — Cœur à-nouveau**
   - [ ] `ConvertParams::load_params` charge `a_nouveau_scenario`
   - [ ] détection consolidée-en-N1 (EXISTS snapshot)
@@ -56,7 +57,8 @@
 - **NEXT → Phase 1** : suppression de `reclassified`. ⚠️ Casse golden serveur (déjà partiellement cassé) et retire le périmètre natif (F00→F01, F98) → résultats divergents tant que les règles utilisateur n'existent pas. Prévoir MAJ des tests Rust `tests/pipeline.rs` (assertions sur `reclassified`, F01/F98) en même temps.
 - **Arrêt session 2026-06-20** sur checkpoint **Phase 0 vert** (commit `db8307f`). Phase 1 non démarrée : pas de sous-ensemble neutre, risque de branche cassée si interrompue. Guide d'exécution prêt ci-dessous.
 - **Phase 1 faite (2026-06-21)** : `reclassified` supprimé du programme entier ; pipeline A→C→D (convert lit corporate) ; clôtures reconstruites **après chaque étape, corporate inclus** (corporate devient point de traitement, `validate_functional` repointé dessus). Périmètre natif (F00→F01, F98) retiré → 2 tests `#[ignore]` (rétablis par règles en Phase 7). Build + tests verts (14+2ignored / 10).
-- **NEXT → Phase 2** : isolation par scénario (`DELETE … WHERE scenario`) + filtre de scope à l'agrégation corporate (jointure `sat_perimeter`). Puis Phase 3 (cœur à-nouveau).
+- **Phase 2 faite (2026-06-21)** : `step_a` filtre par scénario du run + INNER JOIN `sat_perimeter` (scope) ; `server.rs` purge `fact_entry` par scénario (snapshots préservés). No-op sur seed mono-scénario, tests verts.
+- **NEXT → Phase 3** : cœur à-nouveau. `load_params` charge `a_nouveau_scenario` ; détecter consolidée-en-N1 (EXISTS snapshot consolidated F99) ; carry corporate (écrase liasse F00) + carry consolidé (fige % N-1) ; exemption F00 à `step_d` (flux cible d'à-nouveau non re-`× pct`). Conversion inchangée. Générique via `dim_flow.flux_a_nouveau`, jamais F00/F99 en dur.
 
 ---
 
