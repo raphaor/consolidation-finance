@@ -21,20 +21,22 @@
 //! avant toute interpolation dans le DDL ; les noms de tables/colonnes cibles
 //! proviennent du registre [`crate::references`] (jamais de l'entrée utilisateur).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
+use duckdb::{params_from_iter, types::Value as DbValue};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value as JsonValue};
+use serde_json::{json, Map, Value as JsonValue};
 
 use crate::dimensions::is_valid_custom_name;
-use crate::references;
 use crate::state::{db_err, lock_con, AppError, AppState};
+use crate::{masterdata, references};
 
 /// Nom de la table de valeurs d'une caractéristique N1.
 fn value_table(code: &str) -> String {
@@ -311,6 +313,244 @@ pub fn delete_attribute(
     Ok(())
 }
 
+// ─────────────────────── Valeurs N1 (lignes de car_<code>) ──────────────────────
+
+/// Colonnes d'une valeur N1 : `code`, `libelle` + les attributs N2.
+fn value_columns(attrs: &[AttributeDef]) -> Vec<String> {
+    let mut cols = vec!["code".to_string(), "libelle".to_string()];
+    cols.extend(attrs.iter().map(|a| a.name.clone()));
+    cols
+}
+
+/// Confirme l'existence de la caractéristique et renvoie ses attributs N2.
+fn require_characteristic(
+    con: &duckdb::Connection,
+    char_code: &str,
+) -> Result<Vec<AttributeDef>, AppError> {
+    let exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_characteristic WHERE code = ?",
+            [char_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!(
+            "caractéristique inexistante : {char_code}"
+        )));
+    }
+    load_attributes(con, char_code).map_err(db_err)
+}
+
+/// Rejette les champs JSON hors `code` / `libelle` / attributs N2.
+fn reject_unknown_value_fields(
+    attrs: &[AttributeDef],
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    let allowed: HashSet<String> = value_columns(attrs).into_iter().collect();
+    if let Some(k) = obj.keys().find(|k| !allowed.contains(k.as_str())) {
+        return Err(AppError::bad_request(format!(
+            "champ inconnu pour une valeur de caractéristique : {k}"
+        )));
+    }
+    Ok(())
+}
+
+/// Vérifie que chaque valeur d'attribut N2 fournie existe dans la master data de
+/// sa dimension cible (référence dynamique, cf. [`references`]).
+fn validate_attribute_values(
+    con: &duckdb::Connection,
+    attrs: &[AttributeDef],
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    for a in attrs {
+        let v = match obj.get(&a.name) {
+            Some(JsonValue::String(s)) if !s.is_empty() => s.as_str(),
+            _ => continue, // absent / null / vide = non renseigné (attributs nullables)
+        };
+        let (tt, tc) = references::dimension_master(&a.target_dimension).ok_or_else(|| {
+            AppError::bad_request(format!("dimension cible inconnue : {}", a.target_dimension))
+        })?;
+        if !references::value_exists(con, tt, tc, v).map_err(db_err)? {
+            return Err(AppError::bad_request(format!(
+                "{} = '{}' (absent de {}.{})",
+                a.name, v, tt, tc
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Liste les valeurs (lignes) d'une caractéristique N1.
+pub fn list_values(
+    con: &duckdb::Connection,
+    char_code: &str,
+) -> Result<Vec<JsonValue>, AppError> {
+    let attrs = require_characteristic(con, char_code)?;
+    let cols = value_columns(&attrs)
+        .iter()
+        .map(|c| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let vtable = value_table(char_code);
+    masterdata::run_query(con, &format!("SELECT {cols} FROM {vtable} ORDER BY code"), Vec::new())
+}
+
+/// Crée une valeur N1 (ligne de `car_<code>`). `code` requis ; attributs N2
+/// validés contre leur dimension cible.
+pub fn create_value(
+    con: &duckdb::Connection,
+    char_code: &str,
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    let attrs = require_characteristic(con, char_code)?;
+    reject_unknown_value_fields(&attrs, obj)?;
+    let code_val = obj
+        .get("code")
+        .and_then(JsonValue::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::bad_request("code de valeur requis"))?;
+    let vtable = value_table(char_code);
+    let exists: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [code_val],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if exists {
+        return Err(AppError::conflict(format!(
+            "valeur déjà existante : {code_val}"
+        )));
+    }
+    validate_attribute_values(con, &attrs, obj)?;
+    let mut cols = Vec::new();
+    let mut vals: Vec<DbValue> = Vec::new();
+    for (k, v) in obj {
+        cols.push(format!("\"{k}\""));
+        vals.push(masterdata::json_to_db_value(v));
+    }
+    let placeholders = vals.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "INSERT INTO {vtable} ({}) VALUES ({})",
+        cols.join(", "),
+        placeholders
+    );
+    con.execute(&sql, params_from_iter(vals)).map_err(db_err)?;
+    Ok(())
+}
+
+/// Met à jour une valeur N1 (le `code` est immuable).
+pub fn update_value(
+    con: &duckdb::Connection,
+    char_code: &str,
+    value_code: &str,
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    let attrs = require_characteristic(con, char_code)?;
+    reject_unknown_value_fields(&attrs, obj)?;
+    let vtable = value_table(char_code);
+    let exists: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [value_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!(
+            "valeur inexistante : {value_code}"
+        )));
+    }
+    validate_attribute_values(con, &attrs, obj)?;
+    let mut sets = Vec::new();
+    let mut vals: Vec<DbValue> = Vec::new();
+    for (k, v) in obj {
+        if k == "code" {
+            continue; // PK immuable
+        }
+        sets.push(format!("\"{k}\" = ?"));
+        vals.push(masterdata::json_to_db_value(v));
+    }
+    if sets.is_empty() {
+        return Ok(());
+    }
+    vals.push(DbValue::Text(value_code.to_string()));
+    let sql = format!("UPDATE {vtable} SET {} WHERE code = ?", sets.join(", "));
+    con.execute(&sql, params_from_iter(vals)).map_err(db_err)?;
+    Ok(())
+}
+
+/// Supprime une valeur N1.
+pub fn delete_value(
+    con: &duckdb::Connection,
+    char_code: &str,
+    value_code: &str,
+) -> Result<(), AppError> {
+    require_characteristic(con, char_code)?;
+    let vtable = value_table(char_code);
+    let n = con
+        .execute(
+            &format!("DELETE FROM {vtable} WHERE code = ?"),
+            [value_code],
+        )
+        .map_err(db_err)?;
+    if n == 0 {
+        return Err(AppError::not_found(format!(
+            "valeur inexistante : {value_code}"
+        )));
+    }
+    Ok(())
+}
+
+/// Affecte (ou retire, si `value` est `None`/vide) une valeur N1 à un membre de
+/// la dimension de base (ex. classer le compte `700` en `VENTES_IC`).
+pub fn assign(
+    con: &duckdb::Connection,
+    char_code: &str,
+    member: &str,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    let base_dimension: String = con
+        .query_row(
+            "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+            [char_code],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::not_found(format!("caractéristique inexistante : {char_code}")))?;
+    let (base_table, base_key) = references::dimension_master(&base_dimension).ok_or_else(|| {
+        AppError::bad_request(format!(
+            "dimension de base sans master data : {base_dimension}"
+        ))
+    })?;
+    if !references::value_exists(con, base_table, base_key, member).map_err(db_err)? {
+        return Err(AppError::not_found(format!(
+            "membre inexistant : {base_table}.{base_key} = {member}"
+        )));
+    }
+    let vtable = value_table(char_code);
+    let dbval = match value {
+        Some(v) if !v.is_empty() => {
+            if !references::value_exists(con, &vtable, "code", v).map_err(db_err)? {
+                return Err(AppError::bad_request(format!(
+                    "valeur inexistante : {vtable}.code = {v}"
+                )));
+            }
+            DbValue::Text(v.to_string())
+        }
+        _ => DbValue::Null, // désaffectation
+    };
+    let sql = format!(
+        "UPDATE {base_table} SET \"{char_code}\" = ? WHERE \"{base_key}\" = ?"
+    );
+    con.execute(
+        &sql,
+        params_from_iter(vec![dbval, DbValue::Text(member.to_string())]),
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -381,6 +621,71 @@ async fn remove_attr(
     Ok(Json(json!({ "deleted": name })))
 }
 
+#[derive(Deserialize)]
+struct AssignBody {
+    member: String,
+    #[serde(default)]
+    value: Option<String>,
+}
+
+/// GET /api/meta/characteristics/{code}/values — liste les valeurs N1.
+async fn values_list(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+) -> Result<Json<Vec<JsonValue>>, AppError> {
+    let con = lock_con(&state)?;
+    Ok(Json(list_values(&con, &code)?))
+}
+
+/// POST /api/meta/characteristics/{code}/values — crée une valeur N1.
+async fn values_create(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<JsonValue>,
+) -> Result<(StatusCode, Json<JsonValue>), AppError> {
+    let obj = body
+        .as_object()
+        .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?;
+    let con = lock_con(&state)?;
+    create_value(&con, &code, obj)?;
+    Ok((StatusCode::CREATED, Json(body)))
+}
+
+/// PUT /api/meta/characteristics/{code}/values/{value} — met à jour une valeur.
+async fn values_update(
+    State(state): State<Arc<AppState>>,
+    Path((code, value)): Path<(String, String)>,
+    Json(body): Json<JsonValue>,
+) -> Result<Json<JsonValue>, AppError> {
+    let obj = body
+        .as_object()
+        .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?;
+    let con = lock_con(&state)?;
+    update_value(&con, &code, &value, obj)?;
+    Ok(Json(body))
+}
+
+/// DELETE /api/meta/characteristics/{code}/values/{value} — supprime une valeur.
+async fn values_delete(
+    State(state): State<Arc<AppState>>,
+    Path((code, value)): Path<(String, String)>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    delete_value(&con, &code, &value)?;
+    Ok(Json(json!({ "deleted": value })))
+}
+
+/// PUT /api/meta/characteristics/{code}/assign — classe (ou déclasse) un membre.
+async fn assign_handler(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<AssignBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    assign(&con, &code, &body.member, body.value.as_deref())?;
+    Ok(Json(json!({ "member": body.member, "value": body.value })))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/characteristics", get(list).post(create))
@@ -393,6 +698,15 @@ pub fn router() -> Router<Arc<AppState>> {
             "/api/meta/characteristics/{code}/attributes/{name}",
             delete(remove_attr),
         )
+        .route(
+            "/api/meta/characteristics/{code}/values",
+            get(values_list).post(values_create),
+        )
+        .route(
+            "/api/meta/characteristics/{code}/values/{value}",
+            put(values_update).delete(values_delete),
+        )
+        .route("/api/meta/characteristics/{code}/assign", put(assign_handler))
 }
 
 // ───────────────────────────────── Tests ────────────────────────────────────────
@@ -521,6 +835,71 @@ mod tests {
             col_exists(&con, "car_comportement", "compte_destination"),
             "colonne d'attribut survit au reset"
         );
+    }
+
+    #[test]
+    fn valeurs_validation_et_affectation() {
+        let con = setup();
+        con.execute(
+            "INSERT INTO dim_account (code, libelle, classe) VALUES ('471L', 'Liaison', 'bilan')",
+            [],
+        )
+        .unwrap();
+        con.execute(
+            "INSERT INTO dim_account (code, libelle, classe) VALUES ('700', 'Ventes', 'resultat')",
+            [],
+        )
+        .unwrap();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        add_attribute(&con, "comportement", "compte_destination", "L", "account").unwrap();
+
+        // Valeur N1 avec attribut valide.
+        let mut obj = Map::new();
+        obj.insert("code".into(), json!("VENTES_IC"));
+        obj.insert("libelle".into(), json!("Ventes interco"));
+        obj.insert("compte_destination".into(), json!("471L"));
+        create_value(&con, "comportement", &obj).unwrap();
+
+        // Attribut pointant vers un compte inexistant → rejeté.
+        let mut bad = Map::new();
+        bad.insert("code".into(), json!("X"));
+        bad.insert("compte_destination".into(), json!("INEXISTANT"));
+        assert!(
+            create_value(&con, "comportement", &bad).is_err(),
+            "valeur d'attribut hors master data rejetée"
+        );
+
+        // Champ inconnu → rejeté.
+        let mut unknown = Map::new();
+        unknown.insert("code".into(), json!("Y"));
+        unknown.insert("foo".into(), json!("bar"));
+        assert!(create_value(&con, "comportement", &unknown).is_err());
+
+        let vals = list_values(&con, "comportement").unwrap();
+        assert_eq!(vals.len(), 1, "une seule valeur créée");
+
+        // Affectation d'un compte à la valeur.
+        assign(&con, "comportement", "700", Some("VENTES_IC")).unwrap();
+        let assigned: Option<String> = con
+            .query_row("SELECT comportement FROM dim_account WHERE code = '700'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(assigned.as_deref(), Some("VENTES_IC"));
+
+        // Affecter une valeur inexistante → rejeté.
+        assert!(assign(&con, "comportement", "700", Some("NOPE")).is_err());
+        // Affecter à un membre inexistant → rejeté.
+        assert!(assign(&con, "comportement", "999", Some("VENTES_IC")).is_err());
+
+        // Désaffectation (value = None).
+        assign(&con, "comportement", "700", None).unwrap();
+        let after: Option<String> = con
+            .query_row("SELECT comportement FROM dim_account WHERE code = '700'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(after, None, "compte déclassé");
     }
 
     #[test]
