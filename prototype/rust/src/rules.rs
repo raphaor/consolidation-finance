@@ -45,6 +45,7 @@
 //! compris (flux à flux). Le mécanisme reste **conservé derrière un flag** car il
 //! pourra resservir pour d'autres usages.
 
+use crate::characteristics;
 use crate::dimensions;
 use crate::pipeline::materialize_closures::materialize_closures;
 use crate::references;
@@ -189,6 +190,33 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
                         ));
                     }
                 }
+            } else if dest.mode == "map" {
+                // La caractéristique N1 (`via`) et l'attribut N2 (`attr`) doivent
+                // exister, et l'attribut doit pointer vers la dimension écrite.
+                let via = dest.via.as_deref().unwrap_or("");
+                let attr = dest.attr.as_deref().unwrap_or("");
+                if characteristics::base_dimension_of(con, via)
+                    .map_err(|e| e.to_string())?
+                    .is_none()
+                {
+                    return Err(format!(
+                        "destination.{dim} map : caractéristique inconnue : {via}"
+                    ));
+                }
+                match characteristics::attribute_target(con, via, attr).map_err(|e| e.to_string())? {
+                    None => {
+                        return Err(format!(
+                            "destination.{dim} map : attribut inconnu : {via}.{attr}"
+                        ))
+                    }
+                    Some(t) if t != *dim => {
+                        return Err(format!(
+                            "destination.{dim} map : l'attribut {via}.{attr} pointe vers '{t}', \
+                             incompatible avec la dimension '{dim}'"
+                        ))
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -330,8 +358,13 @@ enum Coefficient {
 /// Destination d'une dimension pilotable.
 #[derive(Debug, Clone)]
 struct Destination {
-    mode: String,        // "inherit" | "override" | "null"
+    mode: String, // "inherit" | "override" | "null" | "map"
     value: Option<String>,
+    /// Mode `map` : caractéristique N1 (`via`) traversée et attribut N2 (`attr`)
+    /// dont la valeur surcharge la dimension. La valeur est résolue par jointure
+    /// sur la dimension de base de la caractéristique (cf. `exec_operation`).
+    via: Option<String>,
+    attr: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -528,12 +561,20 @@ fn parse_destination(v: &JsonValue) -> RuleResult_<Destination> {
         .as_object()
         .ok_or("destination.<dim> doit être un objet")?;
     let mode = expect_str(obj, "mode")?;
-    let value = match mode.as_str() {
-        "inherit" | "null" => None,
-        "override" => Some(expect_str(obj, "value")?),
+    let (value, via, attr) = match mode.as_str() {
+        "inherit" | "null" => (None, None, None),
+        "override" => (Some(expect_str(obj, "value")?), None, None),
+        // Mode `map` : la valeur provient de l'attribut N2 `attr` de la
+        // caractéristique N1 `via` (existence validée à l'enregistrement et à
+        // l'exécution — cf. validate_definition / exec_operation).
+        "map" => {
+            let via = expect_str(obj, "via")?;
+            let attr = expect_str(obj, "attr")?;
+            (None, Some(via), Some(attr))
+        }
         other => return Err(format!("destination.mode inconnu : {other}")),
     };
-    Ok(Destination { mode, value })
+    Ok(Destination { mode, value, via, attr })
 }
 
 fn expect_str(obj: &serde_json::Map<String, JsonValue>, key: &str) -> RuleResult_<String> {
@@ -627,6 +668,14 @@ fn dest_expr(
                 params.push(DbValue::Text(d.value.clone().unwrap_or_default()));
                 "?".to_string()
             }
+            // Mode `map` : valeur tirée de l'attribut N2 via l'alias de jointure
+            // `cg_<via>` (cf. `exec_operation`). `via`/`attr` sont validés
+            // (alphanumériques + existence) avant interpolation.
+            "map" => {
+                let via = d.via.clone().unwrap_or_default();
+                let attr = d.attr.clone().unwrap_or_default();
+                format!("cg_{via}.\"{attr}\"")
+            }
             _ => format!("e.{dim}"),
         },
     }
@@ -685,6 +734,34 @@ fn exec_operation(
     ctx: &RuleContext,
 ) -> Result<usize, duckdb::Error> {
     let snap = format!("_rule_snap_{}", op.level);
+
+    // Valider les destinations `map` AVANT toute interpolation (via/attr
+    // viennent du JSON de la règle). On vérifie : identifiants sûrs
+    // (alphanumériques), existence de l'attribut N2, et compatibilité de type
+    // (la dimension écrite doit correspondre à la dimension cible de l'attribut).
+    for (dim, d) in &op.destination {
+        if d.mode != "map" {
+            continue;
+        }
+        let via = d.via.as_deref().unwrap_or("");
+        let attr = d.attr.as_deref().unwrap_or("");
+        if !dimensions::is_valid_custom_name(via) || !dimensions::is_valid_custom_name(attr) {
+            return Err(duckdb_synthesis_error(format!(
+                "destination.{dim} map : identifiants invalides (via={via:?}, attr={attr:?})"
+            )));
+        }
+        let target = characteristics::attribute_target(con, via, attr)?.ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "destination.{dim} map : attribut inconnu {via}.{attr}"
+            ))
+        })?;
+        if target != *dim {
+            return Err(duckdb_synthesis_error(format!(
+                "destination.{dim} map : l'attribut {via}.{attr} pointe vers '{target}', \
+                 incompatible avec la dimension '{dim}'"
+            )));
+        }
+    }
 
     // Noms des colonnes propagées = `selection_dims` privé de `level`.
     let propagated: Vec<&str> = ctx
@@ -783,6 +860,39 @@ fn exec_operation(
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
         }
+    }
+
+    // JOINs des caractéristiques (destinations `map`). Pour chaque N1 distincte
+    // `via`, joindre la dimension de base puis la table de valeurs `car_<via>`.
+    // INNER JOIN volontaire : seules les lignes dont le membre est **classé**
+    // (a une valeur N1, présente dans `car_<via>`) génèrent une écriture.
+    let mut map_vias: Vec<String> = Vec::new();
+    for (_, d) in &op.destination {
+        if d.mode == "map" {
+            if let Some(via) = &d.via {
+                if !map_vias.contains(via) {
+                    map_vias.push(via.clone());
+                }
+            }
+        }
+    }
+    for via in &map_vias {
+        // `via` déjà validé (identifiant sûr) par la boucle de validation map.
+        let base_dim = characteristics::base_dimension_of(con, via)?.ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "destination map : caractéristique inconnue : {via}"
+            ))
+        })?;
+        let (base_table, base_key) = references::dimension_master(&base_dim).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "destination map : dimension de base sans master data : {base_dim}"
+            ))
+        })?;
+        let value_table = format!("car_{via}");
+        joins.push_str(&format!(
+            "\nJOIN {base_table} md_{via}\n  ON md_{via}.{base_key} = e.{base_dim}\
+             \nJOIN {value_table} cg_{via}\n  ON cg_{via}.code = md_{via}.\"{via}\""
+        ));
     }
 
     // WHERE (sélection).
@@ -1383,7 +1493,7 @@ mod tests {
     fn dest_expr_null_pousse_null_littéral() {
         let dests = vec![(
             "partner".to_string(),
-            Destination { mode: "null".into(), value: None },
+            Destination { mode: "null".into(), value: None, via: None, attr: None },
         )];
         let mut params: Vec<DbValue> = Vec::new();
         let expr = dest_expr("partner", &dests, &mut params);
@@ -1395,7 +1505,7 @@ mod tests {
     fn dest_expr_override_binde_la_valeur() {
         let dests = vec![(
             "nature".to_string(),
-            Destination { mode: "override".into(), value: Some("2ELI".into()) },
+            Destination { mode: "override".into(), value: Some("2ELI".into()), via: None, attr: None },
         )];
         let mut params: Vec<DbValue> = Vec::new();
         let expr = dest_expr("nature", &dests, &mut params);

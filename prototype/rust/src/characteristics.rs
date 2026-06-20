@@ -106,6 +106,43 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CharacteristicDe
     Ok(out)
 }
 
+/// Dimension de base d'une caractéristique N1, si elle existe. Utilisé par le
+/// moteur de règles pour bâtir la traversée (mode `map`).
+pub fn base_dimension_of(
+    con: &duckdb::Connection,
+    code: &str,
+) -> duckdb::Result<Option<String>> {
+    match con.query_row(
+        "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+        [code],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(s) => Ok(Some(s)),
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Dimension cible d'un attribut N2 (`characteristic_code.name`), si l'attribut
+/// existe. Utilisé par le moteur de règles pour valider la compatibilité de type
+/// d'un mapping (la dimension écrite doit correspondre à `target_dimension`).
+pub fn attribute_target(
+    con: &duckdb::Connection,
+    char_code: &str,
+    attr: &str,
+) -> duckdb::Result<Option<String>> {
+    match con.query_row(
+        "SELECT target_dimension FROM dim_characteristic_attribute \
+         WHERE characteristic_code = ? AND name = ?",
+        [char_code, attr],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(s) => Ok(Some(s)),
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 fn load_attributes(
     con: &duckdb::Connection,
     char_code: &str,

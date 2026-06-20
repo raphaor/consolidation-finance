@@ -373,3 +373,67 @@ fn scope_filtre_sur_methode_entite() {
     assert!((ssum(&con, "nature='TST' AND entity='M'") - 100.0).abs() < TOL);
     assert_eq!(scount(&con, "nature='TST' AND entity='B'"), 0);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  10. Destination `map` : traversée N1→N2. Les comptes classés par une
+//      caractéristique sont redirigés vers ses attributs (compte de liaison +
+//      nature). INNER JOIN : un compte non classé ne génère rien. Multi-cible :
+//      account ET nature sont mappés depuis la même caractéristique.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn destination_map_traverse_caracteristique() {
+    use conso_engine::characteristics::{add_attribute, create_characteristic};
+
+    let con = engine();
+
+    // N1 « comportement » sur les comptes + 2 attributs N2 (vers comptes / natures).
+    create_characteristic(&con, "comportement", "Comportement", "account").unwrap();
+    add_attribute(&con, "comportement", "compte_destination", "Compte de liaison", "account")
+        .unwrap();
+    add_attribute(&con, "comportement", "nat", "Nature d'élimination", "nature").unwrap();
+
+    // Valeur + affectation en SQL direct (le CRUD est testé côté `characteristics`).
+    con.execute(
+        "INSERT INTO car_comportement (code, libelle, compte_destination, nat) \
+         VALUES ('VENTES_IC', 'Ventes interco', '471L', '1AJUST')",
+        [],
+    )
+    .unwrap();
+    con.execute(
+        "UPDATE dim_account SET comportement = 'VENTES_IC' WHERE code = '468'",
+        [],
+    )
+    .unwrap();
+
+    put(&con, "M", "468", "F20", None, "0LIASS", 100.0, "converted"); // classé → mappé
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // non classé → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"flow","op":"=","val":"F20"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":-1,
+             "destination":{
+                "account":{"mode":"map","via":"comportement","attr":"compte_destination"},
+                "nature":{"mode":"map","via":"comportement","attr":"nat"}}}]}"#,
+    );
+
+    // Seul 468 (classé) génère ; 200 non classé est exclu par l'INNER JOIN.
+    assert_eq!(run_one(&con, "R"), 1, "seul le compte classé est mappé");
+    // Sortie : compte 471L + nature 1AJUST (mappés), flux F20 hérité, montant −100.
+    assert_eq!(
+        scount(&con, "account='471L' AND nature='1AJUST' AND flow='F20'"),
+        1,
+        "account et nature mappés depuis la caractéristique"
+    );
+    assert!((ssum(&con, "account='471L' AND nature='1AJUST'") - (-100.0)).abs() < TOL);
+    // Rien depuis le compte non classé (200).
+    assert_eq!(
+        scount(&con, "nature='1AJUST' AND flow='F20'"),
+        1,
+        "une seule sortie mappée (le non-classé n'a rien produit)"
+    );
+}
