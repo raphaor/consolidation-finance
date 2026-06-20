@@ -33,11 +33,17 @@
 //! validés à la création), jamais du JSON de la règle → pas de risque
 //! d'injection SQL via ces noms.
 //!
-//! # Reconstruction des clôtures
+//! # Reconstruction des clôtures (débranchée — voir [`RECONSTRUCT_CLOSURES_AFTER_RULE`])
 //!
-//! Après chaque règle, [`crate::pipeline::materialize_closures`] est appelée
-//! pour chaque niveau touché : les F99 sont reconstruites depuis leurs
-//! constituants (y compris les nouvelles écritures générées par la règle).
+//! Historiquement, après chaque règle, [`crate::pipeline::materialize_closures`]
+//! était appelée pour chaque niveau touché afin de reconstruire les F99.
+//!
+//! **Décision de modélisation (2026-06-21)** : ce comportement est désormais
+//! **débranché**. Le F99 est calculé par la mécanique de transition de niveau
+//! (notamment la conversion) ; il n'est pas reconstruit après les règles. Une
+//! règle d'élimination sélectionne et génère donc **elle-même chaque flux**, F99
+//! compris (flux à flux). Le mécanisme reste **conservé derrière un flag** car il
+//! pourra resservir pour d'autres usages.
 
 use crate::dimensions;
 use crate::pipeline::materialize_closures::materialize_closures;
@@ -46,6 +52,14 @@ use duckdb::{params_from_iter, types::Value as DbValue, Connection};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeSet;
+
+/// Reconstruire les clôtures (F99) **après chaque règle** ?
+///
+/// Débranché (`false`, 2026-06-21) : le F99 relève de la transition de niveau
+/// (conversion), pas d'une reconstruction post-règle ; les règles gèrent F99
+/// flux à flux (cf. doc du module et discussion #13). Conservé — repasser à
+/// `true` pour réactiver le comportement historique.
+const RECONSTRUCT_CLOSURES_AFTER_RULE: bool = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Whitelists — sécurité : aucun identifiant utilisateur n'est interpolé.
@@ -821,8 +835,8 @@ fn duckdb_synthesis_error(msg: String) -> duckdb::Error {
 ///       `CREATE TEMP TABLE _rule_snap_L AS SELECT * FROM fact_entry WHERE level='L'`.
 ///    c. Pour chaque opération (toutes lisent le snapshot de leur niveau) :
 ///       construit et exécute un `INSERT ... SELECT` paramétré.
-///    d. Pour chaque niveau `L` : `DROP TABLE _rule_snap_L` puis
-///       `materialize_closures(L)` pour reconstruire les clôtures F99.
+///    d. Pour chaque niveau `L` : `DROP TABLE _rule_snap_L` (et, si
+///       [`RECONSTRUCT_CLOSURES_AFTER_RULE`] est réactivé, `materialize_closures(L)`).
 ///
 /// Les snapshots empêchent qu'une opération lise les lignes générées par une
 /// opération précédente (idempotence de la règle).
@@ -881,12 +895,14 @@ pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport
             *generated_per_level.entry(op.level.clone()).or_default() += n;
         }
 
-        // Cleanup + reconstruction des clôtures.
+        // Cleanup des snapshots (+ reconstruction des clôtures si réactivée).
         for lvl in &levels {
             let drop_sql = format!("DROP TABLE _rule_snap_{lvl}");
             // On ignore l'erreur du DROP (la table peut déjà être absente).
             let _ = con.execute(&drop_sql, []);
-            materialize_closures(con, lvl)?;
+            if RECONSTRUCT_CLOSURES_AFTER_RULE {
+                materialize_closures(con, lvl)?;
+            }
         }
 
         for (lvl, n) in generated_per_level {
@@ -959,7 +975,9 @@ pub fn run_ruleset_at_level(
             n += exec_operation(con, rule_code, op, &definition.scope, &ctx)?;
         }
         let _ = con.execute(&format!("DROP TABLE _rule_snap_{level}"), []);
-        materialize_closures(con, level)?;
+        if RECONSTRUCT_CLOSURES_AFTER_RULE {
+            materialize_closures(con, level)?;
+        }
         if n > 0 {
             results.push(RuleResult {
                 rule_code: rule_code.clone(),

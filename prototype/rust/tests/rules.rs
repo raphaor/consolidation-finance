@@ -407,7 +407,13 @@ fn coefficient_constant_et_multiplicateur() {
 //     est une dimension `Active` qui entre dans le grain de reconstruction.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Débranché : ce test valide la reconstruction des clôtures APRÈS une règle
+// (R2), désormais désactivée (cf. `rules::RECONSTRUCT_CLOSURES_AFTER_RULE`). Le
+// F99 relève maintenant de la transition de niveau, pas d'un rebuild post-règle ;
+// une règle gère ses flux (F99 compris) flux à flux. Conservé en `#[ignore]` car
+// le mécanisme R2 reste réactivable et pourra resservir.
 #[test]
+#[ignore = "R2 (reconstruction des clôtures post-règle) débranchée — voir RECONSTRUCT_CLOSURES_AFTER_RULE"]
 fn reconstruction_f99_apres_regle() {
     let con = setup();
     seed_interco(&con);
