@@ -31,11 +31,13 @@
   - [x] `server.rs` DELETE fact_entry WHERE scenario (préserve snapshots figés)
   - [x] `aggregate::step_a(con, scenario)` : filtre `s.scenario = ?` + INNER JOIN `sat_perimeter` (scope, toutes méthodes, entrantes/sortantes incluses) ; colonnes préfixées `s.`
   - [x] build + tests verts (no-op sur seed mono-scénario : toutes entités dans périmètre REEL)
-- [ ] **Phase 3 — Cœur à-nouveau**
-  - [ ] `ConvertParams::load_params` charge `a_nouveau_scenario`
-  - [ ] détection consolidée-en-N1 (EXISTS snapshot)
-  - [ ] carry corporate (écrase liasse) + carry consolidé
-  - [ ] exemption F00 à `step_d`
+- [x] **Phase 3 — Cœur à-nouveau** ✅ commit
+  - [x] `ConvertParams::load_params` charge `a_nouveau_scenario` (+ champ struct)
+  - [x] nouveau module `pipeline/a_nouveau.rs` : `carry(con, params, level)` générique via `dim_flow.flux_a_nouveau` (pairs source→target), câblé dans `run_steps` (corporate + consolidated, avant clôtures)
+  - [x] détection consolidée-en-N1 = EXISTS F99 consolidé snapshot **∩ scope courant** (`sat_perimeter`) → continues/sortantes seulement
+  - [x] carry corporate (écrase liasse F00) + carry consolidé (écrase le F00 produit par step_d → reste au % N-1). **Pas d'exemption dans step_d** : l'écrasement post-step_d est plus simple et équivalent.
+  - [x] **Correctif d'isolation (lacune Phase 2)** : `step_c`/`step_d` lisaient leur niveau sans filtrer le scénario → duplication des lignes du snapshot lors d'un 2ᵉ run. Ajout `AND f.scenario = ?` aux deux.
+  - [x] test dédié `tests/a_nouveau.rs` (2 tests) : report corporate+consolidé, liasse écrasée, clôture qui se referme ; + contrôle sans-à-nouveau. Build + suite verts (36 + 14/2ignored + 10 + 2).
 - [ ] **Phase 4 — Staging cible + orchestration**
   - [ ] cycle de vie par niveau (pré/transform/post/règles/clôtures)
   - [ ] préfixe 2→converti (fonctionnel), 3→consolidé avant %, 4→après %
@@ -58,7 +60,9 @@
 - **Arrêt session 2026-06-20** sur checkpoint **Phase 0 vert** (commit `db8307f`). Phase 1 non démarrée : pas de sous-ensemble neutre, risque de branche cassée si interrompue. Guide d'exécution prêt ci-dessous.
 - **Phase 1 faite (2026-06-21)** : `reclassified` supprimé du programme entier ; pipeline A→C→D (convert lit corporate) ; clôtures reconstruites **après chaque étape, corporate inclus** (corporate devient point de traitement, `validate_functional` repointé dessus). Périmètre natif (F00→F01, F98) retiré → 2 tests `#[ignore]` (rétablis par règles en Phase 7). Build + tests verts (14+2ignored / 10).
 - **Phase 2 faite (2026-06-21)** : `step_a` filtre par scénario du run + INNER JOIN `sat_perimeter` (scope) ; `server.rs` purge `fact_entry` par scénario (snapshots préservés). No-op sur seed mono-scénario, tests verts.
-- **NEXT → Phase 3** : cœur à-nouveau. `load_params` charge `a_nouveau_scenario` ; détecter consolidée-en-N1 (EXISTS snapshot consolidated F99) ; carry corporate (écrase liasse F00) + carry consolidé (fige % N-1) ; exemption F00 à `step_d` (flux cible d'à-nouveau non re-`× pct`). Conversion inchangée. Générique via `dim_flow.flux_a_nouveau`, jamais F00/F99 en dur.
+- **Phase 3 faite (2026-06-21)** : module `pipeline/a_nouveau.rs` (carry générique corporate+consolidé, intersection snapshot∩scope) ; `ConvertParams.a_nouveau_scenario` ; **isolation complétée** (convert+consolidate filtrent le scénario — sinon duplication du snapshot). Approche retenue : écrasement du F00 **après** step_d (plus simple que l'exemption dans step_d, résultat identique). Test `tests/a_nouveau.rs` vert.
+- **NEXT → Phase 4** (staging cible : préfixe 2→converti fonctionnel, 3/4→consolidé avant/après %) ou **Phase 6** (UI/API : champs `a_nouveau_scenario`/`flux_a_nouveau`, retrait `reclassified` du frontend). Le cœur moteur de l'à-nouveau (Phases 0–3) est fonctionnel et testé. Restent surtout : staging fin (Phase 4), validation cohérence (Phase 5), UI (Phase 6), règles utilisateur + recette (Phase 7).
+- **Note** : `materialize_closures` reconstruit encore les clôtures de TOUS les scénarios à chaque run (idempotent, valeurs identiques pour le snapshot figé → sans danger ; optimisation possible : scoper par scénario).
 
 ---
 

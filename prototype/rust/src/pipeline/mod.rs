@@ -18,6 +18,7 @@
 //! Toute la logique est exprimée en SQL déclaratif (portage Rust direct via
 //! duckdb-rs : une passe SQL par règle métier).
 
+pub mod a_nouveau;
 pub mod aggregate;
 pub mod consolidate;
 pub mod convert;
@@ -60,8 +61,11 @@ pub struct ConvertParams {
     pub prev_period: String,
     /// Jeu de taux à utiliser (clé dans `sat_exchange_rate`).
     pub rate_set: String,
-    /// Code du scénario (pour filtrage éventuel — usage futur).
+    /// Code du scénario du run (filtrage de l'agrégation, isolation).
     pub scenario_code: String,
+    /// Scénario d'à-nouveau (conso N-1 figée dont on reporte l'ouverture).
+    /// `None` = pas d'à-nouveau (cf. docs/A_NOUVEAU.md §2.2 / §6).
+    pub a_nouveau_scenario: Option<String>,
 }
 
 impl ConvertParams {
@@ -81,14 +85,15 @@ impl ConvertParams {
         con: &duckdb::Connection,
         scenario_code: &str,
     ) -> duckdb::Result<Self> {
-        // 1. Lecture (presentation, pivot, entry_period, rate_set).
-        let (presentation_currency, pivot_currency, current_period, rate_set): (
-            String, String, String, String,
+        // 1. Lecture (presentation, pivot, entry_period, rate_set, a_nouveau).
+        let (presentation_currency, pivot_currency, current_period, rate_set, a_nouveau_scenario): (
+            String, String, String, String, Option<String>,
         ) = con.query_row(
             "SELECT s.presentation_currency,
                     COALESCE((SELECT value FROM app_config WHERE key = 'pivot_currency'), 'EUR'),
                     s.entry_period,
-                    s.rate_set
+                    s.rate_set,
+                    s.a_nouveau_scenario
              FROM dim_scenario s
              WHERE s.code = ?",
             [scenario_code],
@@ -98,6 +103,7 @@ impl ConvertParams {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
                 ))
             },
         )?;
@@ -123,6 +129,7 @@ impl ConvertParams {
             prev_period,
             rate_set,
             scenario_code: scenario_code.to_string(),
+            a_nouveau_scenario,
         })
     }
 }
@@ -178,8 +185,8 @@ impl Step for ConsolidateStep {
     fn name(&self) -> &'static str { "consolidation" }
     fn output_level(&self) -> &'static str { "consolidated" }
     fn staging_prefix(&self) -> &'static str { "4" }
-    fn run(&self, con: &Connection, _params: &ConvertParams) -> duckdb::Result<()> {
-        consolidate::step_d(con).map(|_| ())
+    fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
+        consolidate::step_d(con, &params.scenario_code).map(|_| ())
     }
 }
 
@@ -255,6 +262,11 @@ fn run_steps(
         if !step.staging_prefix().is_empty() {
             staging::inject_by_prefix(con, step.output_level(), step.staging_prefix())?;
         }
+        // À-nouveau : colle le solde de clôture du snapshot N-1 sur le flux
+        // d'ouverture (F00) au niveau produit (corporate / consolidated), AVANT la
+        // reconstruction des clôtures. No-op si le scénario n'a pas d'à-nouveau.
+        // Cf. docs/A_NOUVEAU.md §3.
+        a_nouveau::carry(con, params, step.output_level())?;
         // Reconstruction autoritaire des clôtures après CHAQUE niveau — y compris
         // `corporate`, qui devient un point de traitement (injection à-nouveau +
         // règles de périmètre, cf. docs/A_NOUVEAU.md §4). Avant la suppression de

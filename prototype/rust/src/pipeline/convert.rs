@@ -45,11 +45,7 @@ use duckdb::Connection;
 /// les 12 colonnes built-in, le SQL produit reste structurellement identique
 /// au SQL statique historique (test golden inchangé).
 ///
-/// # Paramètres `?` (ordre, 8 au total)
-///
-/// Une CTE `params` mutualise les 5 valeurs de runtime (presentation, pivot,
-/// rate_set, current_period, prev_period). Les 3 `?` restants correspondent à
-/// la décoration de la devise dans les SELECT finaux et au filtre d'écart :
+/// # Paramètres `?` (ordre, 9 au total)
 ///
 /// | # | Valeur                       | Rôle                                       |
 /// |---|------------------------------|--------------------------------------------|
@@ -58,9 +54,10 @@ use duckdb::Connection;
 /// | 3 | `rate_set`                   | CTE `params.rate_set`                      |
 /// | 4 | `current_period`             | CTE `params.cur_period`                    |
 /// | 5 | `prev_period`                | CTE `params.prev_period`                   |
-/// | 6 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
-/// | 7 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
-/// | 8 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
+/// | 6 | `scenario_code`              | CTE `conv` : `WHERE f.scenario = ?` (isolation) |
+/// | 7 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
+/// | 8 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
+/// | 9 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
 ///
 /// Renvoie le nombre de lignes produites au niveau `converted`.
 pub fn step_c(con: &Connection, p: &ConvertParams) -> duckdb::Result<usize> {
@@ -165,7 +162,7 @@ conv AS (\n\
            ON r_pres_n1.rate_set        = p.rate_set\n\
           AND r_pres_n1.currency_source = p.presentation\n\
           AND r_pres_n1.period          = p.prev_period\n\
-    WHERE f.level = 'corporate'\n\
+    WHERE f.level = 'corporate' AND f.scenario = ?\n\
 )\n\
 INSERT INTO fact_entry\n\
     ({insert_col_list}, level, amount)\n\
@@ -193,6 +190,7 @@ WHERE currency <> ?\n\
             p.rate_set,
             p.current_period,
             p.prev_period,
+            p.scenario_code, // conv CTE : WHERE f.scenario = ? (isolation)
             p.presentation_currency,
             p.presentation_currency,
             p.presentation_currency,

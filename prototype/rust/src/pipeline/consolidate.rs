@@ -27,8 +27,11 @@ use duckdb::Connection;
 /// les 12 colonnes built-in, le SQL produit reste structurellement identique
 /// au SQL statique historique (test golden inchangé).
 ///
+/// `scenario` = code du scénario du run : seules ses lignes `converted` sont
+/// consolidées (isolation des autres scénarios, ex. snapshot d'à-nouveau figé).
+///
 /// Renvoie le nombre de lignes produites au niveau `consolidated`.
-pub fn step_d(con: &Connection) -> duckdb::Result<usize> {
+pub fn step_d(con: &Connection, scenario: &str) -> duckdb::Result<usize> {
     let dims = dimensions::load_all(con)?;
     let cols = dimensions::propagated_cols(&dims);
     let f_cols = cols
@@ -54,8 +57,9 @@ JOIN sat_perimeter p\n\
 JOIN dim_method m\n\
   ON m.code = p.methode\n\
 WHERE f.level = 'converted'\n\
+  AND f.scenario = ?\n\
   AND m.consolidated = true;  -- équivalence et méthodes futures exclues par flag"
     );
-    con.execute(&sql, [])?;
+    con.execute(&sql, [scenario])?;
     count_level(con, "consolidated")
 }
