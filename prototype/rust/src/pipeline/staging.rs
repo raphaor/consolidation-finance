@@ -1,16 +1,15 @@
 //! Injection des écritures par préfixe de nature (staging).
 //!
-//! Les écritures dont le préfixe de nature est `3` ou `4` sont injectées
-//! directement au niveau correspondant du pipeline, en sautant les étapes
-//! précédentes. Voir `docs/FLUX_CONSO.md` « Staging — Injection par nature ».
+//! Staging cible (cf. docs/A_NOUVEAU.md §4 bis) — 3 niveaux :
 //!
-//! - Préfixe `3` → injecté au niveau `converted` (saute A + C)
-//! - Préfixe `4` → injecté au niveau `consolidated` (saute A + C + D)
-//!
-//! Le préfixe `2` n'est **plus routé** depuis la suppression du niveau
-//! `reclassified` (cf. docs/A_NOUVEAU.md §4). Sa redéfinition cible (injection au
-//! `converted`, en devise fonctionnelle, avant écarts) est prévue en Phase 4
-//! (cf. docs/A_NOUVEAU.md §4 bis) — non implémentée ici.
+//! - Préfixe `2` → **converti**, en devise fonctionnelle, **avant** écarts :
+//!   consommé directement dans `convert::step_c` (UNION), pour subir conversion +
+//!   écarts. **Pas** via ce module.
+//! - Préfixe `3` → **consolidé**, **avant** le × pct : consommé dans
+//!   `consolidate::step_d` (UNION), pour subir le × pct_integration. **Pas** via
+//!   ce module.
+//! - Préfixe `4` → **consolidé**, **après** le × pct : injecté **tel quel** par
+//!   [`inject_by_prefix`] après l'étape D (seul préfixe routé par ce module).
 //!
 //! Les écritures injectées sont supposées déjà traitées pour les étapes
 //! qu'elles sautent. L'agrégation se fait par le grain standard.

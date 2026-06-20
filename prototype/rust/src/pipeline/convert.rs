@@ -45,7 +45,7 @@ use duckdb::Connection;
 /// les 12 colonnes built-in, le SQL produit reste structurellement identique
 /// au SQL statique historique (test golden inchangé).
 ///
-/// # Paramètres `?` (ordre, 9 au total)
+/// # Paramètres `?` (ordre, 10 au total)
 ///
 /// | # | Valeur                       | Rôle                                       |
 /// |---|------------------------------|--------------------------------------------|
@@ -54,10 +54,11 @@ use duckdb::Connection;
 /// | 3 | `rate_set`                   | CTE `params.rate_set`                      |
 /// | 4 | `current_period`             | CTE `params.cur_period`                    |
 /// | 5 | `prev_period`                | CTE `params.prev_period`                   |
-/// | 6 | `scenario_code`              | CTE `conv` : `WHERE f.scenario = ?` (isolation) |
-/// | 7 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
-/// | 8 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
-/// | 9 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
+/// | 6 | `scenario_code`              | sous-requête `conv` : fact_entry corporate `WHERE scenario = ?` |
+/// | 7 | `scenario_code`              | sous-requête `conv` : stg_entry préfixe 2 `WHERE scenario = ?` |
+/// | 8 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
+/// | 9 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
+/// |10 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
 ///
 /// Renvoie le nombre de lignes produites au niveau `converted`.
 pub fn step_c(con: &Connection, p: &ConvertParams) -> duckdb::Result<usize> {
@@ -141,7 +142,16 @@ conv AS (\n\
                 /\n\
                 (CASE WHEN p.presentation = p.pivot THEN 1.0 ELSE r_pres_n.taux_close END)\n\
         END AS taux_close_n\n\
-    FROM fact_entry f\n\
+    FROM (\n\
+        SELECT {insert_col_list}, amount FROM fact_entry\n\
+        WHERE level = 'corporate' AND scenario = ?\n\
+        UNION ALL\n\
+        -- Staging préfixe 2 : écritures en devise FONCTIONNELLE injectées au\n\
+        -- converti, qui subissent la conversion (montant + écarts F80/F81) sans\n\
+        -- apparaître au corporate. Cf. docs/A_NOUVEAU.md §4 bis.\n\
+        SELECT {insert_col_list}, amount FROM stg_entry\n\
+        WHERE substr(nature, 1, 1) = '2' AND scenario = ?\n\
+    ) f\n\
     JOIN dim_flow fl ON fl.code = f.flow\n\
     CROSS JOIN params p\n\
     -- Taux de la devise fonctionnelle vers le pivot (N et N-1)\n\
@@ -162,7 +172,6 @@ conv AS (\n\
            ON r_pres_n1.rate_set        = p.rate_set\n\
           AND r_pres_n1.currency_source = p.presentation\n\
           AND r_pres_n1.period          = p.prev_period\n\
-    WHERE f.level = 'corporate' AND f.scenario = ?\n\
 )\n\
 INSERT INTO fact_entry\n\
     ({insert_col_list}, level, amount)\n\
@@ -190,7 +199,8 @@ WHERE currency <> ?\n\
             p.rate_set,
             p.current_period,
             p.prev_period,
-            p.scenario_code, // conv CTE : WHERE f.scenario = ? (isolation)
+            p.scenario_code, // sous-requête conv : fact_entry corporate WHERE scenario = ?
+            p.scenario_code, // sous-requête conv : stg_entry préfixe 2 WHERE scenario = ?
             p.presentation_currency,
             p.presentation_currency,
             p.presentation_currency,

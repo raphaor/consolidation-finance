@@ -173,7 +173,8 @@ pub struct ConvertStep;
 impl Step for ConvertStep {
     fn name(&self) -> &'static str { "conversion" }
     fn output_level(&self) -> &'static str { "converted" }
-    fn staging_prefix(&self) -> &'static str { "3" }
+    // Pas de staging post-étape : le préfixe 2 est consommé DANS step_c (UNION,
+    // en devise fonctionnelle, pour subir conversion + écarts). Cf. step_c.
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
         convert::step_c(con, params).map(|_| ())
     }
@@ -184,6 +185,8 @@ pub struct ConsolidateStep;
 impl Step for ConsolidateStep {
     fn name(&self) -> &'static str { "consolidation" }
     fn output_level(&self) -> &'static str { "consolidated" }
+    // Préfixe 4 = injection post-étape au consolidé (APRÈS le × pct, tel quel).
+    // Le préfixe 3 (AVANT le × pct) est consommé DANS step_d (UNION). Cf. step_d.
     fn staging_prefix(&self) -> &'static str { "4" }
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
         consolidate::step_d(con, &params.scenario_code).map(|_| ())

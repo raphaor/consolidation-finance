@@ -725,20 +725,22 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
 
-    // Natures de test pour les préfixes 3/4 (le préfixe 2 n'est plus routé
-    // depuis la suppression du niveau reclassified — redéfinition Phase 4).
+    // Natures de test pour les préfixes 2/3/4 (staging cible, cf. A_NOUVEAU §4 bis).
     con.execute_batch(
         "INSERT INTO dim_nature VALUES
-            ('3TEST','Test convert skip',NULL),
-            ('4TEST','Test cons skip',NULL);",
+            ('2TEST','Test converti (fonctionnel)',NULL),
+            ('3TEST','Test consolidé avant %',NULL),
+            ('4TEST','Test consolidé après %',NULL);",
     )
     .expect("seed natures");
 
-    // Écritures de test dans stg_entry
+    // Écritures de test dans stg_entry (M, EUR, compte 100). M est dans le
+    // périmètre REEL → le préfixe 3 (qui passe par step_d) trouve son pct.
     con.execute_batch(
         "INSERT INTO stg_entry
             (scenario, entity, entry_period, period, account, flow, currency, nature, amount)
          VALUES
+            ('REEL','M','2024','2024','100','F20','EUR','2TEST',999.00),
             ('REEL','M','2024','2024','100','F20','EUR','3TEST',888.00),
             ('REEL','M','2024','2024','100','F20','EUR','4TEST',777.00);",
     )
@@ -750,42 +752,24 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
     )
     .expect("run_pipeline");
 
-    // Préfixe 3 : visible à converted, invisible à corporate
-    let n3_corp: i64 = con
-        .query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level='corporate' AND substr(nature,1,1)='3'",
-            [],
+    let count = |level: &str, nature: &str| -> i64 {
+        con.query_row(
+            "SELECT COUNT(*) FROM fact_entry WHERE level=? AND nature=?",
+            [level, nature],
             |r| r.get(0),
         )
-        .unwrap();
-    let n3_conv: i64 = con
-        .query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' AND nature='3TEST'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(n3_corp, 0, "préfixe 3 ne doit pas apparaître à corporate");
-    assert!(n3_conv > 0, "préfixe 3 doit apparaître à converted");
+        .unwrap()
+    };
 
-    // Préfixe 4 : visible à consolidated, invisible ailleurs
-    let n4_conv: i64 = con
-        .query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' AND substr(nature,1,1)='4'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    let n4_cons: i64 = con
-        .query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level='consolidated' AND nature='4TEST'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(n4_conv, 0, "préfixe 4 ne doit pas apparaître à converted");
-    assert!(
-        n4_cons > 0,
-        "préfixe 4 doit apparaître à consolidated"
-    );
+    // Préfixe 2 (fonctionnel) : converti via la conversion, absent du corporate.
+    assert_eq!(count("corporate", "2TEST"), 0, "préfixe 2 absent du corporate");
+    assert!(count("converted", "2TEST") > 0, "préfixe 2 présent au converti");
+
+    // Préfixe 3 : consolidé (subit le × pct), absent du converti.
+    assert_eq!(count("converted", "3TEST"), 0, "préfixe 3 absent du converti");
+    assert!(count("consolidated", "3TEST") > 0, "préfixe 3 présent au consolidé");
+
+    // Préfixe 4 : consolidé (tel quel, après le × pct), absent du converti.
+    assert_eq!(count("converted", "4TEST"), 0, "préfixe 4 absent du converti");
+    assert!(count("consolidated", "4TEST") > 0, "préfixe 4 présent au consolidé");
 }

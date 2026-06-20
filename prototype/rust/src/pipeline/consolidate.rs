@@ -49,17 +49,24 @@ SELECT\n\
     {f_cols},\n\
     'consolidated' AS level,\n\
     f.amount * COALESCE(p.pct_integration, 1.0) AS amount\n\
-FROM fact_entry f\n\
+FROM (\n\
+    SELECT {col_list}, amount FROM fact_entry\n\
+    WHERE level = 'converted' AND scenario = ?\n\
+    UNION ALL\n\
+    -- Staging préfixe 3 : écritures injectées au consolidé AVANT la mécanique de\n\
+    -- taux → elles subissent le × pct_integration (via le JOIN sat_perimeter),\n\
+    -- comme les flux convertis. Cf. docs/A_NOUVEAU.md §4 bis.\n\
+    SELECT {col_list}, amount FROM stg_entry\n\
+    WHERE substr(nature, 1, 1) = '3' AND scenario = ?\n\
+) f\n\
 JOIN sat_perimeter p\n\
   ON p.entity = f.entity\n\
  AND p.scenario = f.scenario\n\
  AND p.period = f.entry_period\n\
 JOIN dim_method m\n\
   ON m.code = p.methode\n\
-WHERE f.level = 'converted'\n\
-  AND f.scenario = ?\n\
-  AND m.consolidated = true;  -- équivalence et méthodes futures exclues par flag"
+WHERE m.consolidated = true;  -- équivalence et méthodes futures exclues par flag"
     );
-    con.execute(&sql, [scenario])?;
+    con.execute(&sql, [scenario, scenario])?;
     count_level(con, "consolidated")
 }

@@ -38,10 +38,12 @@
   - [x] carry corporate (écrase liasse F00) + carry consolidé (écrase le F00 produit par step_d → reste au % N-1). **Pas d'exemption dans step_d** : l'écrasement post-step_d est plus simple et équivalent.
   - [x] **Correctif d'isolation (lacune Phase 2)** : `step_c`/`step_d` lisaient leur niveau sans filtrer le scénario → duplication des lignes du snapshot lors d'un 2ᵉ run. Ajout `AND f.scenario = ?` aux deux.
   - [x] test dédié `tests/a_nouveau.rs` (2 tests) : report corporate+consolidé, liasse écrasée, clôture qui se referme ; + contrôle sans-à-nouveau. Build + suite verts (36 + 14/2ignored + 10 + 2).
-- [ ] **Phase 4 — Staging cible + orchestration**
-  - [ ] cycle de vie par niveau (pré/transform/post/règles/clôtures)
-  - [ ] préfixe 2→converti (fonctionnel), 3→consolidé avant %, 4→après %
-  - [ ] priorité ouverture (F00 staffé préfixe 3 ignoré)
+- [x] **Phase 4 — Staging cible** ✅ commit
+  - [x] préfixe `2` → consommé dans `step_c` (UNION corporate + stg préfixe 2 fonctionnel) → conversion + écarts, absent du corporate
+  - [x] préfixe `3` → consommé dans `step_d` (UNION converti + stg préfixe 3) → subit le × pct_integration (JOIN sat_perimeter), absent du converti
+  - [x] préfixe `4` → injection post-step au consolidé (tel quel) via `inject_by_prefix` (seul préfixe routé par `staging.rs`)
+  - [x] `ConvertStep` ne déclare plus de staging post-étape ; doc `staging.rs` MAJ ; test `staging_route_les_prefixes_vers_le_bon_niveau` réécrit (2/3/4) — vert
+  - ⚠️ priorité ouverture (F00 staffé en préfixe ignoré) : non spécifiquement codée ; le carry à-nouveau écrase le F00 de toute façon. À couvrir en Phase 5 si besoin.
 - [ ] **Phase 5 — Validation** : contrôle de cohérence entrant/snapshot + clôtures 3 niveaux
 - [ ] **Phase 6 — API / UI** : champs `a_nouveau_scenario`, `flux_a_nouveau` ; stats 3 niveaux
 - [ ] **Phase 7 — Tests & règles** : règles corporate (UTILISATEUR), tests Rust, golden, recette Python (écarts préfixe 2)
@@ -63,6 +65,8 @@
 - **Phase 3 faite (2026-06-21)** : module `pipeline/a_nouveau.rs` (carry générique corporate+consolidé, intersection snapshot∩scope) ; `ConvertParams.a_nouveau_scenario` ; **isolation complétée** (convert+consolidate filtrent le scénario — sinon duplication du snapshot). Approche retenue : écrasement du F00 **après** step_d (plus simple que l'exemption dans step_d, résultat identique). Test `tests/a_nouveau.rs` vert.
 - **NEXT → Phase 4** (staging cible : préfixe 2→converti fonctionnel, 3/4→consolidé avant/après %) ou **Phase 6** (UI/API : champs `a_nouveau_scenario`/`flux_a_nouveau`, retrait `reclassified` du frontend). Le cœur moteur de l'à-nouveau (Phases 0–3) est fonctionnel et testé. Restent surtout : staging fin (Phase 4), validation cohérence (Phase 5), UI (Phase 6), règles utilisateur + recette (Phase 7).
 - **Note** : `materialize_closures` reconstruit encore les clôtures de TOUS les scénarios à chaque run (idempotent, valeurs identiques pour le snapshot figé → sans danger ; optimisation possible : scoper par scénario).
+- **Phase 4 faite (2026-06-21)** : staging cible sur 3 niveaux. Préfixes 2 et 3 consommés DANS step_c/step_d (UNION fact_entry + stg) → ils subissent conversion / × pct ; préfixe 4 injecté tel quel après step_d. Test staging réécrit, vert (9 binaires OK, 0 FAILED).
+- **NEXT → Phase 5** (validation cohérence entrant/snapshot) ou **Phase 6** (UI/API). Le moteur (Phases 0–4) est complet et testé.
 
 ---
 
