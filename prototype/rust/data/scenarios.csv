@@ -1,2 +1,2 @@
 code,libelle,category,entry_period,presentation_currency,variant,ruleset_code,rate_set,statut
-REEL,Réel 2024,REEL,2024,EUR,BASE,,RATES,ouvert
+REEL,Réel 2024,REEL,2024,EUR,BASE,RS_INTERCO,RATES,ouvert

@@ -46,7 +46,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
     create_schema, dimensions, export, import, load_all, masterdata, money::Money, run_pipeline,
-    run_pipeline_with_hook, ConvertParams,
+    run_pipeline_with_hook, seed_demo_rules, ConvertParams,
 };
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
@@ -553,6 +553,7 @@ async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetR
         let con = lock_con(&state)?;
         create_schema(&con).map_err(db_err)?; // DROP + CREATE (idempotent)
         load_all(&con, std::path::Path::new(&state.csv_dir)).map_err(db_err)?;
+        seed_demo_rules(&con).map_err(db_err)?; // règle + jeu interco (hors CSV)
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
             .map_err(db_err)?;
@@ -1187,6 +1188,7 @@ async fn main() {
         println!("   Initialisation : création du schéma + import CSV…");
         create_schema(&con).expect("✗ create_schema");
         load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
+        seed_demo_rules(&con).expect("✗ seed_demo_rules"); // règle + jeu interco (hors CSV)
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.

@@ -341,3 +341,66 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
 
     Ok(())
 }
+
+/// Seede la **démo d'élimination interco** : la règle `ELI_700` + le jeu
+/// `RS_INTERCO`. Elle est absente des CSV car la `definition` est du JSON, mal
+/// adapté au format CSV ; on la pose donc en code (même esprit que [`seed_all`]).
+///
+/// Reproduit la fixture canonique de `tests/rules.rs::elim_700_json` : élimine
+/// l'interco du compte 700 entre entités en méthode `globale` (op 1 extourne
+/// partner hérité, op 2 pose la contrepartie partner vidé, le tout en nature
+/// `2ELI`). Le scénario `REEL` référence `RS_INTERCO` (cf. `scenarios.csv`), et
+/// `entries.csv` contient la ligne interco M→A sur 700 que la règle matche.
+///
+/// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
+/// `POST /api/reset`), pas par [`seed_all`] (les tests créent leurs propres
+/// règles). À exécuter sur un schéma fraîchement créé → INSERT simples.
+pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
+    const ELI_700: &str = r#"{
+        "scope": [
+            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
+            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
+        ],
+        "operations": [
+            {
+                "seq": 1, "level": "consolidated",
+                "selection": [
+                    {"dim": "account", "op": "=", "val": "700"},
+                    {"dim": "partner", "op": "IS NOT NULL"}
+                ],
+                "coefficient": {"type": "pct_integration"},
+                "multiplicateur": -1,
+                "destination": {
+                    "nature":  {"mode": "override", "value": "2ELI"},
+                    "partner": {"mode": "inherit"}
+                }
+            },
+            {
+                "seq": 2, "level": "consolidated",
+                "selection": [
+                    {"dim": "account", "op": "=", "val": "700"},
+                    {"dim": "partner", "op": "IS NOT NULL"}
+                ],
+                "coefficient": {"type": "pct_integration"},
+                "multiplicateur": 1,
+                "destination": {
+                    "nature":  {"mode": "override", "value": "2ELI"},
+                    "partner": {"mode": "null"}
+                }
+            }
+        ]
+    }"#;
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
+        params!["ELI_700", "Élimination interco 700", ELI_700],
+    )?;
+    con.execute(
+        "INSERT INTO dim_ruleset (code, libelle) VALUES (?, ?)",
+        params!["RS_INTERCO", "Élimination interco (démo)"],
+    )?;
+    con.execute(
+        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES (?, ?, ?)",
+        params!["RS_INTERCO", 1, "ELI_700"],
+    )?;
+    Ok(())
+}
