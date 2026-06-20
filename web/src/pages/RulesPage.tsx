@@ -24,6 +24,7 @@ import {
 } from '@tanstack/react-table';
 import { api } from '../api';
 import type {
+  Characteristic,
   DimensionInfo,
   MasterTable,
   Operation,
@@ -66,7 +67,7 @@ const BUILTIN_DIMS_FALLBACK: DimensionInfo[] = [
 
 type Notice = { kind: 'success' | 'error'; text: string } | null;
 type Subtab = 'biblio' | 'jeux' | 'dims';
-type DestMode = 'inherit' | 'override' | 'null';
+type DestMode = 'inherit' | 'override' | 'null' | 'map';
 
 interface RuleDraft {
   code: string;
@@ -431,6 +432,22 @@ function RuleFormModal({
   const [draft, setDraft] = useState<RuleDraft>(initial);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Caractéristiques N1/N2 disponibles pour les destinations `map`.
+  const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cs = await api.characteristics.list();
+        if (!cancelled) setCharacteristics(cs);
+      } catch {
+        if (!cancelled) setCharacteristics([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -572,7 +589,7 @@ function RuleFormModal({
   function updateDestination(
     opIdx: number,
     dim: string,
-    patch: Partial<{ mode: DestMode; value: string }>,
+    patch: Partial<{ mode: DestMode; value: string; via: string; attr: string }>,
   ) {
     setDraft((d) => {
       const operations = d.definition.operations.map((o, i) => {
@@ -892,6 +909,16 @@ function RuleFormModal({
                   <h4 className="rule-section__title">Destination</h4>
                   {pilotableDims.map((dim) => {
                     const dest = op.destination[dim] ?? { mode: 'inherit' as DestMode };
+                    // Mode `map` : seules les caractéristiques ayant un attribut
+                    // ciblant cette dimension sont proposées (compatibilité de
+                    // type imposée par le moteur).
+                    const viaOptions = characteristics.filter((c) =>
+                      c.attributes.some((a) => a.target_dimension === dim),
+                    );
+                    const viaChar = characteristics.find((c) => c.code === dest.via);
+                    const attrOptions = (viaChar?.attributes ?? []).filter(
+                      (a) => a.target_dimension === dim,
+                    );
                     return (
                       <div key={dim} className="rule-dest-row">
                         <span className="rule-dest-label">{dim}</span>
@@ -906,6 +933,9 @@ function RuleFormModal({
                           <option value="inherit">inherit</option>
                           <option value="override">override</option>
                           <option value="null">null</option>
+                          <option value="map" disabled={viaOptions.length === 0}>
+                            map (caractéristique)
+                          </option>
                         </select>
                         {dest.mode === 'override' && (
                           <OverrideValueField
@@ -915,6 +945,46 @@ function RuleFormModal({
                               updateDestination(opIdx, dim, { value: v })
                             }
                           />
+                        )}
+                        {dest.mode === 'map' && (
+                          <>
+                            <select
+                              className="rule-dest-input"
+                              value={dest.via ?? ''}
+                              onChange={(e) =>
+                                updateDestination(opIdx, dim, {
+                                  via: e.target.value,
+                                  attr: '',
+                                })
+                              }
+                            >
+                              <option value="" disabled>
+                                — caractéristique —
+                              </option>
+                              {viaOptions.map((c) => (
+                                <option key={c.code} value={c.code}>
+                                  {c.code}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              className="rule-dest-input"
+                              value={dest.attr ?? ''}
+                              disabled={!dest.via}
+                              onChange={(e) =>
+                                updateDestination(opIdx, dim, { attr: e.target.value })
+                              }
+                            >
+                              <option value="" disabled>
+                                — attribut —
+                              </option>
+                              {attrOptions.map((a) => (
+                                <option key={a.name} value={a.name}>
+                                  {a.name}
+                                </option>
+                              ))}
+                            </select>
+                          </>
                         )}
                       </div>
                     );

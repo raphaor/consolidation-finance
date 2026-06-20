@@ -453,7 +453,14 @@ export interface Operation {
   multiplicateur: number;
   destination: Record<
     string,
-    { mode: 'inherit' | 'override' | 'null'; value?: string }
+    {
+      mode: 'inherit' | 'override' | 'null' | 'map';
+      value?: string;
+      // Mode `map` : caractéristique N1 traversée (`via`) et attribut N2 (`attr`)
+      // dont la valeur surcharge la dimension (cf. characteristics.rs).
+      via?: string;
+      attr?: string;
+    }
   >;
 }
 
