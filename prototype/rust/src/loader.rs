@@ -274,9 +274,12 @@ fn build_insert_sql(m: &CsvMapping, csv_path: &str) -> String {
         format!("read_csv_auto('{csv_path}')")
     };
 
+    // Liste de colonnes **explicite** : robuste si la table porte des colonnes
+    // hors CSV (ex. `stg_entry.source`, non-dimensionnelle) — elles restent NULL.
     format!(
-        "INSERT INTO {} SELECT {} FROM {}",
+        "INSERT INTO {} ({}) SELECT {} FROM {}",
         m.table,
+        m.columns.join(", "),
         select_cols.join(", "),
         reader
     )

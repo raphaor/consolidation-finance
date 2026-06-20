@@ -173,7 +173,10 @@ const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>))] = &[
 
 /// Ligne de saisie brute :
 /// (scenario, entity, entry_period, period, account, flow, currency, nature,
-///  partner, share, analysis, analysis2, amount).
+///  partner, share, analysis, source, amount).
+/// Le 12e champ est la **référence source** (`S-M-001`…), métadonnée non-
+/// dimensionnelle insérée dans `stg_entry.source` (et NON dans `analysis2`, qui
+/// est une dimension analytique : l'y mettre ferait de chaque ligne un « dont »).
 type RawRow = (&'static str, &'static str, &'static str, &'static str,
                &'static str, &'static str, &'static str, &'static str,
                Option<&'static str>, Option<&'static str>, Option<&'static str>,
@@ -334,8 +337,13 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
 
     // --- Staging (saisie brute) ---
     for row in RAW {
+        // `analysis2` reste NULL (dimension analytique) ; la réf. source (row.11)
+        // va dans la colonne non-dimensionnelle `source`.
         con.execute(
-            "INSERT INTO stg_entry VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO stg_entry \
+                (scenario, entity, entry_period, period, account, flow, currency, \
+                 nature, partner, share, analysis, analysis2, source, amount) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             params![
                 row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7,
                 row.8, row.9, row.10, row.11, Money(row.12),

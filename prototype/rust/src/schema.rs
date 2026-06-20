@@ -287,7 +287,9 @@ CREATE TABLE IF NOT EXISTS dim_custom_dimension (
 
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
-/// 9. stg_entry : saisie brute — même structure que fact_entry sans la colonne `level`.
+/// 9. stg_entry : saisie brute — mêmes dimensions que fact_entry sans `level`,
+/// **plus** une colonne `source` non-dimensionnelle (métadonnée de provenance,
+/// NON propagée par le pipeline).
 pub const DDL_STG_ENTRY: &str = "\
 CREATE TABLE stg_entry (
     scenario     TEXT,
@@ -302,6 +304,9 @@ CREATE TABLE stg_entry (
     share        TEXT,
     analysis     TEXT,
     analysis2    TEXT,
+    source       TEXT,            -- métadonnée non-dimensionnelle : provenance de
+                                  -- la ligne (réf. liasse source, etc.). Hors
+                                  -- registre des dimensions → non propagée.
     amount       DECIMAL(18,2)
 );";
 

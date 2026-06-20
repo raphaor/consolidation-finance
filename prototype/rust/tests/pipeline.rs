@@ -136,39 +136,33 @@ fn pipeline_produit_les_bons_comptes_par_niveau() {
     // Comptages justifiés par le seed (cf. src/seed.rs). Rappel du périmètre :
     //   M = continu (EUR), A = entrante (USD), B = sortante (GBP) ; globale 100%.
     //
-    //   Le grain d'agrégation inclut partner/share/analysis/analysis2 : deux
-    //   écritures qui ne diffèrent que par analysis2 (ex-S-M-003/004 sur le
-    //   F20 du compte 400 de M) ne sont plus agrégées.
+    //   Le grain d'agrégation/clôture inclut les dimensions analytiques
+    //   (partner/share/analysis/analysis2), mais le seed ne les renseigne PAS :
+    //   la réf. source (`S-M-001`…) vit dans `stg_entry.source`, **non-
+    //   dimensionnelle**. Les écritures se ré-agrègent donc par compte, et les
+    //   clôtures F99 sont reconstruites par compte (pas par ligne).
     //
-    //   - corporate (A) = 32 : M=12 (4 F00 + 8 F20 — le F20/400 éclaté en 2
-    //     lignes analysis2 distinctes), A=10, B=10 (la saisie ne contient que
-    //     F00/F20 en mode écriture).
+    //   - corporate = 31 : M=11 (4 F00 + 7 F20), A=10 (3 F00 + 7 F20), B=10.
     //
-    //   - reclassified (B) : M copie (12), A entrante F00→F01 (10), B sortante
-    //     passe F00/F20 à l'identique (10) + génère un miroir −X sur F98 par
-    //     constituant → 10 (les miroirs ne sont plus agrégés par compte, car
-    //     analysis2 diffère pour 400 et 200 : on avait 8 agrégés, on a 10).
-    //     Sous-total = 12 + 10 + 20 = 42. Puis on materialise F99 (25 lignes :
-    //     M 9 comptes, A 8, B 8 — dont 8 lignes à 0 pour la sortante).
-    //     Total reclassified = 42 + 25 = 67.
+    //   - reclassified = 64 : constitutifs 39 (M 11 ; A 10 = F00→F01 + F20 ;
+    //     B 18 = 3 F00 + 7 F20 + 8 miroirs −X sur F98 de la sortante) + 25
+    //     clôtures F99 reconstruites (M 9 comptes, A 8, B 8).
     //
-    //   - converted (C) : on convertit TOUTES les lignes reclassifiées
-    //     (clôtures F99 comprises) = 67. A (USD) ET B (GBP) génèrent des écarts
-    //     (F01→F80, F20→F81) : 3 F80 + 7 F81 chacun, soit 20 écarts. Puis
-    //     materialize(converted) écrase le F99 porté par la reconstruction
-    //     (compte net nul). Total = 67 + 20 = 87.
+    //   - converted = 84 : 64 lignes converties (clôtures F99 comprises) + 20
+    //     écarts de conversion (A/USD et B/GBP : 3 F80 + 7 F81 chacun ; M/EUR
+    //     n'en génère pas). materialize(converted) écrase ensuite le F99 porté.
     //
-    //   - consolidated (D) : on consolide TOUTES les lignes converted
-    //     (clôtures comprises, pct appliqué), = 87, puis materialize(consolidated)
-    //     écrase le F99 porté. Total = 87.
+    //   - consolidated = 84 : consolidation (pct 100 %) des 84 lignes converted.
+    //
+    //   (Détail ligne à ligne : `cargo run --release --bin dump_pipeline`.)
     let corp = level_count(&con, "corporate");
     let recl = level_count(&con, "reclassified");
     let conv = level_count(&con, "converted");
     let cons = level_count(&con, "consolidated");
-    assert_eq!(corp, 32, "niveau corporate");
-    assert_eq!(recl, 67, "niveau reclassified");
-    assert_eq!(conv, 87, "niveau converted");
-    assert_eq!(cons, 87, "niveau consolidated");
+    assert_eq!(corp, 31, "niveau corporate");
+    assert_eq!(recl, 64, "niveau reclassified");
+    assert_eq!(conv, 84, "niveau converted");
+    assert_eq!(cons, 84, "niveau consolidated");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -619,15 +613,17 @@ fn check_natures_detecte_nature_manquante_et_inconnue() {
     let con = setup();
 
     // Une écriture sans nature (NULL via colonne omise → on UPDATE à NULL/Vide).
+    // On cible une ligne par sa réf. `source` (les `S-M-xxx` sont désormais dans
+    // `stg_entry.source`, plus dans `analysis2`).
     con.execute(
-        "UPDATE stg_entry SET nature = '' WHERE analysis2 = 'S-M-001'",
+        "UPDATE stg_entry SET nature = '' WHERE source = 'S-M-001'",
         [],
     )
     .expect("update nature vide");
 
     // Une écriture avec une nature inconnue de dim_nature.
     con.execute(
-        "UPDATE stg_entry SET nature = 'XNOPE' WHERE analysis2 = 'S-M-002'",
+        "UPDATE stg_entry SET nature = 'XNOPE' WHERE source = 'S-M-002'",
         [],
     )
     .expect("update nature inconnue");
