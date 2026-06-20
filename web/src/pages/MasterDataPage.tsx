@@ -30,13 +30,24 @@ function toFormValue(col: ColumnDef, value: unknown): string {
   return String(value);
 }
 
-function initialValues(def: TableDef, seed: Row | null): Record<string, string> {
+function initialValues(
+  def: TableDef,
+  seed: Row | null,
+  optionsData: Record<string, Row[]>,
+): Record<string, string> {
   const v: Record<string, string> = {};
   for (const col of def.columns) {
     if (seed !== null && seed[col.name] !== undefined && seed[col.name] !== null) {
       v[col.name] = toFormValue(col, seed[col.name]);
     } else if (col.type === 'select' && col.options && col.options.length > 0) {
       v[col.name] = col.options[0];
+    } else if (col.type === 'select' && col.optionsFrom && !col.nullable) {
+      // Défaut = 1ʳᵉ valeur de la table source. Sans ça, un select non-nullable
+      // partait à '' tout en AFFICHANT sa 1ʳᵉ option → valeur vide soumise
+      // silencieusement (ex. périmètre.scenario non renseigné).
+      const rows = optionsData[col.optionsFrom.table] ?? [];
+      v[col.name] =
+        rows.length > 0 ? String(rows[0][col.optionsFrom.value] ?? '') : '';
     } else if (col.type === 'bool') {
       v[col.name] = 'false';
     } else {
@@ -93,9 +104,19 @@ function FieldInput({
           ? rows
           : rows.filter((r) => String(r['classe'] ?? '') === currentClasse);
     }
+    // Placeholder visible quand la valeur courante n'existe pas dans la liste
+    // (ex. donnée vide d'un ancien bug) — évite qu'un select non-nullable fasse
+    // croire que sa 1ʳᵉ option est sélectionnée alors que la valeur est vide.
+    const known = new Set(filtered.map((r) => String(r[valueKey] ?? '')));
+    const showPlaceholder = !col.nullable && !known.has(value);
     return (
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {col.nullable && <option value="">—</option>}
+        {showPlaceholder && (
+          <option value="" disabled>
+            — choisir —
+          </option>
+        )}
         {filtered.map((r) => {
           const v = String(r[valueKey] ?? '');
           const l = String(r[labelKey] ?? v);
@@ -159,7 +180,7 @@ function RowForm({
 }: RowFormProps) {
   const isEdit = initial !== null;
   const [values, setValues] = useState<Record<string, string>>(() =>
-    initialValues(tableDef, initial),
+    initialValues(tableDef, initial, optionsData),
   );
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);

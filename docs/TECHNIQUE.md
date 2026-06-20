@@ -65,7 +65,7 @@ Un seul binaire (prototype), trois responsabilités séparées en crates pour la
 
 **React + Vite + TanStack Table** (TypeScript, npm). Buildée via npm, servie en statique par le serveur Rust.
 - TanStack Table pour les tables filtrables/triées/paginées et le pivot « bilan par flux » (comptes × flux).
-- UI cible : écrans CRUD master data, imports CSV, table filtrable sur tous les champs, bilan par flux, compte de résultat.
+- UI cible : écrans CRUD master data, imports CSV, table filtrable sur tous les champs, bilan par flux, compte de résultat, **éditeur de règles de consolidation** (bibliothèque + jeux de règles ordonnés + exécution + rapport — cf. [`REGLES_CONSO.md`](./REGLES_CONSO.md), [Q24](./QUESTIONS_OUVERTES.md) TRANCHÉE).
 
 ## 6. Structure de projet (workspace Rust + app web)
 

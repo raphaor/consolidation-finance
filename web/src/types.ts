@@ -131,6 +131,7 @@ export type MasterTable =
   | 'flows'
   | 'currencies'
   | 'natures'
+  | 'methods'
   | 'perimeter'
   | 'rates'
   | 'sous_classes'
@@ -157,7 +158,7 @@ export interface TableDef {
 export const MASTER_TABLES: TableDef[] = [
   {
     table: 'scenario_categories',
-    label: 'Catégories de scénario',
+    label: 'Phases',
     columns: [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
@@ -181,13 +182,13 @@ export const MASTER_TABLES: TableDef[] = [
   },
   {
     table: 'scenarios',
-    label: 'Scénarios',
+    label: 'Définitions de consolidation',
     columns: [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
       {
         name: 'category',
-        label: 'Catégorie',
+        label: 'Phase',
         type: 'select',
         nullable: true,
         optionsFrom: { table: 'scenario_categories', value: 'code', label: 'libelle' },
@@ -199,7 +200,13 @@ export const MASTER_TABLES: TableDef[] = [
         nullable: true,
         optionsFrom: { table: 'periods', value: 'code' },
       },
-      { name: 'presentation_currency', label: 'Devise présentation', type: 'text', nullable: true },
+      {
+        name: 'presentation_currency',
+        label: 'Devise présentation',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'currencies', value: 'code_iso', label: 'libelle' },
+      },
       {
         name: 'variant',
         label: 'Variante',
@@ -224,8 +231,19 @@ export const MASTER_TABLES: TableDef[] = [
     columns: [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
-      { name: 'devise_fonctionnelle', label: 'Devise fonct.', type: 'text' },
-      { name: 'entite_parent', label: 'Entité parent', type: 'text', nullable: true },
+      {
+        name: 'devise_fonctionnelle',
+        label: 'Devise fonct.',
+        type: 'select',
+        optionsFrom: { table: 'currencies', value: 'code_iso', label: 'libelle' },
+      },
+      {
+        name: 'entite_parent',
+        label: 'Entité parent',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'entities', value: 'code', label: 'libelle' },
+      },
       { name: 'statut', label: 'Statut', type: 'text' },
     ],
   },
@@ -261,7 +279,13 @@ export const MASTER_TABLES: TableDef[] = [
         optionsFrom: { table: 'sous_classes', value: 'code', label: 'libelle' },
       },
       { name: 'technical_grouping', label: 'Groupement tech.', type: 'text', nullable: true },
-      { name: 'compte_parent', label: 'Compte parent', type: 'text', nullable: true },
+      {
+        name: 'compte_parent',
+        label: 'Compte parent',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'accounts', value: 'code', label: 'libelle' },
+      },
     ],
   },
   {
@@ -276,7 +300,13 @@ export const MASTER_TABLES: TableDef[] = [
         type: 'select',
         options: ['close_n1', 'avg', 'close_n', 'terminal'],
       },
-      { name: 'flux_ecart', label: 'Flux écart', type: 'text', nullable: true },
+      {
+        name: 'flux_ecart',
+        label: 'Flux écart',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
+      },
       {
         name: 'flux_de_report',
         label: 'Flux de report',
@@ -331,7 +361,7 @@ export const MASTER_TABLES: TableDef[] = [
       },
       {
         name: 'scenario',
-        label: 'Scénario',
+        label: 'Définition de consolidation',
         type: 'select',
         pk: true,
         optionsFrom: { table: 'scenarios', value: 'code' },
@@ -401,7 +431,7 @@ export interface RuleDetail {
 
 // Une condition de périmètre
 export interface ScopeCond {
-  target: 'entity' | 'partner';
+  target: 'entity' | 'partner' | 'share';
   dim: string; // methode, pct_interet, pct_integration, entree, sortie
   op: string; // =, !=, >, <, >=, <=, IN, IS NULL, IS NOT NULL
   val: unknown;

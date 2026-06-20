@@ -28,28 +28,27 @@
 //! Le « grain » est l'ensemble des dimensions qui identifient un solde de clôture
 //! **unique**. La reconstruction agrège au grain ; l'écrasement est ciblé au grain.
 //!
-//! Grain actuel : `closure_grain_cols` privé de `flow` = Fixed + Active sans flow
-//! (ex. `scenario, entity, entry_period, period, account, currency, nature`).
+//! Grain actuel : **grain complet** (toutes les dimensions propagées) privé de
+//! `flow` (ex. `scenario, entity, entry_period, period, account, currency,
+//! nature, partner, share, analysis, analysis2` + customs).
 //!
 //! La dimension `flow` est **hors grain** : la clôture est identifiée par
 //! `fl.flux_de_report` (qui vaut F99 pour tous les constituants reportant à F99),
 //! donc le `GROUP BY` porte sur `fl.flux_de_report` plutôt que sur `e.flow`.
 //!
 //! Les dimensions analytiques (`partner`, `share`, `analysis`, `analysis2` + customs)
-//! sont volontairement **hors grain** : une clôture est un solde agrégé, pas une
-//! écriture détaillée (l'interco / l'analyse n'a pas de sens sur un solde de clôture).
+//! **font partie du grain** : une ligne dont une dimension analytique est
+//! renseignée est un *« dont »* (of which) de la ligne où elle est NULL ; elle
+//! subit les **mêmes automatismes** (clôtures, conversion) à son propre grain.
+//! Ainsi la F99 d'un `partner = B` est reconstruite depuis ses seuls constituants
+//! `partner = B`, et la clôture **principale** (analytiques NULL) ne somme que
+//! les constituants principaux — pas de double compte. Les **totaux** (bilan,
+//! compte de résultat) excluent les « dont » en filtrant `<analytique> IS NULL`
+//! (cf. `dimensions::analytical_cols`, `report.rs`, `server.rs`).
 //!
-//! **À chaque ajout de dimension** (custom comprise), se poser la question :
-//!
-//! > *Deux clôtures qui ne diffèrent que par cette dimension sont-elles des soldes
-//! > distincts ?*
-//!
-//! - **Oui** (ex. `Nature` « liasse » vs « ajustement » : ce sont des clôtures
-//!   différentes) → la dimension **entre dans le grain**. Comme les customs sont
-//!   `Analytical` par construction, elles n'y entrent pas par défaut ; il faudrait
-//!   ajuster `closure_grain_cols` ou la logique de filtrage.
-//! - **Non** → ne pas l'ajouter : la dimension sera agrégée (somme) dans la clôture,
-//!   ce qui n'a de sens que si elle est nulle ou constante pour les flux concernés.
+//! Le grain étant complet, toute nouvelle dimension (custom comprise) y entre
+//! automatiquement : deux clôtures qui diffèrent par n'importe quelle dimension
+//! propagée sont des soldes distincts.
 
 use crate::dimensions;
 use duckdb::Connection;
@@ -69,9 +68,14 @@ use duckdb::Connection;
 ///    par (clôture × grain).
 pub fn materialize_closures(con: &Connection, level: &str) -> duckdb::Result<usize> {
     let dims = dimensions::load_all(con)?;
-    // Grain de reconstruction = Fixed + Active, sans `flow` (la clôture est
-    // identifiée par `fl.flux_de_report`, pas par le flux source).
-    let grain_cols: Vec<&str> = dimensions::closure_grain_cols(&dims)
+    // Grain de reconstruction = grain COMPLET (toutes les dimensions propagées),
+    // sans `flow` (la clôture est identifiée par `fl.flux_de_report`, pas par le
+    // flux source). Les dimensions analytiques (`partner`, `share`, `analysis`…)
+    // font partie du grain : chaque « dont » a sa propre clôture (ex. la F99 du
+    // partner B = Σ de ses constituants partner B), et la clôture principale
+    // (analytiques NULL) ne somme que les constituants principaux. Les totaux
+    // (bilan, compte de résultat) excluent ensuite les « dont » via `IS NULL`.
+    let grain_cols: Vec<&str> = dimensions::propagated_cols(&dims)
         .into_iter()
         .filter(|c| *c != "flow")
         .collect();
@@ -81,9 +85,13 @@ pub fn materialize_closures(con: &Connection, level: &str) -> duckdb::Result<usi
         .map(|c| format!("e.{c}"))
         .collect::<Vec<_>>()
         .join(", ");
+    // `IS NOT DISTINCT FROM` (et non `=`) : les dimensions analytiques sont
+    // nullables et `NULL = NULL` vaut NULL en SQL. Cet opérateur traite deux
+    // NULL comme égaux, sinon l'écrasement ciblé raterait les clôtures
+    // principales (analytiques NULL).
     let fe_grain_match = grain_cols
         .iter()
-        .map(|c| format!("e.{c} = fe.{c}"))
+        .map(|c| format!("e.{c} IS NOT DISTINCT FROM fe.{c}"))
         .collect::<Vec<_>>()
         .join("\n        AND ");
 

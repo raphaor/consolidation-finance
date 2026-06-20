@@ -173,6 +173,22 @@
   border-color: var(--primary);
 }
 
+/* Champ invalide (validation multiplicateur, etc.) */
+.field input.field--invalid {
+  border-color: var(--danger, #c0392b);
+  background: rgba(192, 57, 43, 0.05);
+}
+
+/* Message d'aide sous un champ */
+.field-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.field-hint--error {
+  color: var(--danger, #c0392b);
+}
+
 /* ---------- Buttons ---------- */
 
 .btn {
@@ -637,7 +653,19 @@
 }
 
 .rule-modal {
-  max-width: 880px;
+  max-width: 1100px;
+}
+
+.rule-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--header-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  font-family: monospace;
+  cursor: help;
 }
 
 .rule-section {
@@ -653,6 +681,21 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
+}
+
+.rule-section__hint {
+  margin: -4px 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.rule-section__hint code {
+  background: var(--surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  border: 1px solid var(--border);
 }
 
 .rule-condition {

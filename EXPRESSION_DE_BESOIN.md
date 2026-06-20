@@ -41,7 +41,7 @@ Les solutions actuelles sont soit professionnelles et coûteuses, soit s'appuien
 Deux natures de traitements (la dichotomie B/C est abandonnée) :
 
 - **Natifs** : implémentés dans le moteur, non paramétrables.
-- **Construits via l'éditeur de règles** : l'utilisateur compose lui-même les écritures automatiques paramétrables (module **post-MVP** — voir [Q24](./docs/QUESTIONS_OUVERTES.md)).
+- **Construits via l'éditeur de règles** : l'utilisateur compose lui-même les écritures automatiques paramétrables (**implémenté dans le prototype** — moteur + API + UI ; voir [Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE).
 
 **Traitements natifs — MVP**
 - Agrégation / cumul des comptes
@@ -54,8 +54,8 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 - Fusions, entrées / sorties en cours d'exercice
 - IFRS 5 (held-for-sale / discontinued operations)
 
-**Éditeur de règles de consolidation — post-MVP** ([Q24](./docs/QUESTIONS_OUVERTES.md))
-Écritures automatiques paramétrables par l'utilisateur. Premières règles prévues : éliminations interco (ventes, créances/dettes, marges en stock, dividendes) et éliminations des participations ; puis **intérêts minoritaires**, retraitements, variations de capital, répartition des résultats.
+**Éditeur de règles de consolidation** ([Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE — implémenté)
+Écritures automatiques paramétrables par l'utilisateur. Premières règles prévues : éliminations interco (ventes, créances/dettes, marges en stock, dividendes) et éliminations des participations ; puis **intérêts minoritaires**, retraitements, variations de capital, répartition des résultats. Spécification détaillée dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md).
 
 ### 3.5 Process & workflow
 - Saisie par **chargement de fichier** (format §4) + écritures manuelles par-dessus.
@@ -120,13 +120,14 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 **Dans le MVP**
 - Scénario : **réel seul**.
 - Traitements **natifs** : agrégation, conversion multi-devises (clôture → bilan, moyen → résultat), méthodes de conso (globale, proportionnelle), variations de périmètre (entrées/sorties). Mise en équivalence et intérêts minoritaires reportés (post-MVP).
+- **Éditeur de règles de consolidation** ([Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE, implémenté par anticipation) : éliminations interco et participations. Spécification dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md). Reste post-MVP : intérêts minoritaires, retraitements, variations de capital, répartition des résultats (catalogue §10).
 - Restitutions : table filtrable, **bilan par flux**, **compte de résultat** (§5).
 - Master data : **CRUD complet** pour chaque dimension et table satellite + import CSV (liasses + taux) (§3.4, [`docs/MODELE_DONNEES.md`](./docs/MODELE_DONNEES.md)).
 - Volumétrie : **large** (50+ entités, millions de lignes) — la performance est un critère de validation.
 
 **Reporté (post-MVP)**
-- Éditeur de règles de consolidation ([Q24](./docs/QUESTIONS_OUVERTES.md)) : éliminations interco et participations, retraitements, variations de capital, répartition des résultats.
 - Extensions natives : fusions, entrées/sorties en cours d'exercice, IFRS 5.
+- Règles avancées : intérêts minoritaires, retraitements, variations de capital, répartition des résultats (cf. catalogue [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md) §10).
 - Multi-scénarios (budget, prévision), TFT, annexe, dashboards.
 
 **Encore à trancher (TÔT) avant la 1ʳᵒ implémentation** : [Q6](./docs/QUESTIONS_OUVERTES.md) (mode complète/marge), [Q8](./docs/QUESTIONS_OUVERTES.md) (workflow validation), [Q9](./docs/QUESTIONS_OUVERTES.md) (granularité de clôture), [Q10](./docs/QUESTIONS_OUVERTES.md) (détection interco — utile au post-MVP), [Q12](./docs/QUESTIONS_OUVERTES.md) (cible de perf).

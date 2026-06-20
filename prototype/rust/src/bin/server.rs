@@ -45,10 +45,10 @@ use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
-    create_schema, dimensions, import, load_all, masterdata, money::Money, run_pipeline,
-    run_ruleset, ConvertParams,
+    create_schema, dimensions, export, import, load_all, masterdata, money::Money, run_pipeline,
+    run_pipeline_with_hook, run_ruleset, ConvertParams,
 };
-use conso_engine::rules::RulesetReport;
+use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,29 +78,6 @@ struct BilanRow {
     account: String,
     flow: String,
     nature: String,
-    amount: Decimal,
-}
-
-/// Ligne `/api/entries` : écriture individuelle de la table `fact_entry`.
-///
-/// Les colonnes `partner`, `share`, `analysis`, `analysis2` sont optionnelles (NULL en base)
-/// — sérialisées en `null` JSON quand absentes.
-#[derive(Serialize)]
-struct EntryRow {
-    id: i64,
-    scenario: String,
-    entity: String,
-    entry_period: String,
-    period: String,
-    account: String,
-    flow: String,
-    currency: String,
-    nature: String,
-    partner: Option<String>,
-    share: Option<String>,
-    analysis: Option<String>,
-    analysis2: Option<String>,
-    level: String,
     amount: Decimal,
 }
 
@@ -269,12 +246,20 @@ async fn get_bilan(
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
+        // Totaux = lignes principales uniquement : on exclut les « dont »
+        // (dimensions analytiques renseignées), qui sont des détails de la ligne
+        // de même grain sans la dimension. Cf. dimensions::analytical_cols.
+        let dims = dimensions::load_all(&con).map_err(db_err)?;
+        let of_which: String = dimensions::analytical_cols(&dims)
+            .iter()
+            .map(|c| format!(" AND e.{c} IS NULL"))
+            .collect();
         let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
         let sql = format!(
             "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
-             WHERE e.level = ? AND a.classe = 'bilan' {fsql}
+             WHERE e.level = ? AND a.classe = 'bilan' {fsql}{of_which}
              GROUP BY e.account, e.flow, e.nature
              ORDER BY e.account, e.flow, e.nature"
         );
@@ -310,12 +295,18 @@ async fn get_compte_resultat(
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
+        // Totaux = lignes principales uniquement (exclut les « dont »). Idem bilan.
+        let dims = dimensions::load_all(&con).map_err(db_err)?;
+        let of_which: String = dimensions::analytical_cols(&dims)
+            .iter()
+            .map(|c| format!(" AND e.{c} IS NULL"))
+            .collect();
         let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
         let sql = format!(
             "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
-             WHERE e.level = ? AND a.classe = 'resultat' {fsql}
+             WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
              GROUP BY e.account, e.flow, e.nature
              ORDER BY e.account, e.flow, e.nature"
         );
@@ -342,37 +333,25 @@ async fn get_compte_resultat(
     Ok(Json(rows))
 }
 
-fn map_entry_row(row: &duckdb::Row) -> duckdb::Result<EntryRow> {
-    let m: Money = row.get(14)?;
-    Ok(EntryRow {
-        id: row.get(0)?,
-        scenario: row.get(1)?,
-        entity: row.get(2)?,
-        entry_period: row.get(3)?,
-        period: row.get(4)?,
-        account: row.get(5)?,
-        flow: row.get(6)?,
-        currency: row.get(7)?,
-        nature: row.get(8)?,
-        partner: row.get(9)?,
-        share: row.get(10)?,
-        analysis: row.get(11)?,
-        analysis2: row.get(12)?,
-        level: row.get(13)?,
-        amount: m.into_decimal(),
-    })
-}
-
 /// GET /api/entries?level=consolidated&limit=100&offset=0 — écritures paginées.
+///
+/// Colonnes **dynamiques** : toutes les dimensions propagées (built-in +
+/// **custom**) + `id`, `level`, `amount`. La sérialisation générique
+/// ([`masterdata::run_query`]) renvoie un objet JSON par ligne, donc les
+/// dimensions custom apparaissent automatiquement (vue Écritures pilotée par
+/// `/api/meta/dimensions`).
 ///
 /// Niveau spécial `raw` : lit la saisie brute (`stg_entry`) avant pipeline,
 /// avec un id synthétique (ROW_NUMBER) pour la cohérence de pagination côté UI.
 async fn get_entries(
     Query(q): Query<EntriesQuery>,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<EntryRow>>, AppError> {
+) -> Result<Json<Vec<JsonValue>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
+        // Colonnes propagées (built-in + custom) depuis le registre.
+        let dims = dimensions::load_all(&con).map_err(db_err)?;
+        let col_list = dimensions::propagated_cols(&dims).join(", ");
         let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
         let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
             let where_stg = if fsql.is_empty() {
@@ -382,10 +361,8 @@ async fn get_entries(
             };
             let sql = format!(
                 "SELECT * FROM (
-                    SELECT ROW_NUMBER() OVER (ORDER BY entity, scenario, period, account, flow, analysis2) AS id,
-                           scenario, entity, entry_period, period, account, flow,
-                           currency, nature, partner, share, analysis, analysis2,
-                           'raw' AS level, amount
+                    SELECT ROW_NUMBER() OVER (ORDER BY entity, scenario, period, account, flow) AS id,
+                           {col_list}, 'raw' AS level, amount
                     FROM stg_entry {where_stg}
                 ) ORDER BY id
                 LIMIT ? OFFSET ?"
@@ -396,8 +373,7 @@ async fn get_entries(
             (sql, params)
         } else {
             let sql = format!(
-                "SELECT id, scenario, entity, entry_period, period, account, flow,
-                        currency, nature, partner, share, analysis, analysis2, level, amount
+                "SELECT id, {col_list}, level, amount
                  FROM fact_entry
                  WHERE level = ? {fsql}
                  ORDER BY id
@@ -409,15 +385,7 @@ async fn get_entries(
             params.push(DbValue::BigInt(q.offset));
             (sql, params)
         };
-        let mut stmt = con.prepare(&sql).map_err(db_err)?;
-        let iter = stmt
-            .query_map(params_from_iter(params), map_entry_row)
-            .map_err(db_err)?;
-        let mut out = Vec::new();
-        for r in iter {
-            out.push(r.map_err(db_err)?);
-        }
-        out
+        masterdata::run_query(&con, &sql, params)?
     };
     Ok(Json(rows))
 }
@@ -540,14 +508,31 @@ async fn run_pipeline_handler(
         // 4. Vider les résultats du pipeline avant de relancer (sinon accumulation).
         con.execute("DELETE FROM fact_entry", []).map_err(db_err)?;
 
-        // 5. Pipeline.
-        let counts = run_pipeline(&con, &params).map_err(db_err)?.counts();
-
-        // 6. Ruleset optionnel.
-        let ruleset_report = match &ruleset_code {
-            Some(code) => Some(run_ruleset(&con, code).map_err(db_err)?),
-            None => None,
+        // 5. Pipeline. Si le scénario référence un ruleset, on **intercale** ses
+        //    règles au niveau qu'elles ciblent (hook post-étape) : une règle
+        //    `converted` est injectée juste après l'étape C, puis consolidée par
+        //    l'étape D — propagation identique à une écriture manuelle. Sinon,
+        //    pipeline natif seul.
+        let mut rule_results: Vec<RuleResult> = Vec::new();
+        let counts = match &ruleset_code {
+            Some(code) => {
+                let mut hook = |c: &Connection, level: &str| -> duckdb::Result<()> {
+                    rule_results.extend(run_ruleset_at_level(c, code, level)?);
+                    Ok(())
+                };
+                run_pipeline_with_hook(&con, &params, &mut hook)
+                    .map_err(db_err)?
+                    .counts()
+            }
+            None => run_pipeline(&con, &params).map_err(db_err)?.counts(),
         };
+
+        // 6. Rapport du ruleset (agrégé depuis les niveaux intercalés).
+        let ruleset_report = ruleset_code.as_ref().map(|code| RulesetReport {
+            ruleset: code.clone(),
+            total_generated: rule_results.iter().map(|r| r.generated).sum(),
+            rules: rule_results,
+        });
 
         PipelineResult {
             corporate: counts[0],
@@ -852,6 +837,7 @@ async fn create_rule(
                 body.code
             )));
         }
+        validate_definition(&con, &definition_text).map_err(AppError::bad_request)?;
         con.execute(
             "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
             params_from_iter(vec![
@@ -884,6 +870,7 @@ async fn update_rule(
     let definition_text = definition_to_text(&body.definition)?;
     let detail = {
         let con = lock_con(&state)?;
+        validate_definition(&con, &definition_text).map_err(AppError::bad_request)?;
         let n = con
             .execute(
                 "UPDATE dim_rule SET libelle = ?, definition = ? WHERE code = ?",
@@ -1314,6 +1301,7 @@ async fn main() {
         )
         .merge(masterdata::router())
         .merge(import::router())
+        .merge(export::router())
         .fallback_service(serve_dir)
         .layer(cors)
         .with_state(state);

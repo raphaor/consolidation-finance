@@ -68,7 +68,7 @@ export function Filters({
   return (
     <>
       <label className="field">
-        <span>Scénario</span>
+        <span>Définition de consolidation</span>
         <select
           value={scenario}
           onChange={(e) => onScenarioChange(e.target.value)}

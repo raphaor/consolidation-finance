@@ -253,6 +253,7 @@ fn run_steps(
     con: &Connection,
     params: &ConvertParams,
     steps: &[Box<dyn Step>],
+    after_level: &mut dyn FnMut(&Connection, &str) -> duckdb::Result<()>,
 ) -> duckdb::Result<PipelineReport> {
     let wall = Instant::now();
     let mut timings: Vec<StepTiming> = Vec::with_capacity(steps.len());
@@ -263,6 +264,12 @@ fn run_steps(
             staging::inject_by_prefix(con, step.output_level(), step.staging_prefix())?;
             materialize_closures::materialize_closures(con, step.output_level())?;
         }
+        // Hook post-niveau : permet d'injecter des écritures (ex. règles de
+        // consolidation au niveau produit) AVANT que l'étape suivante ne
+        // consomme ce niveau. Une règle au niveau `converted` est ainsi
+        // propagée vers `consolidated` par l'étape D, comme une écriture
+        // manuelle. Sans hook (pipeline natif seul), c'est un no-op.
+        after_level(con, step.output_level())?;
         let rows = count_level(con, step.output_level())?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         timings.push(StepTiming { level: step.output_level(), rows, ms });
@@ -298,13 +305,28 @@ pub fn run_pipeline(
     con: &Connection,
     params: &ConvertParams,
 ) -> duckdb::Result<PipelineReport> {
+    run_pipeline_with_hook(con, params, &mut |_con, _level| Ok(()))
+}
+
+/// Comme [`run_pipeline`], mais appelle `after_level(con, level)` après chaque
+/// étape (une fois ses clôtures matérialisées) et avant l'étape suivante.
+///
+/// Sert à intercaler les **règles de consolidation** au bon niveau : le serveur
+/// passe un hook qui exécute les règles ciblant le niveau produit. Une règle au
+/// niveau `converted` est donc injectée juste après l'étape C, puis l'étape D la
+/// consolide normalement (propagation identique à une écriture manuelle).
+pub fn run_pipeline_with_hook(
+    con: &Connection,
+    params: &ConvertParams,
+    after_level: &mut dyn FnMut(&Connection, &str) -> duckdb::Result<()>,
+) -> duckdb::Result<PipelineReport> {
     let steps: Vec<Box<dyn Step>> = vec![
         Box::new(AggregateStep),
         Box::new(ReclassifyStep),
         Box::new(ConvertStep),
         Box::new(ConsolidateStep),
     ];
-    run_steps(con, params, &steps)
+    run_steps(con, params, &steps, after_level)
 }
 
 /// Compte les lignes d'un niveau de stockage donné.

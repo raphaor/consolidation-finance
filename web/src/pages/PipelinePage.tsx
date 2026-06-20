@@ -4,7 +4,7 @@
 // La sélection alimente `api.run(scenario)`. Sans sélection, le serveur
 // choisit le premier scénario `'ouvert'` (rétro-compatibilité dev).
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
 import type { LevelCount, PipelineCounts, ScenarioSummary } from '../types';
 import { formatInt } from '../utils/format';
@@ -47,7 +47,7 @@ const STEPS: Step[] = [
 // Lignes paramètres affichées en lecture seule sous le dropdown scénario.
 function paramRows(s: ScenarioSummary): { label: string; value: string }[] {
   return [
-    { label: 'Catégorie', value: s.category ?? '—' },
+    { label: 'Phase', value: s.category ?? '—' },
     { label: 'Période d\'entrée', value: s.entry_period ?? '—' },
     { label: 'Devise présentation', value: s.presentation_currency ?? '—' },
     { label: 'Variante', value: s.variant ?? '—' },
@@ -140,6 +140,44 @@ export function PipelinePage() {
     }
   }
 
+  // Export complet → téléchargement d'un paquet JSON.
+  async function exportAll() {
+    setStatus({ kind: 'running', label: 'Export…' });
+    try {
+      const bundle = await api.backup.exportAll();
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `conso_export_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus({ kind: 'done' });
+    } catch (err) {
+      setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
+    }
+  }
+
+  // Import complet → remplace tout l'état depuis le paquet choisi.
+  async function importAll(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // autorise la re-sélection du même fichier
+    if (!file) return;
+    setStatus({ kind: 'running', label: 'Import du paquet…' });
+    setResult(null);
+    try {
+      const bundle = JSON.parse(await file.text());
+      await api.backup.importAll(bundle);
+      setStatus({ kind: 'done' });
+      void loadCounts();
+    } catch (err) {
+      setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
+    }
+  }
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = status.kind === 'running';
 
   return (
@@ -168,12 +206,37 @@ export function PipelinePage() {
               ? status.label
               : 'Reset + Reimport'}
           </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={exportAll}
+            disabled={busy}
+            title="Télécharger un paquet JSON complet (référentiels + écritures + règles)"
+          >
+            Tout exporter
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            title="Restaurer l'état complet depuis un paquet exporté (remplace tout)"
+          >
+            Importer un paquet…
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={importAll}
+          />
         </div>
       </div>
 
       <div className="scenario-picker">
         <label className="scenario-picker__label" htmlFor="scenario-select">
-          Scénario
+          Définition de consolidation
         </label>
         <select
           id="scenario-select"

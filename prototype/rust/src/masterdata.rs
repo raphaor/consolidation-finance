@@ -16,6 +16,7 @@ use duckdb::{params_from_iter, types::Value as DbValue, types::ValueRef, Row};
 use serde_json::{Map, Value as JsonValue};
 use std::sync::Arc;
 
+use crate::references;
 use crate::state::{db_err, lock_con, AppError, AppState};
 
 struct TableDef {
@@ -187,7 +188,7 @@ fn date32_to_iso(days: i32) -> String {
     format!("{year:04}-{m:02}-{d:02}")
 }
 
-fn json_to_db_value(v: &JsonValue) -> DbValue {
+pub(crate) fn json_to_db_value(v: &JsonValue) -> DbValue {
     match v {
         JsonValue::Null => DbValue::Null,
         JsonValue::Bool(b) => DbValue::Boolean(*b),
@@ -216,7 +217,7 @@ fn row_to_json(row: &Row, names: &[String]) -> Result<JsonValue, duckdb::Error> 
     Ok(JsonValue::Object(obj))
 }
 
-fn run_query(
+pub fn run_query(
     con: &duckdb::Connection,
     sql: &str,
     params: Vec<DbValue>,
@@ -289,6 +290,46 @@ fn reject_unknown_fields(def: &TableDef, obj: &Map<String, JsonValue>) -> Result
     Ok(())
 }
 
+/// Vérifie que chaque valeur référentielle de la ligne existe dans sa table
+/// cible (cf. [`crate::references`]). Tolère l'auto-référence (valeur = PK de la
+/// ligne elle-même, ex. `dim_flow.flux_de_report = 'F99'` sur la ligne F99) et
+/// ignore les colonnes non-textuelles ou vides.
+fn validate_references(
+    def: &TableDef,
+    obj: &Map<String, JsonValue>,
+    con: &duckdb::Connection,
+) -> Result<(), AppError> {
+    let mut bad = Vec::new();
+    for r in references::references_for(def.sql_name) {
+        let Some(v) = obj.get(r.column) else { continue };
+        let Some(s) = v.as_str() else { continue };
+        if s.is_empty() {
+            continue;
+        }
+        // Auto-référence : la ligne se référence elle-même par sa PK.
+        if r.target_table == def.sql_name {
+            if let Some(own) = obj.get(r.target_column).and_then(|x| x.as_str()) {
+                if own == s {
+                    continue;
+                }
+            }
+        }
+        if !references::value_exists(con, r.target_table, r.target_column, s).map_err(db_err)? {
+            bad.push(format!(
+                "{} = '{}' (absent de {}.{})",
+                r.column, s, r.target_table, r.target_column
+            ));
+        }
+    }
+    if !bad.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "référence(s) invalide(s) : {}",
+            bad.join(" ; ")
+        )));
+    }
+    Ok(())
+}
+
 fn pk_from_body(def: &TableDef, body: &JsonValue) -> Result<Vec<(String, JsonValue)>, AppError> {
     let obj = body
         .as_object()
@@ -339,6 +380,7 @@ async fn create(
         if fetch_one(def, &pk_vals, &con)?.is_some() {
             return Err(AppError::conflict("déjà existant"));
         }
+        validate_references(def, &obj, &con)?;
         let mut cols = Vec::new();
         let mut vals: Vec<DbValue> = Vec::new();
         for col in def.columns {
@@ -389,6 +431,7 @@ async fn update(
         if fetch_one(def, &pk_vals, &con)?.is_none() {
             return Err(AppError::not_found("introuvable"));
         }
+        validate_references(def, &obj, &con)?;
         let mut sets = Vec::new();
         let mut vals: Vec<DbValue> = Vec::new();
         for col in def.columns {

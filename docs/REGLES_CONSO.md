@@ -45,6 +45,8 @@ Définit **à quelles entités** la règle s'applique, par filtrage sur les attr
 
 **Scope sur les Titres** : lorsqu'une entité détient une participation dans une autre (dimension `Titres` / participations), le scope peut également filtrer sur les caractéristiques de cette relation — typiquement les **méthodes respectives** des deux entités liées. Ex : élimination des titres de participation quand la détentrice et la détenue sont toutes deux en méthode globale. Ce mécanisme est l'équivalent du scope croisé interco, mais via la dimension de participation (titres) plutôt que via la dimension `partner`.
 
+**Articulation des conditions** : les conditions du scope sont combinées exclusivement par **ET** (conjonction codée en dur dans le moteur). Pour exprimer un **OU sur une même dimension**, utiliser l'opérateur `IN` (ex : `methode IN ('globale', 'proportionnelle')`). Le OU entre dimensions différentes n'est pas supporté aujourd'hui — il faut créer plusieurs règles ([Q30](./QUESTIONS_OUVERTES.md), statut OUVERTE, post-prototype).
+
 ---
 
 ## 4. Modèle d'une opération
@@ -80,7 +82,8 @@ facteur = coefficient × multiplicateur
 
 Cas particuliers :
 - Si aucun coefficient n'est spécifié → coefficient implicite = 1.
-- Si aucun multiplicateur n'est spécifié → multiplicateur implicite = 1.
+- Si aucun multiplicateur n'est spécifié (clé absente) → multiplicateur implicite = 1.
+- `multiplicateur: null` explicite est **rejeté** (défense contre les bugs de parsing côté client : `Number("")` produit `NaN` en JS, qui se sérialise en `null` en JSON — sans ce garde-fou, la règle s'exécuterait silencieusement avec 1.0 au lieu de la valeur saisie).
 - Donc par défaut, facteur = 1 (copie à l'identique).
 
 ### 4.3 Destination

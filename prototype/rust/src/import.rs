@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::dimensions;
+use crate::references;
 use crate::state::{lock_con, AppError, AppState};
 
 fn escape_csv_path(p: &str) -> String {
@@ -70,6 +71,59 @@ fn require_columns(header: &[String], required: &[&str]) -> Result<(), AppError>
     Ok(())
 }
 
+/// Valide les références du CSV **avant** insertion : pour chaque colonne du
+/// fichier qui est une référence (cf. [`crate::references`]), vérifie qu'aucune
+/// valeur non-vide n'est absente de la table cible. Anti-jointure sur le fichier
+/// temporaire (on ne contrôle que les données entrantes, pas l'existant).
+fn validate_csv_references(
+    con: &duckdb::Connection,
+    target_table: &str,
+    header: &[String],
+    csv_path: &str,
+) -> Result<(), AppError> {
+    let mut bad = Vec::new();
+    for r in references::references_for(target_table) {
+        if !header.iter().any(|h| h == r.column) {
+            continue;
+        }
+        let sql = format!(
+            "SELECT DISTINCT CAST(\"{col}\" AS VARCHAR) \
+             FROM read_csv_auto('{path}', header=true, null_padding=true) \
+             WHERE \"{col}\" IS NOT NULL AND CAST(\"{col}\" AS VARCHAR) <> '' \
+               AND CAST(\"{col}\" AS VARCHAR) NOT IN (SELECT CAST(\"{tcol}\" AS VARCHAR) FROM {ttab}) \
+             LIMIT 6",
+            col = r.column,
+            path = csv_path,
+            tcol = r.target_column,
+            ttab = r.target_table,
+        );
+        let err = |e: duckdb::Error| {
+            AppError::bad_request(format!("validation référence {} : {e}", r.column))
+        };
+        let mut stmt = con.prepare(&sql).map_err(err)?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+        let mut vals = Vec::new();
+        for x in rows {
+            vals.push(x.map_err(err)?);
+        }
+        if !vals.is_empty() {
+            bad.push(format!(
+                "{} : valeur(s) absente(s) de {} → {}",
+                r.column,
+                r.target_table,
+                vals.join(", ")
+            ));
+        }
+    }
+    if !bad.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "références invalides dans le CSV : {}",
+            bad.join(" ; ")
+        )));
+    }
+    Ok(())
+}
+
 fn split_first_line(bytes: &[u8]) -> Result<(String, usize), AppError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|e| AppError::bad_request(format!("fichier non UTF-8 : {e}")))?;
@@ -115,6 +169,12 @@ async fn import_entries(
 
     let imported = {
         let con = lock_con(&state)?;
+
+        // Cohérence référentielle des dimensions avant insertion.
+        if let Err(e) = validate_csv_references(&con, "stg_entry", &header, &path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
 
         // Colonnes connues de stg_entry = dimensions propagées (built-in +
         // customs) + amount. Pas de `level` dans stg_entry.
@@ -191,6 +251,10 @@ async fn import_rates(
 
     let imported = {
         let con = lock_con(&state)?;
+        if let Err(e) = validate_csv_references(&con, "sat_exchange_rate", &header, &path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         match con.execute(&sql, []) {
             Ok(n) => n,
             Err(e) => {
@@ -246,6 +310,10 @@ async fn import_perimeter(
 
     let imported = {
         let con = lock_con(&state)?;
+        if let Err(e) = validate_csv_references(&con, "sat_perimeter", &header, &path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
         match con.execute(&sql, []) {
             Ok(n) => n,
             Err(e) => {

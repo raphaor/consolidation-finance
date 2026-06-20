@@ -75,7 +75,7 @@ impl DimDef {
 pub fn builtin_dims() -> Vec<DimDef> {
     vec![
         // Fixed
-        DimDef { name: "scenario".into(),     category: DimCategory::Fixed,      custom: false, label: "Scénario".into() },
+        DimDef { name: "scenario".into(),     category: DimCategory::Fixed,      custom: false, label: "Définition de consolidation".into() },
         // Active
         DimDef { name: "entity".into(),       category: DimCategory::Active,     custom: false, label: "Entité".into() },
         // Fixed
@@ -160,6 +160,21 @@ pub fn pilotable_cols(dims: &[DimDef]) -> Vec<&str> {
 /// (Fixed + Active).
 pub fn closure_grain_cols(dims: &[DimDef]) -> Vec<&str> {
     dims.iter().filter(|d| d.in_closure_grain()).map(|d| d.name.as_str()).collect()
+}
+
+/// Retourne les noms des dimensions analytiques (catégorie `Analytical`).
+///
+/// Ces dimensions portent un *« dont »* (of which) de la ligne de même grain
+/// sans la dimension : une ligne dont une dimension analytique est renseignée
+/// est un détail de la ligne où elle est NULL. Elles ne doivent donc **jamais**
+/// entrer dans un **total** (bilan, compte de résultat) — ces totaux filtrent
+/// `<col> IS NULL` pour ne sommer que les lignes principales. En revanche elles
+/// font partie du grain de clôture (chaque « dont » a sa propre clôture).
+pub fn analytical_cols(dims: &[DimDef]) -> Vec<&str> {
+    dims.iter()
+        .filter(|d| d.category == DimCategory::Analytical)
+        .map(|d| d.name.as_str())
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

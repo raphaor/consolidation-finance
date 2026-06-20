@@ -20,7 +20,7 @@ Sémantique des champs du CSV et caractéristiques *master data* de chaque dimen
 | `Partner*` | Dimension | Contrepartie (interco si dans le périmètre, sinon tiers lié / externe) |
 | `Share*` | Dimension | Participation visée par l'écriture (A détient B → `Share` identifie la relation et la cible B) |
 | `Analysis*` | Dimension | Axe analytique libre (centre de coût, projet…) |
-| `Audit_id` | Référence | Traçabilité de l'écriture (saisie initiale + écritures auto) |
+| `Analysis2*` | Dimension | Second axe analytique libre. **Ex-`Audit_id`** : cette dimension avait été créée pour la traçabilité, mais ce rôle est tenu par `Nature` ; `analysis2` est donc un axe analytique générique, aujourd'hui libre/inutilisé. Il n'existe **pas** de colonne `audit_id` dédiée. |
 | `Amount` | Mesure | Montant |
 
 `*` = optionnel.
@@ -118,6 +118,48 @@ Répond à [Q5](./QUESTIONS_OUVERTES.md).
 Réglages globaux du groupe, gérés via une **page de paramètres** (hors master data dimensionnelle). Notamment :
 - `compte_équivalence_actif` : compte d'actif portant la contrepartie de la mise en équivalence (ex. `261E`).
 - `compte_équivalence_résultat` : compte où se condense le P&L des entités à l'équivalence (ex. `880E`).
+
+## 4 bis. Catégories de dimensions et sémantique « of which »
+
+Chaque dimension appartient à une **catégorie** (registre `engine/src/dimensions.rs`) qui détermine son comportement dans le pipeline :
+
+| Catégorie | Propagée | Pilotable (règles) | Nullable | Grain de clôture | Dans les **totaux** |
+|---|---|---|---|---|---|
+| **Fixed** (scenario, entry_period, period, currency) | oui | non | non | oui | oui |
+| **Active** (entity, account, flow, nature) | oui | oui | non | oui | oui |
+| **Analytical** (partner, share, analysis, analysis2 + **custom**) | oui | oui | **oui** | **oui** | **non (voir ci-dessous)** |
+
+**Sémantique « of which » (dont)** — règle centrale, décidée suite à l'audit du modèle :
+
+> Une ligne dont une dimension **Analytical** est renseignée est un **« dont »** (of which) de la ligne de même grain où cette dimension est **NULL**. Elle ne s'additionne **jamais** au total.
+
+Concrètement :
+- **Totaux** (bilan, compte de résultat) : ne somment que les lignes **principales** — toutes les dimensions analytiques `IS NULL`. Le filtre est dérivé du registre (`dimensions::analytical_cols`) ; cf. `server.rs` (`/api/bilan`, `/api/compte-resultat`) et `report.rs`.
+- **Clôtures** : les dimensions analytiques **font partie du grain de clôture** (`pipeline/materialize_closures.rs`). Chaque « dont » obtient **sa propre F99** (ex. la clôture `partner = B` = Σ de ses seuls constituants `partner = B`), et la clôture principale ne somme que les constituants principaux → **pas de double compte**.
+- **Conversion / variations** : les lignes « dont » subissent **les mêmes automatismes** que les lignes principales (mêmes flux, même conversion, écarts F80/F81 hérités) à leur propre grain.
+
+Conséquence pratique : **une ligne principale ne doit jamais porter de valeur analytique** (sinon elle disparaît des totaux). Exemple à proscrire : un identifiant d'audit posé sur `analysis2` de chaque écriture.
+
+## 4 ter. Intégrité référentielle (graphe de références)
+
+Le modèle n'a pas de FK dures (DuckDB, choix du proto). Les liens entre objets sont déclarés dans un **registre central** (`engine/src/references.rs`) : chaque `(table.colonne) → (table_cible.colonne)`. Il couvre notamment :
+
+- `dim_scenario.{category, entry_period, presentation_currency, variant, ruleset_code, rate_set}`
+- `dim_entity.{devise_fonctionnelle, entite_parent}`, `dim_account.{sous_classe, compte_parent}`, `dim_flow.{flux_ecart, flux_de_report}`
+- `sat_perimeter.{entity, scenario, period, methode}`, `sat_exchange_rate.{rate_set, currency_source, period}`
+- écritures : `{scenario, entity, entry_period, period, account, flow, currency, nature}` + `{partner, share}` → **`dim_entity`** (les trois rôles de la §2.2)
+- `dim_ruleset_item.{ruleset_code, rule_code}`
+
+**Validation à l'écriture** (rejet d'une référence inexistante, message explicite) :
+- **Master data** : `create`/`update` (`masterdata.rs`) — avec tolérance d'auto-référence (`flux_de_report = F99` sur la ligne F99).
+- **Imports CSV** : entries / rates / perimeter (`import.rs`) — anti-jointure du fichier contre les tables cibles **avant** insertion.
+- **Définitions de règles** : valeurs de `selection` / `destination override` / `scope` (`rules.rs::validate_definition`, appelée à `POST`/`PUT /api/rules`).
+
+Les dimensions **Analytical libres** (`analysis`, `analysis2`, custom) n'ont **pas** de référence → saisie libre.
+
+## 4 quater. Export / import complet (sauvegarde-restauration)
+
+`GET /api/export` produit un **paquet JSON unique** `{ table → [lignes] }` couvrant tout l'état persistant (config, dimensions, satellites, **écritures**, **règles + rulesets**, **dimensions custom**) — `fact_entry` exclue (dérivée). `POST /api/import/all` restaure ce paquet par **remplacement total** (DROP + CREATE, recréation des dimensions custom, réinsertion), sans relancer le pipeline. UI : boutons « Tout exporter » / « Importer un paquet… » de la vue Pipeline. À distinguer de `load_all` (qui ne charge que les 16 CSV de référentiels, sans les règles).
 
 ## 5. Points ouverts (renvoi au registre)
 

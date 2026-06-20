@@ -2,7 +2,7 @@
 
 ## État du projet
 
-Projet en **phase d'expression de besoins**. Aucun code, aucune stack installée, aucun test. Toute modification doit d'abord s'inscrire dans le cadre décrit par [`EXPRESSION_DE_BESOIN.md`](./EXPRESSION_DE_BESOIN.md), qui est la source de vérité fonctionnelle.
+Projet en **phase prototype / POC**. Le moteur Rust (`prototype/rust/`, crate `conso-engine`) et le frontend React (`web/`) sont implémentés et fonctionnels : pipeline 4 étapes, conversion multi-devises, éditeur de règles, API REST, master data + import CSV. Le prototype Python (`prototype/python/`) reste une **référence historique** dont le Rust est le portage. Toute modification doit s'inscrire dans le cadre décrit par [`EXPRESSION_DE_BESOIN.md`](./EXPRESSION_DE_BESOIN.md), qui reste la source de vérité fonctionnelle. Voir [`CLAUDE.md`](./CLAUDE.md) pour l'architecture du moteur et les commandes de build/test.
 
 Langue de travail : **français** (docs, termes métier, commits). Conserver ce registre.
 
@@ -38,11 +38,11 @@ Champs marqués `*` sont **optionnels**. Tout autre champ est obligatoire.
 - Méthode de consolidation : **par les flux** — chaque traitement génère des écritures taguées par un code de flux (`Flow`). Catalogue dans [`docs/FLUX_CONSO.md`](./docs/FLUX_CONSO.md) (F00 ouverture, F20 variation, F80/F81 conversion, F01/F98 périmètre, F99 clôture).
 - Deux natures de traitements (la dichotomie B/C est abandonnée) :
   - **Natifs** (moteur) : agrégation, conversion multi-devises, méthodes de consolidation (globale / proportionnelle / équivalence), variations de périmètre.
-  - **Construits via l'éditeur de règles** (module **post-MVP**) : écritures automatiques paramétrables (éliminations interco et participations, retraitements, variations de capital, répartition des résultats).
+  - **Construits via l'éditeur de règles** (**implémenté dans le prototype** — moteur `engine/src/rules.rs` + API REST + UI React `web/src/pages/RulesPage.tsx`, [Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE) : écritures automatiques paramétrables (éliminations interco et participations déjà couvertes ; intérêts minoritaires, retraitements, variations de capital, répartition des résultats = catalogue post-MVP dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md) §10).
 - L'utilisateur saisit les liasses **directement dans le plan de compte du groupe** (pas de mapping prévu dans cette version).
 - Conversion de devises : **taux clôture pour le bilan, taux moyen (simple) pour le résultat**.
 
-Ne pas inventer de règles de consolidation : tout traitement non listé comme **natif** dans `EXPRESSION_DE_BESOIN.md` §3.4 doit passer par l'éditeur de règles (post-MVP). Ne pas le coder en dur dans le moteur.
+Ne pas inventer de règles de consolidation : tout traitement non listé comme **natif** dans `EXPRESSION_DE_BESOIN.md` §3.4 doit passer par l'éditeur de règles. Ne pas coder de règle métier spécifique en dur dans le moteur Rust — `engine/src/rules.rs` est un **exécuteur générique** (parsing JSON → INSERT...SELECT paramétré), pas l'endroit où implanter une logique interco/participation en dur.
 
 ## Conventions de travail
 

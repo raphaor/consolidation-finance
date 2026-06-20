@@ -5,6 +5,7 @@
 //! Toutes les restitutions sont calculées par requête SQL (format long) puis
 //! mises en forme en Rust, pour rester lisibles et faciles à maintenir.
 
+use crate::dimensions;
 use crate::money::Money;
 use crate::validate::{validate_consolidated, validate_functional, CheckResult};
 use duckdb::Connection;
@@ -75,12 +76,18 @@ fn fmt_amount(x: Decimal) -> String {
 
 /// Charge une grille (account, flow) → montant pour un niveau donné.
 fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, String), Decimal>> {
-    let mut stmt = con.prepare(
+    // Totaux = lignes principales : exclut les « dont » (analytiques renseignées).
+    let dims = dimensions::load_all(con)?;
+    let of_which: String = dimensions::analytical_cols(&dims)
+        .iter()
+        .map(|c| format!(" AND {c} IS NULL"))
+        .collect();
+    let mut stmt = con.prepare(&format!(
         "SELECT account, flow, SUM(amount) AS amount
          FROM fact_entry
-         WHERE level = ?
-         GROUP BY account, flow",
-    )?;
+         WHERE level = ?{of_which}
+         GROUP BY account, flow"
+    ))?;
     let rows = stmt.query_map([level], |row| {
         let m: Money = row.get(2)?;
         Ok((
@@ -174,13 +181,18 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
     println!();
     println!("  {}", "─".repeat(28 + col_w * flow_order.len()));
 
+    let dims = dimensions::load_all(con)?;
+    let of_which: String = dimensions::analytical_cols(&dims)
+        .iter()
+        .map(|c| format!(" AND {c} IS NULL"))
+        .collect();
     for lvl in levels {
-        let mut stmt = con.prepare(
+        let mut stmt = con.prepare(&format!(
             "SELECT flow, SUM(amount) AS amount
              FROM fact_entry
-             WHERE level = ? AND account = ?
-             GROUP BY flow",
-        )?;
+             WHERE level = ? AND account = ?{of_which}
+             GROUP BY flow"
+        ))?;
         let account_str = account.to_string();
         let rows = stmt.query_map([&lvl, account_str.as_str()], |row| {
             let m: Money = row.get(1)?;

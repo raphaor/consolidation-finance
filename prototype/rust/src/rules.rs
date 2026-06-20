@@ -41,6 +41,7 @@
 
 use crate::dimensions;
 use crate::pipeline::materialize_closures::materialize_closures;
+use crate::references;
 use duckdb::{params_from_iter, types::Value as DbValue, Connection};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -80,8 +81,10 @@ fn allowed_scope_dims(con: &Connection) -> Vec<String> {
     })
 }
 
-/// Cibles autorisées pour `scope.target`.
-const ALLOWED_TARGETS: &[&str] = &["entity", "partner"];
+/// Cibles autorisées pour `scope.target` : l'entité, son partenaire (`partner`)
+/// ou sa quote-part (`share`) — ces trois dimensions portent un code d'entité,
+/// joint à `sat_perimeter` pour filtrer sur les attributs de périmètre.
+const ALLOWED_TARGETS: &[&str] = &["entity", "partner", "share"];
 
 /// Opérateurs acceptés sur les conditions (scope et sélection).
 const ALLOWED_OPS: &[&str] = &["=", "!=", ">", "<", ">=", "<=", "IN", "IS NULL", "IS NOT NULL"];
@@ -128,6 +131,99 @@ impl RuleContext {
             scope_dims,
         })
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Validation référentielle d'une définition (à l'enregistrement)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Valide les **références** d'une définition de règle, au-delà des noms de
+/// dimensions déjà contrôlés au parsing : chaque valeur de `selection`, de
+/// `destination` (mode `override`) et de `scope` doit exister dans sa table
+/// cible (cf. [`crate::references`]). Appelée à l'enregistrement d'une règle
+/// (`POST`/`PUT /api/rules`) pour refuser une règle qui pointe vers un compte,
+/// une nature, une méthode… inexistants.
+///
+/// Les dimensions sans cible référentielle (`analysis`, customs) et les
+/// opérateurs `IS NULL` / `IS NOT NULL` sont ignorés.
+pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<(), String> {
+    let ctx = RuleContext::from_registry(con).map_err(|e| e.to_string())?;
+    let def = parse_definition(definition_json, &ctx)?;
+
+    for op in &def.operations {
+        for s in &op.selection {
+            check_ref_value(
+                con,
+                references::entry_dimension_target(&s.dim),
+                &s.op,
+                &s.val,
+                &format!("selection.{}", s.dim),
+            )?;
+        }
+        for (dim, dest) in &op.destination {
+            if dest.mode == "override" {
+                if let (Some(v), Some(r)) =
+                    (&dest.value, references::entry_dimension_target(dim))
+                {
+                    if !v.is_empty()
+                        && !references::value_exists(con, r.target_table, r.target_column, v)
+                            .map_err(|e| e.to_string())?
+                    {
+                        return Err(format!(
+                            "destination.{dim} : '{v}' inexistant dans {}.{}",
+                            r.target_table, r.target_column
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    for c in &def.scope {
+        check_ref_value(
+            con,
+            references::perimeter_target(&c.dim),
+            &c.op,
+            &c.val,
+            &format!("scope.{} ({})", c.dim, c.target),
+        )?;
+    }
+    Ok(())
+}
+
+/// Vérifie qu'une valeur de condition (ou chaque élément d'un `IN`) existe dans
+/// la table cible. `None` (dimension libre) et ops de nullité → rien à vérifier.
+fn check_ref_value(
+    con: &Connection,
+    target: Option<&references::Reference>,
+    op: &str,
+    val: &Option<JsonValue>,
+    label: &str,
+) -> Result<(), String> {
+    let Some(r) = target else { return Ok(()) };
+    if op == "IS NULL" || op == "IS NOT NULL" {
+        return Ok(());
+    }
+    let vals: Vec<String> = match val {
+        Some(JsonValue::Array(a)) => {
+            a.iter().filter_map(|x| x.as_str().map(String::from)).collect()
+        }
+        Some(JsonValue::String(s)) => vec![s.clone()],
+        _ => return Ok(()),
+    };
+    for v in vals {
+        if v.is_empty() {
+            continue;
+        }
+        if !references::value_exists(con, r.target_table, r.target_column, &v)
+            .map_err(|e| e.to_string())?
+        {
+            return Err(format!(
+                "{label} : '{v}' inexistant dans {}.{}",
+                r.target_table, r.target_column
+            ));
+        }
+    }
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,15 +276,19 @@ struct Definition {
 /// Une condition de périmètre (`scope[]`).
 #[derive(Debug, Clone)]
 struct ScopeCond {
-    target: String, // "entity" ou "partner"
+    target: String, // "entity", "partner" ou "share"
     dim: String,
     op: String,
-    val: JsonValue,
+    val: Option<JsonValue>,
 }
 
 /// Une opération (`operations[]`).
 #[derive(Debug, Clone)]
 struct Operation {
+    /// Numéro d'ordre (métadonnée UI). Validé au parsing comme entier, mais
+    /// l'exécuteur n'en dépend pas (les opérations s'exécutent dans l'ordre du
+    /// tableau JSON). Conservé pour la cohérence avec la définition stockée.
+    #[allow(dead_code)]
     seq: i64,
     level: String,
     selection: Vec<SelectionCond>,
@@ -275,16 +375,18 @@ fn parse_scope_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<ScopeCond> 
     if !ALLOWED_OPS.contains(&op.as_str()) {
         return Err(format!("scope.op invalide : {op}"));
     }
-    let val = obj
-        .get("val")
-        .cloned()
-        .ok_or("scope.val manquant")?;
-    // `val` est requis sauf pour IS NULL / IS NOT NULL (présence tolérée).
-    if matches!(val, JsonValue::Null)
-        && op != "IS NULL"
-        && op != "IS NOT NULL"
-    {
-        return Err(format!("scope.val null pour op='{op}'"));
+    // `val` est requis (présence) sauf pour IS NULL / IS NOT NULL, et `val: null`
+    // explicite n'est accepté que pour ces deux ops (pour les ops binaires, c'est
+    // presque sûrement une erreur — l'utilisateur voulait probablement IS NULL).
+    // Cohérent avec `parse_selection_cond`.
+    let val = obj.get("val").cloned();
+    if val.is_none() && op != "IS NULL" && op != "IS NOT NULL" {
+        return Err(format!("scope.val manquant pour op='{op}'"));
+    }
+    if matches!(val, Some(JsonValue::Null)) && op != "IS NULL" && op != "IS NOT NULL" {
+        return Err(format!(
+            "scope.val null pour op='{op}' — utilisez IS NULL pour tester la nullité"
+        ));
     }
     Ok(ScopeCond { target, dim, op, val })
 }
@@ -314,7 +416,18 @@ fn parse_operation(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Operation> {
         Some(c) => parse_coefficient(c)?,
     };
     let multiplicateur = match obj.get("multiplicateur") {
-        None | Some(JsonValue::Null) => 1.0,
+        // Absent → défaut implicite = 1.0 (documenté REGLES_CONSO §4.2).
+        None => 1.0,
+        // null explicite → presque sûrement un bug client (ex: Number("") = NaN
+        // en JS → JSON.stringify(NaN) produit null). On rejette plutôt que de
+        // silently tomber sur 1.0, pour rendre le bug visible.
+        Some(JsonValue::Null) => {
+            return Err(
+                "multiplicateur est null — valeur probablement issue d'un champ \
+                 vide non validé côté client (Number(\"\") = NaN → JSON null)"
+                    .into(),
+            )
+        }
         Some(JsonValue::Number(n)) => n
             .as_f64()
             .ok_or("multiplicateur doit être un nombre")?,
@@ -365,6 +478,14 @@ fn parse_selection_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Selecti
     let val = obj.get("val").cloned();
     if val.is_none() && op != "IS NULL" && op != "IS NOT NULL" {
         return Err(format!("selection.val manquant pour op='{op}'"));
+    }
+    // `val: null` explicite n'est accepté que pour IS NULL / IS NOT NULL
+    // (cohérent avec `parse_scope_cond`). Pour les ops binaires, c'est presque
+    // sûrement une erreur — l'utilisateur voulait probablement IS NULL.
+    if matches!(val, Some(JsonValue::Null)) && op != "IS NULL" && op != "IS NOT NULL" {
+        return Err(format!(
+            "selection.val null pour op='{op}' — utilisez IS NULL pour tester la nullité"
+        ));
     }
     Ok(SelectionCond { dim, op, val })
 }
@@ -536,15 +657,15 @@ fn format_float(v: f64) -> String {
 /// l'ordre du registre, en appliquant les destinations. Les paramètres `?`
 /// sont poussés dans l'ordre textuel suivant :
 ///
-/// 1. Pour chaque dim propagated (sauf `analysis2`) : si `destination.<dim>`
-///    est `override`, un `?` est poussé.
-/// 2. `analysis2` : `?` (toujours, tag `RULE:{code}:{seq}`).
-/// 3. `level` : `?` (toujours).
-/// 4. Conditions des JOINs `sat_perimeter` (scope).
-/// 5. Conditions du WHERE (sélection).
+/// 1. Pour chaque dim propagated : si `destination.<dim>` est `override`, un
+///    `?` est poussé. Toutes les dimensions suivent leur destination, **y
+///    compris `analysis2`** (plus de tag `RULE:` — voir la note du corps).
+/// 2. `level` : `?` (toujours).
+/// 3. Conditions des JOINs `sat_perimeter` (scope).
+/// 4. Conditions du WHERE (sélection).
 fn exec_operation(
     con: &Connection,
-    rule_code: &str,
+    _rule_code: &str,
     op: &Operation,
     scope: &[ScopeCond],
     ctx: &RuleContext,
@@ -565,26 +686,30 @@ fn exec_operation(
     let (coeff_expr, coeff_needs_p_ent) = coefficient_expr(&op.coefficient);
     let scope_has_entity = scope.iter().any(|c| c.target == "entity");
     let scope_has_partner = scope.iter().any(|c| c.target == "partner");
+    let scope_has_share = scope.iter().any(|c| c.target == "share");
     let need_p_ent = scope_has_entity || coeff_needs_p_ent;
     let need_p_part = scope_has_partner;
+    let need_p_share = scope_has_share;
 
     // Construction du SELECT et de la liste INSERT dans le même ordre.
-    // Chaque dim propagated devient une colonne du SELECT + une colonne INSERT.
-    // Sauf `analysis2` qui reçoit le tag RULE:{code}:{seq} inconditionnellement.
+    // Chaque dim propagated devient une colonne du SELECT + une colonne INSERT,
+    // en suivant sa destination (inherit / override / null) — **y compris
+    // `analysis2`**.
+    //
+    // ⚠ Historiquement `analysis2` recevait un tag `RULE:{code}:{seq}` pour la
+    // traçabilité. Mais `analysis2` est une dimension **Analytical** : une ligne
+    // dont une analytique est renseignée est un « dont » exclu des totaux
+    // (cf. `dimensions::analytical_cols`). Le tag rendait donc **toute** ligne
+    // générée par une règle invisible dans le bilan / compte de résultat. On
+    // n'écrit plus ce tag : la traçabilité passe par `Nature` (ex. `2ELI`).
     let mut params: Vec<DbValue> = Vec::new();
     let mut select_parts: Vec<String> = Vec::with_capacity(propagated.len() + 2);
     let mut insert_parts: Vec<&str> = Vec::with_capacity(propagated.len() + 2);
 
     for dim in &propagated {
         insert_parts.push(dim);
-        if *dim == "analysis2" {
-            // Tag RULE:{code}:{seq} — inconditionnel (cf. doc d'en-tête).
-            select_parts.push("? AS analysis2".to_string());
-            params.push(DbValue::Text(format!("RULE:{rule_code}:{}", op.seq)));
-        } else {
-            let expr = dest_expr(dim, &op.destination, &mut params);
-            select_parts.push(format!("{expr} AS {dim}"));
-        }
+        let expr = dest_expr(dim, &op.destination, &mut params);
+        select_parts.push(format!("{expr} AS {dim}"));
     }
     insert_parts.push("level");
     insert_parts.push("amount");
@@ -612,7 +737,7 @@ fn exec_operation(
         );
         for c in scope.iter().filter(|c| c.target == "entity") {
             let operand = format!("p_ent.{}", c.dim);
-            let cond = push_condition(&operand, &c.op, &Some(c.val.clone()), &mut params)
+            let cond = push_condition(&operand, &c.op, &c.val, &mut params)
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
         }
@@ -626,7 +751,21 @@ fn exec_operation(
         );
         for c in scope.iter().filter(|c| c.target == "partner") {
             let operand = format!("p_part.{}", c.dim);
-            let cond = push_condition(&operand, &c.op, &Some(c.val.clone()), &mut params)
+            let cond = push_condition(&operand, &c.op, &c.val, &mut params)
+                .map_err(duckdb_synthesis_error)?;
+            joins.push_str(&format!("\n AND {cond}"));
+        }
+    }
+    if need_p_share {
+        joins.push_str(
+            "\nJOIN sat_perimeter p_share\n  \
+                ON p_share.entity = e.share\n \
+                AND p_share.scenario = e.scenario\n \
+                AND p_share.period = e.entry_period",
+        );
+        for c in scope.iter().filter(|c| c.target == "share") {
+            let operand = format!("p_share.{}", c.dim);
+            let cond = push_condition(&operand, &c.op, &c.val, &mut params)
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
         }
@@ -765,4 +904,504 @@ pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport
         rules: results,
         total_generated,
     })
+}
+
+/// Exécute uniquement les opérations d'un ruleset qui **ciblent `level`**, sur
+/// le `fact_entry` courant à ce niveau.
+///
+/// Destinée à être appelée par le **hook du pipeline** ([`crate::pipeline::
+/// run_pipeline_with_hook`]) juste après l'étape qui produit `level` : les
+/// lignes générées sont alors propagées par les étapes suivantes (ex. une règle
+/// `converted` est consolidée par l'étape D). Les rulesets dont aucune règle ne
+/// cible `level` ne génèrent rien.
+///
+/// Même sémantique de snapshot que [`run_ruleset`] (isolation des opérations
+/// d'une règle, chaque règle voyant la sortie de la précédente), mais restreinte
+/// au niveau donné. Renvoie un `RuleResult` par règle ayant généré des lignes.
+pub fn run_ruleset_at_level(
+    con: &Connection,
+    ruleset_code: &str,
+    level: &str,
+) -> Result<Vec<RuleResult>, duckdb::Error> {
+    let ctx = RuleContext::from_registry(con)?;
+    let rules: Vec<(String, String)> = {
+        let mut stmt = con.prepare(
+            "SELECT i.rule_code, r.definition \
+             FROM dim_ruleset_item i \
+             JOIN dim_rule r ON r.code = i.rule_code \
+             WHERE i.ruleset_code = ? \
+             ORDER BY i.ordre",
+        )?;
+        let rows = stmt.query_map([ruleset_code], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        v
+    };
+
+    let mut results: Vec<RuleResult> = Vec::new();
+    for (rule_code, definition_json) in &rules {
+        let definition = parse_definition(definition_json, &ctx).map_err(duckdb_synthesis_error)?;
+        let has_ops_here = definition.operations.iter().any(|op| op.level == level);
+        if !has_ops_here {
+            continue;
+        }
+        // Snapshot du niveau (isolation des opérations de la règle).
+        con.execute(
+            &format!("CREATE TEMP TABLE _rule_snap_{level} AS SELECT * FROM fact_entry WHERE level = ?"),
+            [level],
+        )?;
+        let mut n = 0usize;
+        for op in definition.operations.iter().filter(|op| op.level == level) {
+            n += exec_operation(con, rule_code, op, &definition.scope, &ctx)?;
+        }
+        let _ = con.execute(&format!("DROP TABLE _rule_snap_{level}"), []);
+        materialize_closures(con, level)?;
+        if n > 0 {
+            results.push(RuleResult {
+                rule_code: rule_code.clone(),
+                level: level.to_string(),
+                generated: n,
+            });
+        }
+    }
+    Ok(results)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tests unitaires — parsing et helpers SQL (fonctions privées).
+//
+//  Ces tests valident le parsing JSON → structures fortement typées et les
+//  helpers de génération SQL, indépendamment de toute base. Ils ciblent
+//  spécifiquement les branches de rejet par les whitelists (sécurité SQL) que
+//  les tests d'intégration tests/rules.rs et rules_test.py ne couvrent qu'im-
+//  plicitement (via un code d'erreur HTTP générique).
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use duckdb::types::Value as DbValue;
+
+    /// Contexte de test minimal : reproduit la forme d'un RuleContext construit
+    /// depuis `from_registry` sur un schéma standard (12 dimensions built-in,
+    /// 5 colonnes sat_perimeter, pas de custom). On l'utilise pour valider le
+    /// parsing sans avoir à ouvrir une DuckDB.
+    fn ctx_fixture() -> RuleContext {
+        RuleContext {
+            selection_dims: vec![
+                "scenario".into(), "entity".into(), "entry_period".into(),
+                "period".into(), "account".into(), "flow".into(),
+                "currency".into(), "nature".into(), "partner".into(),
+                "share".into(), "analysis".into(), "analysis2".into(),
+                "level".into(),
+            ],
+            pilotable_dims: vec![
+                "entity".into(), "account".into(), "flow".into(),
+                "nature".into(), "partner".into(), "share".into(),
+                "analysis".into(), "analysis2".into(),
+            ],
+            scope_dims: vec![
+                "methode".into(), "pct_interet".into(), "pct_integration".into(),
+                "entree".into(), "sortie".into(),
+            ],
+        }
+    }
+
+    /// Définition JSON complète de la règle d'élimination interco à 4 opérations
+    /// (miroir de celle du test Python `rules_test.py`).
+    fn elim_interco_json() -> &'static str {
+        r#"{
+            "scope": [
+                {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
+                {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
+            ],
+            "operations": [
+                {
+                    "seq": 1, "level": "consolidated",
+                    "selection": [
+                        {"dim": "account", "op": "=", "val": "700"},
+                        {"dim": "partner", "op": "IS NOT NULL"}
+                    ],
+                    "coefficient": {"type": "pct_integration"},
+                    "multiplicateur": -1,
+                    "destination": {
+                        "nature":  {"mode": "override", "value": "2ELI"},
+                        "partner": {"mode": "inherit"}
+                    }
+                },
+                {
+                    "seq": 2, "level": "consolidated",
+                    "selection": [
+                        {"dim": "account", "op": "=", "val": "600"},
+                        {"dim": "partner", "op": "IS NOT NULL"}
+                    ],
+                    "coefficient": {"type": "pct_integration"},
+                    "multiplicateur": -1,
+                    "destination": {
+                        "nature":  {"mode": "override", "value": "2ELI"},
+                        "partner": {"mode": "null"}
+                    }
+                }
+            ]
+        }"#
+    }
+
+    // ── Parsing valide ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_definition_valide_interco() {
+        let ctx = ctx_fixture();
+        let def = parse_definition(elim_interco_json(), &ctx).expect("définition valide");
+        assert_eq!(def.scope.len(), 2, "2 conditions de scope");
+        assert_eq!(def.operations.len(), 2, "2 opérations");
+        // Le scope croisé entity + partner est reconnu.
+        assert!(def.scope.iter().any(|c| c.target == "entity"));
+        assert!(def.scope.iter().any(|c| c.target == "partner"));
+        // Opération 1 : multiplicateur -1, coefficient PctIntegration, partner hérité.
+        let op1 = &def.operations[0];
+        assert_eq!(op1.seq, 1);
+        assert_eq!(op1.level, "consolidated");
+        assert!(matches!(op1.coefficient, Coefficient::PctIntegration));
+        assert!((op1.multiplicateur - (-1.0)).abs() < 1e-9);
+        // Destination nature override 2ELI, partner inherit.
+        let dest_nature = op1.destination.iter().find(|(k, _)| k == "nature");
+        assert!(matches!(dest_nature, Some((_, d)) if d.mode == "override"
+                                              && d.value.as_deref() == Some("2ELI")));
+    }
+
+    #[test]
+    fn parse_definition_accepte_scope_vide_et_sans_coefficient() {
+        // Une opération minimale : coefficient implicite = Constant(1.0),
+        // multiplicateur implicite = 1.0, destination vide.
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations": [ { "seq": 1, "level": "reclassified" } ] }"#;
+        let def = parse_definition(json, &ctx).expect("définition minimale valide");
+        assert!(def.scope.is_empty(), "scope par défaut = vide");
+        let op = &def.operations[0];
+        assert!(matches!(op.coefficient, Coefficient::Constant(v) if (v - 1.0).abs() < 1e-9),
+            "coefficient implicite = Constant(1.0)");
+        assert!((op.multiplicateur - 1.0).abs() < 1e-9, "multiplicateur implicite = 1.0");
+        assert!(op.destination.is_empty(), "destination vide par défaut");
+        assert!(op.selection.is_empty(), "sélection vide par défaut");
+    }
+
+    // ── Rejets par les whitelists (sécurité SQL) ─────────────────────────
+
+    #[test]
+    fn parse_rejette_scope_target_invalide() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "scope": [{"target":"company","dim":"methode","op":"=","val":"globale"}],
+                        "operations":[{"seq":1,"level":"consolidated"}] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("ALLOWED_TARGETS") || err.contains("target"),
+            "message devrait mentionner target invalide : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_scope_dim_hors_whitelist() {
+        let ctx = ctx_fixture();
+        // "pct_inconnu" n'est pas une colonne de sat_perimeter.
+        let json = r#"{ "scope": [{"target":"entity","dim":"pct_inconnu","op":"=","val":1}],
+                        "operations":[{"seq":1,"level":"consolidated"}] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("scope.dim") || err.contains("invalide"),
+            "message devrait mentionner scope.dim invalide : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_scope_val_null_avec_op_eq() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "scope": [{"target":"entity","dim":"methode","op":"=","val":null}],
+                        "operations":[{"seq":1,"level":"consolidated"}] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("null"), "message devrait mentionner null : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_selection_val_null_avec_op_eq() {
+        // Miroir de parse_rejette_scope_val_null_avec_op_eq pour la sélection :
+        // `val: null` explicite avec op binaire doit être rejeté (cohérence).
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","op":"=","val":null}]
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("null"), "message devrait mentionner null : {err}");
+    }
+
+    #[test]
+    fn parse_accepte_scope_sans_val_avec_is_null() {
+        // Pour IS NULL / IS NOT NULL, l'absence de `val` est tolérée (cohérent
+        // avec `parse_selection_cond`).
+        let ctx = ctx_fixture();
+        for op in &["IS NULL", "IS NOT NULL"] {
+            let json = format!(
+                "{{ \"scope\": [{{\"target\":\"entity\",\"dim\":\"entree\",\"op\":\"{op}\"}}], \
+                 \"operations\":[{{\"seq\":1,\"level\":\"consolidated\"}}] }}"
+            );
+            let def = parse_definition(&json, &ctx)
+                .unwrap_or_else(|e| panic!("op={op} devrait tolérer l'absence de val : {e}"));
+            assert_eq!(def.scope.len(), 1);
+            assert!(def.scope[0].val.is_none(), "op={op} : val devrait être None");
+        }
+    }
+
+    #[test]
+    fn parse_accepte_scope_avec_val_explicite() {
+        // `val` présent reste valide pour tous les opérateurs binaires.
+        let ctx = ctx_fixture();
+        let json = r#"{ "scope": [{"target":"entity","dim":"methode","op":"=","val":"globale"}],
+                        "operations":[{"seq":1,"level":"consolidated"}] }"#;
+        let def = parse_definition(json, &ctx).expect("val explicite valide");
+        assert_eq!(def.scope.len(), 1);
+        match &def.scope[0].val {
+            Some(JsonValue::String(s)) => assert_eq!(s, "globale"),
+            other => panic!("val inattendu : {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rejette_level_invalide() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{"seq":1,"level":"consolid"}] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("level"), "message devrait mentionner level : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_selection_dim_hors_whitelist() {
+        let ctx = ctx_fixture();
+        // "level" est un nom réservé : il est dans selection_dims, donc accepté.
+        // "foobar" n'est pas une dimension connue → rejeté.
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"foobar","op":"=","val":"x"}]
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("selection.dim") || err.contains("invalide"),
+            "message devrait mentionner selection.dim : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_destination_dim_non_pilotable() {
+        let ctx = ctx_fixture();
+        // "currency" est une dimension Fixed (non pilotable) → refusée en
+        // destination (elle doit rester héritée).
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "destination":{"currency":{"mode":"override","value":"USD"}}
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("pilotable") || err.contains("destination"),
+            "message devrait mentionner pilotable/destination : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_destination_mode_inconnu() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "destination":{"nature":{"mode":"swap","value":"X"}}
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("mode"), "message devrait mentionner mode : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_coefficient_type_inconnu() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "coefficient":{"type":"pct_share"}
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("coefficient.type") || err.contains("inconnu"),
+            "message devrait mentionner coefficient.type : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_coefficient_constant_sans_value() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "coefficient":{"type":"constant"}
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("value"), "message devrait mentionner value : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_operations_manquant() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "scope": [] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("operations"), "message devrait mentionner operations : {err}");
+    }
+
+    #[test]
+    fn parse_rejette_operations_non_tableau() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations": "oops" }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(err.contains("tableau"), "message devrait mentionner tableau : {err}");
+    }
+
+    #[test]
+    fn parse_coefficient_constant_avec_value() {
+        let v = serde_json::json!({"type":"constant","value":0.25});
+        let c = parse_coefficient(&v).expect("coefficient constant valide");
+        assert!(matches!(c, Coefficient::Constant(x) if (x - 0.25).abs() < 1e-9));
+    }
+
+    #[test]
+    fn parse_multiplicateur_absent_donne_1() {
+        // Absence de la clé → défaut implicite = 1.0 (documenté).
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{"seq":1,"level":"consolidated"}] }"#;
+        let def = parse_definition(json, &ctx).expect("multiplicateur absent = 1.0");
+        assert!((def.operations[0].multiplicateur - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_multiplicateur_null_explicite_rejete() {
+        // null explicite (bug UI typique : Number("") = NaN → JSON null)
+        // doit être rejeté plutôt que silencieusement remplacé par 1.0.
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{"seq":1,"level":"consolidated","multiplicateur":null}] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(
+            err.contains("null"),
+            "le message doit mentionner null : {err}"
+        );
+    }
+
+    // ── Helpers SQL ──────────────────────────────────────────────────────
+
+    #[test]
+    fn coefficient_expr_pct_integration_necessite_join_perimeter() {
+        let (expr, needs_join) = coefficient_expr(&Coefficient::PctIntegration);
+        assert!(needs_join, "PctIntegration doit déclencher le JOIN sat_perimeter");
+        assert!(expr.contains("pct_integration"), "expression doit lire pct_integration : {expr}");
+    }
+
+    #[test]
+    fn coefficient_expr_constant_ne_necessite_pas_join() {
+        let (expr, needs_join) = coefficient_expr(&Coefficient::Constant(0.5));
+        assert!(!needs_join, "Constant n'a pas besoin du JOIN sat_perimeter");
+        assert!(!expr.contains("pct_"), "expression ne doit pas lire le périmètre : {expr}");
+    }
+
+    #[test]
+    fn format_float_point_decimal_et_un_chiffre() {
+        // Entier : "1.0" (force un chiffre après le point pour SQL).
+        assert_eq!(format_float(1.0), "1.0");
+        assert_eq!(format_float(2.0), "2.0");
+        assert_eq!(format_float(-1.0), "-1.0");
+        // Fractionnaire : représentation Rust par défaut (point décimal).
+        assert_eq!(format_float(0.5), "0.5");
+        assert_eq!(format_float(-0.25), "-0.25");
+    }
+
+    #[test]
+    fn push_condition_in_liste_vide_rend_faux() {
+        // Une sélection IN () est invalide en SQL ; le helper doit produire 1=0
+        // plutôt que d'injecter une liste vide.
+        let mut params: Vec<DbValue> = Vec::new();
+        let cond = push_condition("e.account", "IN", &Some(JsonValue::Array(vec![])), &mut params)
+            .expect("IN liste vide → 1=0");
+        assert_eq!(cond, "1=0", "IN liste vide doit donner 1=0, eu {cond}");
+        assert!(params.is_empty(), "aucun paramètre bindé pour 1=0");
+    }
+
+    #[test]
+    fn push_condition_in_avec_plusieurs_valeurs() {
+        let mut params: Vec<DbValue> = Vec::new();
+        let val = JsonValue::Array(vec![
+            JsonValue::String("100".into()),
+            JsonValue::String("200".into()),
+        ]);
+        let cond = push_condition("e.account", "IN", &Some(val), &mut params).expect("IN ok");
+        assert_eq!(cond, "e.account IN (?, ?)");
+        assert_eq!(params.len(), 2, "deux valeurs bindées");
+    }
+
+    #[test]
+    fn push_condition_op_simple_binde_une_valeur() {
+        let mut params: Vec<DbValue> = Vec::new();
+        let cond = push_condition(
+            "e.amount",
+            ">",
+            &Some(JsonValue::Number(serde_json::Number::from(100))),
+            &mut params,
+        )
+        .expect("op > ok");
+        assert_eq!(cond, "e.amount > ?");
+        assert_eq!(params.len(), 1, "une valeur bindée");
+    }
+
+    #[test]
+    fn push_condition_is_null_ne_bind_rien() {
+        let mut params: Vec<DbValue> = Vec::new();
+        let cond = push_condition("e.partner", "IS NULL", &None, &mut params).expect("IS NULL ok");
+        assert_eq!(cond, "e.partner IS NULL");
+        assert!(params.is_empty(), "IS NULL ne bind rien");
+    }
+
+    #[test]
+    fn dest_expr_héritage_par_défaut_quand_dim_absente() {
+        // Une dimension absente de la liste des destinations est héritée.
+        let mut params: Vec<DbValue> = Vec::new();
+        let expr = dest_expr("account", &[], &mut params);
+        assert_eq!(expr, "e.account", "héritage par défaut");
+        assert!(params.is_empty());
+    }
+
+    #[test]
+    fn dest_expr_null_pousse_null_littéral() {
+        let dests = vec![(
+            "partner".to_string(),
+            Destination { mode: "null".into(), value: None },
+        )];
+        let mut params: Vec<DbValue> = Vec::new();
+        let expr = dest_expr("partner", &dests, &mut params);
+        assert_eq!(expr, "NULL", "mode null → NULL littéral");
+        assert!(params.is_empty(), "mode null ne bind rien");
+    }
+
+    #[test]
+    fn dest_expr_override_binde_la_valeur() {
+        let dests = vec![(
+            "nature".to_string(),
+            Destination { mode: "override".into(), value: Some("2ELI".into()) },
+        )];
+        let mut params: Vec<DbValue> = Vec::new();
+        let expr = dest_expr("nature", &dests, &mut params);
+        assert_eq!(expr, "?", "mode override → placeholder");
+        assert_eq!(params.len(), 1, "une valeur bindée");
+        match &params[0] {
+            DbValue::Text(s) => assert_eq!(s, "2ELI"),
+            other => panic!("attendu Text(2ELI), eu {other:?}"),
+        }
+    }
+
+    #[test]
+    fn json_to_dbvalue_convertit_types_primitifs() {
+        assert!(matches!(json_to_dbvalue(&JsonValue::Null), DbValue::Null));
+        assert!(matches!(json_to_dbvalue(&JsonValue::Bool(true)), DbValue::Boolean(true)));
+        assert!(matches!(json_to_dbvalue(&JsonValue::String("x".into())), DbValue::Text(_)));
+        // Entier → BigInt ; flottant → Double.
+        assert!(matches!(
+            json_to_dbvalue(&JsonValue::Number(serde_json::Number::from(42))),
+            DbValue::BigInt(42)
+        ));
+        assert!(matches!(
+            json_to_dbvalue(&serde_json::json!(3.14)),
+            DbValue::Double(_)
+        ));
+    }
 }

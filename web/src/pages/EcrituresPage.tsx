@@ -16,9 +16,13 @@ import {
 } from '@tanstack/react-table';
 import { api } from '../api';
 import { Filters } from '../components/Filters';
-import type { Entry } from '../types';
+import type { DimensionInfo } from '../types';
 import { LEVELS } from '../types';
 import { formatAmount, formatInt } from '../utils/format';
+
+// Une écriture = objet générique (colonnes dynamiques : dimensions built-in +
+// custom + level + amount), cf. /api/entries.
+type EntryRow = Record<string, unknown>;
 
 const PAGE_SIZE = 100;
 const FETCH_LIMIT = 10_000;
@@ -33,10 +37,29 @@ export function EcrituresPage() {
   const [entryPeriod, setEntryPeriod] = useState('');
   const [period, setPeriod] = useState('');
   const [nature, setNature] = useState('');
-  const [data, setData] = useState<Entry[]>([]);
+  const [data, setData] = useState<EntryRow[]>([]);
+  const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
+
+  // Liste des dimensions (built-in + custom) pour construire les colonnes.
+  // Les libellés (ex. « Définition de consolidation » pour scenario) viennent
+  // du registre serveur.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await api.dimensions.list();
+        if (!cancelled) setDims(rows);
+      } catch {
+        if (!cancelled) setDims([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,14 +88,17 @@ export function EcrituresPage() {
     void load();
   }, [load]);
 
-  const columns = useMemo<ColumnDef<Entry>[]>(
-    () => [
-      { header: 'Scenario', accessorKey: 'scenario' },
-      { header: 'Entity', accessorKey: 'entity' },
-      { header: 'Account', accessorKey: 'account' },
-      { header: 'Flow', accessorKey: 'flow' },
-      { header: 'Currency', accessorKey: 'currency' },
-      { header: 'Nature', accessorKey: 'nature' },
+  // Colonnes dynamiques : une par dimension du registre (built-in + custom),
+  // dans l'ordre du registre, puis Level et Amount. Inclut donc toutes les
+  // dimensions d'analyse (le « dont ») et les dimensions custom.
+  const columns = useMemo<ColumnDef<EntryRow>[]>(() => {
+    const dimCols: ColumnDef<EntryRow>[] = dims.map((d) => ({
+      header: d.label,
+      accessorKey: d.name,
+    }));
+    return [
+      ...dimCols,
+      { header: 'Level', accessorKey: 'level' },
       {
         header: 'Amount',
         accessorKey: 'amount',
@@ -81,9 +107,8 @@ export function EcrituresPage() {
         ),
         sortingFn: 'alphanumeric',
       },
-    ],
-    [],
-  );
+    ];
+  }, [dims]);
 
   const table = useReactTable({
     data,
