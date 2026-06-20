@@ -307,16 +307,19 @@ fn validate_references(
     con: &duckdb::Connection,
 ) -> Result<(), AppError> {
     let mut bad = Vec::new();
-    let mut missing = Vec::new();
-    for r in references::references_for(def.sql_name) {
+    let mut missing: Vec<String> = Vec::new();
+    // `all_references` = graphe statique + références dynamiques (caractéristiques
+    // N1/N2). Filtré sur la table éditée.
+    let all = references::all_references(con);
+    for r in all.iter().filter(|r| r.table == def.sql_name) {
         // Une valeur est « vide » si la colonne est absente, JSON null, ou chaîne
         // vide. Sur une référence obligatoire (non-nullable), c'est rejeté ;
         // sinon (nullable) c'est toléré (= NULL).
-        let s = match obj.get(r.column) {
+        let s = match obj.get(r.column.as_str()) {
             Some(JsonValue::String(s)) if !s.is_empty() => s.as_str(),
             None | Some(JsonValue::Null) | Some(JsonValue::String(_)) => {
                 if r.required {
-                    missing.push(r.column);
+                    missing.push(r.column.clone());
                 }
                 continue;
             }
@@ -326,13 +329,13 @@ fn validate_references(
         };
         // Auto-référence : la ligne se référence elle-même par sa PK.
         if r.target_table == def.sql_name {
-            if let Some(own) = obj.get(r.target_column).and_then(|x| x.as_str()) {
+            if let Some(own) = obj.get(r.target_column.as_str()).and_then(|x| x.as_str()) {
                 if own == s {
                     continue;
                 }
             }
         }
-        if !references::value_exists(con, r.target_table, r.target_column, s).map_err(db_err)? {
+        if !references::value_exists(con, &r.target_table, &r.target_column, s).map_err(db_err)? {
             bad.push(format!(
                 "{} = '{}' (absent de {}.{})",
                 r.column, s, r.target_table, r.target_column
@@ -599,9 +602,9 @@ async fn get_references(
 #[derive(serde::Serialize)]
 struct OrphanCheck {
     table: String,
-    column: &'static str,
+    column: String,
     target_table: String,
-    target_column: &'static str,
+    target_column: String,
     count: i64,
     sample: Vec<String>,
 }
@@ -627,19 +630,20 @@ async fn get_data_health(
     let con = lock_con(&state)?;
     let mut checks = Vec::new();
     let mut total = 0i64;
-    for r in references::REFERENCES {
+    // Graphe statique + références dynamiques (caractéristiques N1/N2) : ainsi le
+    // rapport couvre aussi les orphelins sur les colonnes de rattachement et les
+    // attributs des caractéristiques.
+    for r in references::all_references(&con) {
+        let col = r.column.as_str();
+        let tt = r.target_table.as_str();
+        let tc = r.target_column.as_str();
+        let tbl = r.table.as_str();
         let where_orphan = format!(
             "e.\"{col}\" IS NOT NULL AND e.\"{col}\" <> '' \
-             AND NOT EXISTS (SELECT 1 FROM {tt} t WHERE t.\"{tc}\" = e.\"{col}\")",
-            col = r.column,
-            tt = r.target_table,
-            tc = r.target_column,
+             AND NOT EXISTS (SELECT 1 FROM {tt} t WHERE t.\"{tc}\" = e.\"{col}\")"
         );
-        let count_sql = format!(
-            "SELECT COUNT(DISTINCT e.\"{col}\") FROM {tbl} e WHERE {where_orphan}",
-            col = r.column,
-            tbl = r.table,
-        );
+        let count_sql =
+            format!("SELECT COUNT(DISTINCT e.\"{col}\") FROM {tbl} e WHERE {where_orphan}");
         // Table source potentiellement absente selon le schéma → on tolère.
         let count: i64 = match con.query_row(&count_sql, [], |row| row.get(0)) {
             Ok(n) => n,
@@ -649,9 +653,7 @@ async fn get_data_health(
             continue;
         }
         let sample_sql = format!(
-            "SELECT DISTINCT e.\"{col}\" AS v FROM {tbl} e WHERE {where_orphan} ORDER BY v LIMIT 20",
-            col = r.column,
-            tbl = r.table,
+            "SELECT DISTINCT e.\"{col}\" AS v FROM {tbl} e WHERE {where_orphan} ORDER BY v LIMIT 20"
         );
         let mut sample = Vec::new();
         if let Ok(mut stmt) = con.prepare(&sample_sql) {
@@ -663,12 +665,12 @@ async fn get_data_health(
         }
         total += count;
         checks.push(OrphanCheck {
-            table: api_name_for_sql(r.table).unwrap_or(r.table).to_string(),
-            column: r.column,
-            target_table: api_name_for_sql(r.target_table)
-                .unwrap_or(r.target_table)
-                .to_string(),
-            target_column: r.target_column,
+            table: api_name_for_sql(tbl).map(str::to_string).unwrap_or_else(|| tbl.to_string()),
+            column: col.to_string(),
+            target_table: api_name_for_sql(tt)
+                .map(str::to_string)
+                .unwrap_or_else(|| tt.to_string()),
+            target_column: tc.to_string(),
             count,
             sample,
         });
