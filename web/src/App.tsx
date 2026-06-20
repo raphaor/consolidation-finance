@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Layout, type PageId } from './components/Layout';
 import { useHealth } from './hooks/useHealth';
+import { CaracteristiquesPage } from './pages/CaracteristiquesPage';
 import { EcrituresPage } from './pages/EcrituresPage';
 import { ImportPage } from './pages/ImportPage';
 import { MasterDataPage } from './pages/MasterDataPage';
@@ -22,6 +23,7 @@ export default function App() {
       {page === 'ecritures' && <EcrituresPage />}
       {page === 'pipeline' && <PipelinePage />}
       {page === 'masterdata' && <MasterDataPage />}
+      {page === 'caracteristiques' && <CaracteristiquesPage />}
       {page === 'regles' && <RulesPage />}
       {page === 'import' && <ImportPage />}
     </Layout>

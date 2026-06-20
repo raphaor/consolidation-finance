@@ -10,6 +10,7 @@ export type PageId =
   | 'ecritures'
   | 'pipeline'
   | 'masterdata'
+  | 'caracteristiques'
   | 'regles'
   | 'import';
 
@@ -25,6 +26,7 @@ const TABS: { id: PageId; label: string }[] = [
   { id: 'ecritures', label: 'Écritures' },
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'masterdata', label: 'Master data' },
+  { id: 'caracteristiques', label: 'Caractéristiques' },
   { id: 'regles', label: 'Règles' },
   { id: 'import', label: 'Import' },
 ];

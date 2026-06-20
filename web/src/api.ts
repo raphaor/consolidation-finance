@@ -12,6 +12,7 @@
 
 import type {
   BilanRow,
+  Characteristic,
   DataHealthReport,
   DimensionInfo,
   HealthStatus,
@@ -207,5 +208,30 @@ export const api = {
       postJsonRaw<DimensionInfo>('/meta/dimensions', body),
     remove: (name: string) =>
       deleteJson<{ deleted: number }>(`/meta/dimensions/${name}`),
+  },
+  // Caractéristiques N1/N2 : regroupement d'une dimension par une caractéristique
+  // dont les attributs pointent vers d'autres dimensions (cf. characteristics.rs).
+  characteristics: {
+    list: () => getJson<Characteristic[]>('/meta/characteristics'),
+    create: (body: { code: string; libelle: string; base_dimension: string }) =>
+      postJsonRaw<{ code: string }>('/meta/characteristics', body),
+    remove: (code: string) =>
+      deleteJson<{ deleted: string }>(`/meta/characteristics/${code}`),
+    addAttribute: (
+      code: string,
+      body: { name: string; libelle: string; target_dimension: string },
+    ) => postJsonRaw<unknown>(`/meta/characteristics/${code}/attributes`, body),
+    removeAttribute: (code: string, name: string) =>
+      deleteJson<unknown>(`/meta/characteristics/${code}/attributes/${name}`),
+    listValues: (code: string) =>
+      getJson<Record<string, unknown>[]>(`/meta/characteristics/${code}/values`),
+    createValue: (code: string, row: Record<string, unknown>) =>
+      postJsonRaw<unknown>(`/meta/characteristics/${code}/values`, row),
+    updateValue: (code: string, value: string, row: Record<string, unknown>) =>
+      putJson<unknown>(`/meta/characteristics/${code}/values/${value}`, row),
+    removeValue: (code: string, value: string) =>
+      deleteJson<unknown>(`/meta/characteristics/${code}/values/${value}`),
+    assign: (code: string, body: { member: string; value: string | null }) =>
+      putJson<unknown>(`/meta/characteristics/${code}/assign`, body),
   },
 };

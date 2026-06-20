@@ -504,6 +504,26 @@ export interface DimensionInfo {
   pilotable: boolean;
 }
 
+// ---------- Caractéristiques N1/N2 (GET /api/meta/characteristics) ----------
+// Une caractéristique N1 regroupe les membres d'une dimension de base
+// (`base_dimension`) ; ses attributs N2 (`attributes`) pointent chacun vers une
+// dimension cible (`target_dimension`). Les valeurs vivent dans `value_table`
+// (`car_<code>`).
+
+export interface CharacteristicAttribute {
+  name: string;
+  libelle: string;
+  target_dimension: string;
+}
+
+export interface Characteristic {
+  code: string;
+  libelle: string;
+  base_dimension: string;
+  value_table: string;
+  attributes: CharacteristicAttribute[];
+}
+
 // ---------- Références (graphe de jointures, GET /api/meta/references) ----------
 // Source de vérité serveur (engine/src/references.rs). `table` est en nom SQL
 // (ex. stg_entry, sat_perimeter, dim_*) ; `target_table` est traduit en nom de
