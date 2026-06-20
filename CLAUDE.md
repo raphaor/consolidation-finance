@@ -109,4 +109,5 @@ Pages dans `pages/` (Import, MasterData, Pipeline, Rapports, Ecritures, Rules), 
 - `docs/FLUX_CONSO.md` — catalogue des flux F00–F99.
 - `docs/REGLES_CONSO.md` — spécification de l'éditeur de règles.
 - `docs/TECHNIQUE.md` — architecture et justifications de la stack.
-- `prototype/rust/SPEC_*.md` — specs détaillées (registry, propagation, règles).
+- `docs/README.md` — index de la doc (vivant vs archive).
+- `docs/archive/` — **historique non maintenu** : specs d'implémentation livrées (`specs-livrees/` : registry, propagation, règles, UI règles, scénario v2) et analyses/revues ponctuelles (`analyses/`). Référence de conception, pas spec courante.

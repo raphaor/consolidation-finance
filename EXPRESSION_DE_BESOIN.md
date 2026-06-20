@@ -70,9 +70,9 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 - Format d'échange : **CSV** (prototype ; évolutif ensuite — voir [Q18](./docs/QUESTIONS_OUVERTES.md)).
 - Champs en entrée (ordre et casse à respecter) :
 
-  `Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Audit_id, Partner*, Share*, Analysis*, Amount`
+  `Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Partner*, Share*, Analysis*, Analysis2*, Source*, Amount`
 
-  `*` = champ optionnel. Tout autre champ est obligatoire.
+  `*` = champ optionnel. Tout autre champ est obligatoire. (`Audit_id` a été supprimé : son rôle de traçabilité est tenu par `Source` — métadonnée non-dimensionnelle — et l'ancien axe a été renommé `Analysis2`. Voir [Q13](./docs/QUESTIONS_OUVERTES.md).)
 - Sémantique détaillée des champs et master data de chaque dimension : voir [`docs/MODELE_DONNEES.md`](./docs/MODELE_DONNEES.md).
 
 ## 5. Restitution & reporting
@@ -91,7 +91,7 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 | Performance | Critère de validation du POC (test sur gros volumes) ; temps cible exact à préciser | [Q12](./docs/QUESTIONS_OUVERTES.md) |
 | Volumétrie | **Large** : 50+ entités, milliers de comptes, millions de lignes — performance testée sur gros volumes | [Q3](./docs/QUESTIONS_OUVERTES.md) |
 | Sécurité | Ignoré initialement | [Q15](./docs/QUESTIONS_OUVERTES.md) |
-| Audit / traçabilité | Chaque écriture tracée par référence ; détail à préciser | [Q13](./docs/QUESTIONS_OUVERTES.md) |
+| Audit / traçabilité | Provenance tracée par le champ `Source` (ex-`Audit_id`, non-dimensionnel) | [Q13](./docs/QUESTIONS_OUVERTES.md) (TRANCHÉE) |
 | Évolutivité | Ajout filiale / référentiel / module sans refonte | [Q14](./docs/QUESTIONS_OUVERTES.md) |
 
 ## 7. Contraintes & préférences techniques

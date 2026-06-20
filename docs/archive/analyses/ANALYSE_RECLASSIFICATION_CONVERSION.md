@@ -3,7 +3,7 @@
 > **Conclusion** : reclassification de périmètre **AVANT** conversion.
 > Étape de traitement : `Agrégation → Reclassification → Conversion → Consolidation` (4 étapes pour 3 niveaux de stockage).
 
-Simulation : [`simulations/consolidation_sim.py`](../simulations/consolidation_sim.py)
+Simulation : [`simulations/consolidation_sim.py`](../../../simulations/consolidation_sim.py)
 
 ## Contexte
 

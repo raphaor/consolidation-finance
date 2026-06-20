@@ -13,13 +13,15 @@ Langue de travail : **français** (docs, termes métier, commits). Conserver ce 
 - `docs/MODELE_DONNEES.md` — **annexe modèle de données** : sémantique des champs CSV, catalogue des dimensions (attributs master data + traitements conso liés), tables satellites (Périmètre, Taux de change, Participations).
 - `docs/TECHNIQUE.md` — **annexe stack technique** : architecture (engine/server/web), justifications des choix (Rust, DuckDB, Axum, React/Vite/TanStack Table).
 - `docs/FLUX_CONSO.md` — **catalogue des flux de consolidation** (F00–F99) : sémantique et traitement générateur de chaque code de flux.
+- `docs/REGLES_CONSO.md` — **spécification de l'éditeur de règles** de consolidation.
+- `docs/README.md` — **index** de la documentation (distingue le vivant de l'archive). Les specs d'implémentation **livrées** (`SPEC_*`) et les analyses/revues ponctuelles sont rangées sous `docs/archive/` : **historique, non maintenu** — ne pas s'y fier comme spec courante.
 - Convention de travail : quand une exigence reste ouverte, **créer/éditer une entrée dans le registre** plutôt que d'éparpiller des `?` dans le texte. À l'inverse, quand une question passe à `TRANCHÉE`, **reporter la décision dans l'EDB** et conserver la ligne (historique).
 
 ## Stack (décidée)
 
-- **Moteur de consolidation en Rust** (crate `engine`) : logique métier native (agrégation, conversion, méthodes, variations de périmètre).
+- **Moteur de consolidation en Rust** (crate `conso-engine`, dans `prototype/rust/` — **pas de workspace**) : logique métier native (agrégation, conversion, méthodes, variations de périmètre).
 - **Stockage : DuckDB embarqué** (analytique columnar, fichier local) — choisi pour la perf sur gros volumes.
-- **Serveur web : Axum** (Rust, crate `server`) — API JSON + sert le frontend statique.
+- **Serveur web : Axum** (Rust, binaire `conso-server` du crate `conso-engine`) — API JSON + sert le frontend statique.
 - **Frontend : React + Vite + TanStack Table** (TypeScript, npm).
 - Hébergement **local**, mono-utilisateur (prototype). Pas de SaaS.
 - Détails et justifications : [`docs/TECHNIQUE.md`](./docs/TECHNIQUE.md).
@@ -29,20 +31,20 @@ Langue de travail : **français** (docs, termes métier, commits). Conserver ce 
 Format d'échange : **CSV** (pour le prototype uniquement, évolutif ensuite).
 
 Champs en entrée (respecter l'ordre et la casse) :
-`Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Audit_id, Partner*, Share*, Analysis*, Amount`
+`Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Partner*, Share*, Analysis*, Analysis2*, Source*, Amount`
 
-Champs marqués `*` sont **optionnels**. Tout autre champ est obligatoire.
+Champs marqués `*` sont **optionnels**. Tout autre champ est obligatoire. (`Audit_id` supprimé : provenance portée par `Source`, ancien axe renommé `Analysis2` — cf. [Q13](./docs/QUESTIONS_OUVERTES.md).)
 
 ## Sémantique métier essentielle
 
 - Méthode de consolidation : **par les flux** — chaque traitement génère des écritures taguées par un code de flux (`Flow`). Catalogue dans [`docs/FLUX_CONSO.md`](./docs/FLUX_CONSO.md) (F00 ouverture, F20 variation, F80/F81 conversion, F01/F98 périmètre, F99 clôture).
 - Deux natures de traitements (la dichotomie B/C est abandonnée) :
   - **Natifs** (moteur) : agrégation, conversion multi-devises, méthodes de consolidation (globale / proportionnelle / équivalence), variations de périmètre.
-  - **Construits via l'éditeur de règles** (**implémenté dans le prototype** — moteur `engine/src/rules.rs` + API REST + UI React `web/src/pages/RulesPage.tsx`, [Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE) : écritures automatiques paramétrables (éliminations interco et participations déjà couvertes ; intérêts minoritaires, retraitements, variations de capital, répartition des résultats = catalogue post-MVP dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md) §10).
+  - **Construits via l'éditeur de règles** (**implémenté dans le prototype** — moteur `prototype/rust/src/rules.rs` + API REST + UI React `web/src/pages/RulesPage.tsx`, [Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE) : écritures automatiques paramétrables (éliminations interco et participations déjà couvertes ; intérêts minoritaires, retraitements, variations de capital, répartition des résultats = catalogue post-MVP dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md) §10).
 - L'utilisateur saisit les liasses **directement dans le plan de compte du groupe** (pas de mapping prévu dans cette version).
 - Conversion de devises : **taux clôture pour le bilan, taux moyen (simple) pour le résultat**.
 
-Ne pas inventer de règles de consolidation : tout traitement non listé comme **natif** dans `EXPRESSION_DE_BESOIN.md` §3.4 doit passer par l'éditeur de règles. Ne pas coder de règle métier spécifique en dur dans le moteur Rust — `engine/src/rules.rs` est un **exécuteur générique** (parsing JSON → INSERT...SELECT paramétré), pas l'endroit où implanter une logique interco/participation en dur.
+Ne pas inventer de règles de consolidation : tout traitement non listé comme **natif** dans `EXPRESSION_DE_BESOIN.md` §3.4 doit passer par l'éditeur de règles. Ne pas coder de règle métier spécifique en dur dans le moteur Rust — `prototype/rust/src/rules.rs` est un **exécuteur générique** (parsing JSON → INSERT...SELECT paramétré), pas l'endroit où implanter une logique interco/participation en dur.
 
 ## Conventions de travail
 

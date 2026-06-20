@@ -20,13 +20,13 @@ Proposition technique (à confirmer couche par couche). Le moteur de consolidati
 └──────────────────┬───────────────────────┘
                    │ HTTP (API JSON + assets)
 ┌──────────────────▼───────────────────────┐
-│  crate `server`  (serveur web Rust)      │
+│  bin `conso-server` (serveur web Rust)   │
 │  - expose le moteur + CRUD master data   │
 │  - sert le frontend                      │
 └──────────────────┬───────────────────────┘
                    │ appelle
 ┌──────────────────▼───────────────────────┐
-│  crate `engine` (bibliothèque Rust)      │
+│  crate `conso-engine` (bibliothèque)     │
 │  - logique de consolidation native       │
 │    (agrégation, conversion, méthodes,    │
 │     variations de périmètre)             │
@@ -40,7 +40,13 @@ Proposition technique (à confirmer couche par couche). Le moteur de consolidati
 └──────────────────────────────────────────┘
 ```
 
-Un seul binaire (prototype), trois responsabilités séparées en crates pour la maintenabilité.
+> **État réel (implémenté)** : un **seul crate** `conso-engine`, situé dans
+> `prototype/rust/` — **pas de workspace Cargo**. Il fournit une bibliothèque (le
+> moteur) et plusieurs binaires : `conso-engine` (défaut), `conso-server`
+> (serveur Axum), `conso-bench` (benchmark). Les responsabilités restent
+> séparées par module, pas par crate. Le découpage `engine`/`server` ci-dessus
+> était la proposition initiale ; la réalité est consignée dans
+> [`../CLAUDE.md`](../CLAUDE.md) (§Architecture).
 
 **Stockage** : les données consolidées sont persistées à **4 niveaux** (corporate → reclassifié → converti → consolidé), chacun matérialisant l'état des données après une phase d'élaboration. Le niveau *reclassifié* (devise fonctionnelle, après reclassifications de périmètre) est persisté car utile pour l'audit et la re-conversion.
 
@@ -67,18 +73,22 @@ Un seul binaire (prototype), trois responsabilités séparées en crates pour la
 - TanStack Table pour les tables filtrables/triées/paginées et le pivot « bilan par flux » (comptes × flux).
 - UI cible : écrans CRUD master data, imports CSV, table filtrable sur tous les champs, bilan par flux, compte de résultat, **éditeur de règles de consolidation** (bibliothèque + jeux de règles ordonnés + exécution + rapport — cf. [`REGLES_CONSO.md`](./REGLES_CONSO.md), [Q24](./QUESTIONS_OUVERTES.md) TRANCHÉE).
 
-## 6. Structure de projet (workspace Rust + app web)
+## 6. Structure de projet (état réel)
 
 ```
 consolidation-finance/
-  Cargo.toml          # workspace Rust (engine + server)
-  engine/             # crate Rust : logique de consolidation native + accès DuckDB
-  server/             # crate Rust : Axum (API JSON) + sert le frontend statique
+  prototype/rust/     # crate `conso-engine` — PAS de workspace (Cargo.toml ici)
+    Cargo.toml
+    src/              # lib (moteur : pipeline, rules, dimensions…)
+    src/bin/          # conso-server (Axum), conso-bench (benchmark)
+    tests/            # pipeline.rs, rules.rs
   web/                # app React + Vite + TanStack Table (npm)
-  docs/
+  docs/               # source de vérité fonctionnelle (+ archive/)
+  prototype/python/   # prototype d'origine — référence historique
+  simulations/        # scripts exploratoires Python
 ```
 
-Un seul binaire (`server`) à lancer pour le POC : il démarre Axum, ouvre DuckDB, et sert l'app React buildée.
+Le binaire `conso-server` est celui à lancer pour le POC : il démarre Axum, ouvre DuckDB, et sert l'app React buildée. (Le découpage `engine`/`server` en crates séparées, et le workspace racine, étaient la proposition initiale — non retenue.)
 
 ## 7. Récapitulatif stack
 
