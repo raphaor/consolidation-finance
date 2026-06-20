@@ -16,6 +16,7 @@ Tenus à jour avec le code. À lire avant d'implémenter.
 | [`FLUX_CONSO.md`](./FLUX_CONSO.md) | Catalogue des flux F00–F99 et leur traitement générateur. |
 | [`REGLES_CONSO.md`](./REGLES_CONSO.md) | Spécification de l'éditeur de règles de consolidation. |
 | [`TECHNIQUE.md`](./TECHNIQUE.md) | Architecture et justifications de la stack. |
+| [`RECETTE_PYTHON.md`](./RECETTE_PYTHON.md) | Recette boîte noire : lancement et rôle des 3 scripts Python (`smoke` / `rules` / `golden`). |
 
 ## Archive (`archive/`)
 
