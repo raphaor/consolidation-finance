@@ -515,3 +515,20 @@ export interface ReferenceInfo {
   target_column: string;
   required: boolean;
 }
+
+// ---------- Santé des données (GET /api/meta/health) ----------
+// Rapport d'orphelins : valeurs présentes en source mais absentes de la cible.
+export interface OrphanCheck {
+  table: string;
+  column: string;
+  target_table: string;
+  target_column: string;
+  count: number; // nb de valeurs orphelines distinctes
+  sample: string[]; // échantillon (max 20)
+}
+
+export interface DataHealthReport {
+  ok: boolean;
+  total: number;
+  checks: OrphanCheck[];
+}

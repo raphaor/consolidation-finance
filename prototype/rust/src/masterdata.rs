@@ -551,14 +551,14 @@ async fn remove(
 
 /// Ligne renvoyée par `GET /api/meta/references` : une référence du graphe.
 ///
-/// `target_table` est traduit en nom d'API master data quand la cible en a un
-/// (ex. `dim_scenario` → `scenarios`) ; sinon le nom SQL est conservé (ex.
-/// `dim_ruleset` / `dim_rule`, qui ne sont pas des tables master data CRUD).
-/// `table` (source) reste en nom SQL : le front filtre sur `stg_entry` /
-/// `sat_perimeter` pour dériver le mapping dimension → table.
+/// `table` (source) et `target_table` sont traduits en nom d'API master data
+/// quand la table en a un (ex. `dim_scenario` → `scenarios`, `sat_perimeter` →
+/// `perimeter`) ; sinon le nom SQL est conservé (ex. `stg_entry` qui n'est pas
+/// une table master data CRUD, ou `dim_ruleset` / `dim_rule`). Le front filtre
+/// donc sur `stg_entry` / `perimeter` pour dériver le mapping dimension → table.
 #[derive(serde::Serialize)]
 struct ReferenceDto {
-    table: &'static str,
+    table: String,
     column: &'static str,
     target_table: String,
     target_column: &'static str,
@@ -568,19 +568,111 @@ struct ReferenceDto {
 /// GET /api/meta/references — graphe des références (source de vérité unique pour
 /// les dropdowns contextuels du front, en remplacement des miroirs codés en dur).
 async fn get_references() -> Json<Vec<ReferenceDto>> {
+    // Traduit un nom de table SQL en nom d'API master data, en conservant le nom
+    // SQL pour les tables sans équivalent CRUD (stg_entry, dim_ruleset…).
+    let to_api = |sql: &'static str| {
+        api_name_for_sql(sql)
+            .map(str::to_string)
+            .unwrap_or_else(|| sql.to_string())
+    };
     let out = references::REFERENCES
         .iter()
         .map(|r| ReferenceDto {
-            table: r.table,
+            table: to_api(r.table),
             column: r.column,
-            target_table: api_name_for_sql(r.target_table)
-                .map(str::to_string)
-                .unwrap_or_else(|| r.target_table.to_string()),
+            target_table: to_api(r.target_table),
             target_column: r.target_column,
             required: r.required,
         })
         .collect();
     Json(out)
+}
+
+/// Une anomalie d'intégrité : des valeurs de `table.column` n'existent pas dans
+/// `target_table.target_column`. `count` = nb de valeurs orphelines distinctes,
+/// `sample` = échantillon (max 20).
+#[derive(serde::Serialize)]
+struct OrphanCheck {
+    table: String,
+    column: &'static str,
+    target_table: String,
+    target_column: &'static str,
+    count: i64,
+    sample: Vec<String>,
+}
+
+/// Rapport « santé des données » : agrège les orphelins sur tout le graphe.
+#[derive(serde::Serialize)]
+struct DataHealthReport {
+    ok: bool,
+    total: i64,
+    checks: Vec<OrphanCheck>,
+}
+
+/// GET /api/meta/health — rapport d'orphelins sur l'ensemble du graphe de
+/// références (généralise `validate::check_natures` à toutes les FK). Pour
+/// chaque référence, liste les valeurs présentes dans la source mais absentes de
+/// la cible (vide/NULL ignoré : c'est la nullabilité, pas un orphelin).
+///
+/// Sécurité : tables/colonnes proviennent du registre `const` `REFERENCES`
+/// (jamais de l'utilisateur) → interpolation sûre.
+async fn get_data_health(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<DataHealthReport>, AppError> {
+    let con = lock_con(&state)?;
+    let mut checks = Vec::new();
+    let mut total = 0i64;
+    for r in references::REFERENCES {
+        let where_orphan = format!(
+            "e.\"{col}\" IS NOT NULL AND e.\"{col}\" <> '' \
+             AND NOT EXISTS (SELECT 1 FROM {tt} t WHERE t.\"{tc}\" = e.\"{col}\")",
+            col = r.column,
+            tt = r.target_table,
+            tc = r.target_column,
+        );
+        let count_sql = format!(
+            "SELECT COUNT(DISTINCT e.\"{col}\") FROM {tbl} e WHERE {where_orphan}",
+            col = r.column,
+            tbl = r.table,
+        );
+        // Table source potentiellement absente selon le schéma → on tolère.
+        let count: i64 = match con.query_row(&count_sql, [], |row| row.get(0)) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        if count == 0 {
+            continue;
+        }
+        let sample_sql = format!(
+            "SELECT DISTINCT e.\"{col}\" AS v FROM {tbl} e WHERE {where_orphan} ORDER BY v LIMIT 20",
+            col = r.column,
+            tbl = r.table,
+        );
+        let mut sample = Vec::new();
+        if let Ok(mut stmt) = con.prepare(&sample_sql) {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                for v in rows.flatten() {
+                    sample.push(v);
+                }
+            }
+        }
+        total += count;
+        checks.push(OrphanCheck {
+            table: api_name_for_sql(r.table).unwrap_or(r.table).to_string(),
+            column: r.column,
+            target_table: api_name_for_sql(r.target_table)
+                .unwrap_or(r.target_table)
+                .to_string(),
+            target_column: r.target_column,
+            count,
+            sample,
+        });
+    }
+    Ok(Json(DataHealthReport {
+        ok: checks.is_empty(),
+        total,
+        checks,
+    }))
 }
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -590,4 +682,5 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list).post(create).put(update).delete(remove),
         )
         .route("/api/meta/references", get(get_references))
+        .route("/api/meta/health", get(get_data_health))
 }

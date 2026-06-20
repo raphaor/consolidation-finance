@@ -12,6 +12,7 @@
 
 import type {
   BilanRow,
+  DataHealthReport,
   DimensionInfo,
   HealthStatus,
   LevelCount,
@@ -201,6 +202,8 @@ export const api = {
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.
   references: () => getJson<ReferenceInfo[]>('/meta/references'),
+  // Rapport « santé des données » : orphelins sur tout le graphe de références.
+  dataHealth: () => getJson<DataHealthReport>('/meta/health'),
   dimensions: {
     list: () => getJson<DimensionInfo[]>('/meta/dimensions'),
     create: (body: { name: string; label: string }) =>

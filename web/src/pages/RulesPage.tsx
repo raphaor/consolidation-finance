@@ -148,12 +148,12 @@ const DIM_TO_TABLE_FALLBACK: DimToTable = {
 
 // Construit le mapping dimension → table depuis le graphe de références exposé
 // par l'API. On ne garde que les sources `stg_entry` (dimensions d'écriture) et
-// `sat_perimeter` (scope des règles, dont `methode`) : ce sont les colonnes
+// `perimeter` (scope des règles, dont `methode`) : ce sont les colonnes
 // pilotables dans l'éditeur. `target_table` est déjà un nom de table master data.
 function buildDimToTable(refs: ReferenceInfo[]): DimToTable {
   const out: DimToTable = {};
   for (const r of refs) {
-    if (r.table === 'stg_entry' || r.table === 'sat_perimeter') {
+    if (r.table === 'stg_entry' || r.table === 'perimeter') {
       out[r.column] = {
         table: r.target_table as MasterTable,
         pkCol: r.target_column,

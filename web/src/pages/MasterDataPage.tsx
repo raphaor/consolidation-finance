@@ -17,8 +17,14 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
-import type { ColumnDef, MasterTable, TableDef } from '../types';
+import type {
+  ColumnDef,
+  DataHealthReport,
+  MasterTable,
+  TableDef,
+} from '../types';
 import { MASTER_TABLES } from '../types';
+import { findReferenceDrift } from '../utils/referenceCheck';
 
 type Row = Record<string, unknown>;
 type FormState = { mode: 'create' } | { mode: 'edit'; row: Row } | null;
@@ -286,6 +292,47 @@ export function MasterDataPage() {
   const [notice, setNotice] = useState<Notice>(null);
   const [formState, setFormState] = useState<FormState>(null);
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
+  // Cohérence des optionsFrom front vs graphe de références serveur (autoritaire).
+  const [refDrift, setRefDrift] = useState<string[]>([]);
+  // Rapport « santé des données » (orphelins), à la demande.
+  const [health, setHealth] = useState<DataHealthReport | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+
+  const runHealth = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      const report = await api.dataHealth();
+      setHealth(report);
+    } catch (err) {
+      setNotice({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'erreur',
+      });
+    } finally {
+      setHealthLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const refs = await api.references();
+        if (cancelled) return;
+        const drift = findReferenceDrift(refs);
+        setRefDrift(drift);
+        if (drift.length > 0) {
+          console.warn('Dérive optionsFrom vs références serveur :', drift);
+        }
+      } catch {
+        // Endpoint indisponible (serveur obsolète) : on ne signale rien.
+        if (!cancelled) setRefDrift([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -428,6 +475,15 @@ export function MasterDataPage() {
           <button type="button" className="btn" onClick={load} disabled={loading}>
             {loading ? 'Chargement…' : 'Rafraîchir'}
           </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void runHealth()}
+            disabled={healthLoading}
+            title="Vérifie l'intégrité référentielle de toutes les données (orphelins)"
+          >
+            {healthLoading ? 'Vérification…' : 'Santé des données'}
+          </button>
         </div>
       </div>
 
@@ -438,6 +494,45 @@ export function MasterDataPage() {
       {error && <div className="alert alert--error">Erreur : {error}</div>}
       {notice && (
         <div className={`alert alert--${notice.kind}`}>{notice.text}</div>
+      )}
+      {refDrift.length > 0 && (
+        <div className="alert alert--error" role="alert">
+          ⚠ Incohérence config front vs références serveur :
+          <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+            {refDrift.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {health !== null && (
+        <div
+          className={`alert alert--${health.ok ? 'success' : 'error'}`}
+          role="alert"
+        >
+          {health.ok ? (
+            <>✓ Intégrité référentielle OK — aucun orphelin.</>
+          ) : (
+            <>
+              ⚠ {health.total} valeur(s) orpheline(s) détectée(s) :
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                {health.checks.map((c) => (
+                  <li key={`${c.table}.${c.column}`}>
+                    <strong>
+                      {c.table}.{c.column}
+                    </strong>{' '}
+                    → {c.target_table}.{c.target_column} : {c.count} orphelin(s)
+                    {c.sample.length > 0 && (
+                      <> ({c.sample.join(', ')}
+                        {c.count > c.sample.length ? ', …' : ''})</>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       )}
 
       <div className="table-wrap">
