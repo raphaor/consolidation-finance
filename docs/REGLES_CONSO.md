@@ -88,10 +88,17 @@ Cas particuliers :
 
 ### 4.3 Destination
 
-Définit où et comment écrire l'écriture générée. Pour **chaque dimension** de l'écriture destination, trois modes possibles :
+Définit où et comment écrire l'écriture générée. Pour **chaque dimension pilotable** de l'écriture destination, quatre modes possibles :
 
 | Mode | Sémantique | Exemple |
 |------|------------|---------|
+| `inherit` | La valeur du grain source est conservée. | `partner` hérité pour l'audit. |
+| `override` | La valeur est forcée à une constante saisie. | `nature` → `2ELI`. |
+| `null` | La valeur est vidée (`NULL`). | `partner` vidé sur la ligne principale. |
+| `map` | La valeur est **résolue en traversant une caractéristique** du membre source. `via` = la caractéristique N1, `attr` = l'attribut N2 dont la valeur surcharge la dimension. La dimension écrite doit **correspondre à la dimension cible de l'attribut** (validé au moteur). **INNER JOIN** : seuls les membres *classés* (ayant une valeur pour la caractéristique) génèrent une écriture. | `account` → map `comportement.compte_destination` ; `nature` → map `comportement.nature` (même caractéristique, **multi-cible**). |
+
+> **Mode `map` — caractéristiques N1/N2.** Une *caractéristique N1* (ex. `comportement`) regroupe les membres d'une dimension de base (les comptes) ; chacune de ses valeurs porte des *attributs N2* typés pointant vers d'autres dimensions (`compte_destination → comptes`, `nature → natures`). En `map`, le moteur joint `e.<base> → master_data.<N1> → car_<N1>.<attr>`. C'est la réalisation générique du mapping par compte source de [R3](#7-questions-ouvertes) : la règle ne liste pas les comptes ni ne code en dur le compte de liaison — elle route selon le comportement attribué au compte. Définition et affectation des caractéristiques : onglet **Caractéristiques** de l'UI. Implémentation : `prototype/rust/src/characteristics.rs` + `rules.rs` (parsing/validation/`exec_operation`).
+
 Les dimensions d'une écriture se répartissent en deux catégories :
 
 **Dimensions toujours héritées** (non pilotables par les règles) :
