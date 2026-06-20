@@ -16,20 +16,37 @@
 use duckdb::Connection;
 
 /// Un lien référentiel : `table.column` doit exister dans `target_table.target_column`.
+///
+/// `required` = la colonne est **non-nullable** : une valeur vide/absente est
+/// rejetée à l'écriture (cf. `masterdata::validate_references`). Les colonnes
+/// nullables (auto-références parent, attributs optionnels de scénario…) restent
+/// à `false` : vide y est autorisé (= NULL).
 pub struct Reference {
     pub table: &'static str,
     pub column: &'static str,
     pub target_table: &'static str,
     pub target_column: &'static str,
+    pub required: bool,
 }
 
+/// Référence **optionnelle** (colonne nullable) : vide autorisé.
 const fn r(
     table: &'static str,
     column: &'static str,
     target_table: &'static str,
     target_column: &'static str,
 ) -> Reference {
-    Reference { table, column, target_table, target_column }
+    Reference { table, column, target_table, target_column, required: false }
+}
+
+/// Référence **obligatoire** (colonne non-nullable) : vide rejeté.
+const fn rq(
+    table: &'static str,
+    column: &'static str,
+    target_table: &'static str,
+    target_column: &'static str,
+) -> Reference {
+    Reference { table, column, target_table, target_column, required: true }
 }
 
 /// Le graphe complet des références du modèle.
@@ -47,7 +64,7 @@ pub const REFERENCES: &[Reference] = &[
     r("dim_scenario", "ruleset_code", "dim_ruleset", "code"),
     r("dim_scenario", "rate_set", "dim_rate_set", "code"),
     // dim_entity
-    r("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso"),
+    rq("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso"),
     r("dim_entity", "entite_parent", "dim_entity", "code"),
     // dim_account
     r("dim_account", "sous_classe", "dim_sous_classe", "code"),
@@ -55,30 +72,31 @@ pub const REFERENCES: &[Reference] = &[
     // dim_flow (auto-références : flux d'écart / de report)
     r("dim_flow", "flux_ecart", "dim_flow", "code"),
     r("dim_flow", "flux_de_report", "dim_flow", "code"),
-    // sat_perimeter
-    r("sat_perimeter", "entity", "dim_entity", "code"),
-    r("sat_perimeter", "scenario", "dim_scenario", "code"),
-    r("sat_perimeter", "period", "dim_period", "code"),
-    r("sat_perimeter", "methode", "dim_method", "code"),
-    // sat_exchange_rate
-    r("sat_exchange_rate", "rate_set", "dim_rate_set", "code"),
-    r("sat_exchange_rate", "currency_source", "dim_currency", "code_iso"),
-    r("sat_exchange_rate", "period", "dim_period", "code"),
+    // sat_perimeter (entity/scenario/period = PK ; methode obligatoire)
+    rq("sat_perimeter", "entity", "dim_entity", "code"),
+    rq("sat_perimeter", "scenario", "dim_scenario", "code"),
+    rq("sat_perimeter", "period", "dim_period", "code"),
+    rq("sat_perimeter", "methode", "dim_method", "code"),
+    // sat_exchange_rate (rate_set/currency_source/period = PK)
+    rq("sat_exchange_rate", "rate_set", "dim_rate_set", "code"),
+    rq("sat_exchange_rate", "currency_source", "dim_currency", "code_iso"),
+    rq("sat_exchange_rate", "period", "dim_period", "code"),
     // Écritures (stg_entry — mêmes cibles que fact_entry).
     // `analysis` / `analysis2` et les dimensions custom sont libres (pas de ref).
-    r("stg_entry", "scenario", "dim_scenario", "code"),
-    r("stg_entry", "entity", "dim_entity", "code"),
-    r("stg_entry", "entry_period", "dim_period", "code"),
-    r("stg_entry", "period", "dim_period", "code"),
-    r("stg_entry", "account", "dim_account", "code"),
-    r("stg_entry", "flow", "dim_flow", "code"),
-    r("stg_entry", "currency", "dim_currency", "code_iso"),
-    r("stg_entry", "nature", "dim_nature", "code"),
+    // `partner` / `share` sont nullables ; les autres dimensions sont obligatoires.
+    rq("stg_entry", "scenario", "dim_scenario", "code"),
+    rq("stg_entry", "entity", "dim_entity", "code"),
+    rq("stg_entry", "entry_period", "dim_period", "code"),
+    rq("stg_entry", "period", "dim_period", "code"),
+    rq("stg_entry", "account", "dim_account", "code"),
+    rq("stg_entry", "flow", "dim_flow", "code"),
+    rq("stg_entry", "currency", "dim_currency", "code_iso"),
+    rq("stg_entry", "nature", "dim_nature", "code"),
     r("stg_entry", "partner", "dim_entity", "code"),
     r("stg_entry", "share", "dim_entity", "code"),
     // Jeux de règles
-    r("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code"),
-    r("dim_ruleset_item", "rule_code", "dim_rule", "code"),
+    rq("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code"),
+    rq("dim_ruleset_item", "rule_code", "dim_rule", "code"),
 ];
 
 /// Les références portées par une table donnée.

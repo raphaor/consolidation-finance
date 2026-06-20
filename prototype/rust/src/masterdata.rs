@@ -300,12 +300,23 @@ fn validate_references(
     con: &duckdb::Connection,
 ) -> Result<(), AppError> {
     let mut bad = Vec::new();
+    let mut missing = Vec::new();
     for r in references::references_for(def.sql_name) {
-        let Some(v) = obj.get(r.column) else { continue };
-        let Some(s) = v.as_str() else { continue };
-        if s.is_empty() {
-            continue;
-        }
+        // Une valeur est « vide » si la colonne est absente, JSON null, ou chaîne
+        // vide. Sur une référence obligatoire (non-nullable), c'est rejeté ;
+        // sinon (nullable) c'est toléré (= NULL).
+        let s = match obj.get(r.column) {
+            Some(JsonValue::String(s)) if !s.is_empty() => s.as_str(),
+            None | Some(JsonValue::Null) | Some(JsonValue::String(_)) => {
+                if r.required {
+                    missing.push(r.column);
+                }
+                continue;
+            }
+            // Valeur non-textuelle (nombre, booléen…) : pas un code référentiel,
+            // on ne vérifie pas son existence.
+            Some(_) => continue,
+        };
         // Auto-référence : la ligne se référence elle-même par sa PK.
         if r.target_table == def.sql_name {
             if let Some(own) = obj.get(r.target_column).and_then(|x| x.as_str()) {
@@ -320,6 +331,12 @@ fn validate_references(
                 r.column, s, r.target_table, r.target_column
             ));
         }
+    }
+    if !missing.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "champ(s) obligatoire(s) non renseigné(s) : {}",
+            missing.join(", ")
+        )));
     }
     if !bad.is_empty() {
         return Err(AppError::bad_request(format!(

@@ -33,7 +33,6 @@ function toFormValue(col: ColumnDef, value: unknown): string {
 function initialValues(
   def: TableDef,
   seed: Row | null,
-  optionsData: Record<string, Row[]>,
 ): Record<string, string> {
   const v: Record<string, string> = {};
   for (const col of def.columns) {
@@ -42,12 +41,14 @@ function initialValues(
     } else if (col.type === 'select' && col.options && col.options.length > 0) {
       v[col.name] = col.options[0];
     } else if (col.type === 'select' && col.optionsFrom && !col.nullable) {
-      // Défaut = 1ʳᵉ valeur de la table source. Sans ça, un select non-nullable
-      // partait à '' tout en AFFICHANT sa 1ʳᵉ option → valeur vide soumise
-      // silencieusement (ex. périmètre.scenario non renseigné).
-      const rows = optionsData[col.optionsFrom.table] ?? [];
-      v[col.name] =
-        rows.length > 0 ? String(rows[0][col.optionsFrom.value] ?? '') : '';
+      // Choix explicite obligatoire : on laisse vide pour forcer la sélection
+      // d'une valeur réelle. `FieldInput` affiche alors le placeholder
+      // « — choisir — » (et la soumission est bloquée tant que vide, cf.
+      // RowForm.submit). On NE pré-remplit PAS sur la 1ʳᵉ valeur de la table
+      // source : ça évitait le « vide silencieux » mais introduisait un
+      // « mauvais défaut silencieux » (ex. périmètre.period pré-rempli à 2023
+      // au lieu de 2024 → règle interco qui ne matchait rien).
+      v[col.name] = '';
     } else if (col.type === 'bool') {
       v[col.name] = 'false';
     } else {
@@ -180,7 +181,7 @@ function RowForm({
 }: RowFormProps) {
   const isEdit = initial !== null;
   const [values, setValues] = useState<Record<string, string>>(() =>
-    initialValues(tableDef, initial, optionsData),
+    initialValues(tableDef, initial),
   );
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -191,8 +192,28 @@ function RowForm({
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setSubmitting(true);
     setFormError(null);
+
+    // Choix explicite obligatoire : tout select `optionsFrom` non-nullable doit
+    // avoir une valeur (cf. initialValues — ils partent vides). Bloque la
+    // soumission plutôt que d'envoyer une FK vide.
+    const missing = tableDef.columns.filter(
+      (col) =>
+        col.type === 'select' &&
+        col.optionsFrom &&
+        !col.nullable &&
+        (values[col.name] ?? '') === '',
+    );
+    if (missing.length > 0) {
+      setFormError(
+        `Champ(s) obligatoire(s) à renseigner : ${missing
+          .map((c) => c.label)
+          .join(', ')}.`,
+      );
+      return;
+    }
+
+    setSubmitting(true);
     try {
       await onSubmit(values);
     } catch (err) {
