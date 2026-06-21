@@ -54,6 +54,7 @@
   - [x] `types.ts` : `PipelineCounts`/`LEVELS` à 3 niveaux ; `Scenario`/`ScenarioSummary` + `a_nouveau_scenario` ; colonne CRUD `a_nouveau_scenario` (scenarios) + `flux_a_nouveau` (flows)
   - [x] `PipelinePage.tsx` : STEP `reclassified` retiré, ligne « Conso d'à-nouveau » affichée ; `RulesPage.tsx` : `LEVELS_LIST` à 3 niveaux
   - [x] `npm run build` (tsc + vite) vert ; suite Rust verte après recompil serveur
+  - [x] `references.rs` : auto-références `dim_scenario.a_nouveau_scenario → dim_scenario.code` et `dim_flow.flux_a_nouveau → dim_flow.code` (sinon la vue master data signale « optionsFrom sans référence serveur correspondante »). Validation à l'écriture + santé des données couvrent désormais les 2 champs.
 - [ ] **Phase 7 — Tests & règles** : règles corporate (UTILISATEUR), tests Rust, golden, recette Python (écarts préfixe 2)
 
 ## Décisions clés (rappel, détail dans A_NOUVEAU.md)

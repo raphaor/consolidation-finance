@@ -63,15 +63,18 @@ pub const REFERENCES: &[Reference] = &[
     r("dim_scenario", "variant", "dim_variant", "code"),
     r("dim_scenario", "ruleset_code", "dim_ruleset", "code"),
     r("dim_scenario", "rate_set", "dim_rate_set", "code"),
+    // Conso d'à-nouveau : auto-référence vers un autre scénario (N-1 figé).
+    r("dim_scenario", "a_nouveau_scenario", "dim_scenario", "code"),
     // dim_entity
     rq("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso"),
     r("dim_entity", "entite_parent", "dim_entity", "code"),
     // dim_account
     r("dim_account", "sous_classe", "dim_sous_classe", "code"),
     r("dim_account", "compte_parent", "dim_account", "code"),
-    // dim_flow (auto-références : flux d'écart / de report)
+    // dim_flow (auto-références : flux d'écart / de report / d'à-nouveau)
     r("dim_flow", "flux_ecart", "dim_flow", "code"),
     r("dim_flow", "flux_de_report", "dim_flow", "code"),
+    r("dim_flow", "flux_a_nouveau", "dim_flow", "code"),
     // sat_perimeter (entity/scenario/period = PK ; methode obligatoire)
     rq("sat_perimeter", "entity", "dim_entity", "code"),
     rq("sat_perimeter", "scenario", "dim_scenario", "code"),
