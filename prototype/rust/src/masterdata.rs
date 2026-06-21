@@ -1,9 +1,19 @@
 //! CRUD générique sur les tables master data (dimensions + satellites +
-//! catalogues scénario v2).
+//! catalogues scénario v2 + tables dynamiques des caractéristiques/listes).
 //!
-//! Expose `router()` qui monte les routes `/api/md/{table}` (GET/POST/PUT/DELETE)
-//! sur le serveur Axum. La table est validée contre une whitelist statique
-//! (`TABLES`) : aucun nom de table ni de colonne n'est interpolé depuis
+//! Expose `router()` qui monte les routes :
+//! - `GET /api/md` — liste des tables navigables (natives + `car_<code>` + `lst_<code>`) ;
+//! - `GET /api/md/{table}/schema` — schéma complet d'une table (colonnes + métadonnées FK) ;
+//! - `GET/POST/PUT/DELETE /api/md/{table}` — CRUD sur les lignes.
+//!
+//! La résolution d'une table est **dynamique** ([`resolve_table`]) :
+//! - tables natives de la whitelist [`TABLES`] ;
+//! - tables de valeurs `car_<code>` (caractéristiques) et `lst_<code>` (listes) ;
+//! - colonnes ajoutées dynamiquement aux tables natives par les caractéristiques
+//!   (rattachement N1) et les références directes (patron B) — découvertes via le
+//!   graphe [`crate::references::all_references`].
+//!
+//! Sécurité : aucun nom de table ni de colonne n'est interpolé depuis
 //! l'utilisateur — seules les valeurs passent par des `?` paramétrés.
 
 use axum::{
@@ -21,6 +31,7 @@ use crate::state::{db_err, lock_con, AppError, AppState};
 
 struct TableDef {
     api_name: &'static str,
+    label: &'static str,
     sql_name: &'static str,
     columns: &'static [&'static str],
     pk: &'static [&'static str],
@@ -30,24 +41,28 @@ const TABLES: &[TableDef] = &[
     // --- Catalogues v2 (dépendances amont de dim_scenario) ---
     TableDef {
         api_name: "scenario_categories",
+        label: "Phases",
         sql_name: "dim_scenario_category",
         columns: &["code", "libelle"],
         pk: &["code"],
     },
     TableDef {
         api_name: "variants",
+        label: "Variantes",
         sql_name: "dim_variant",
         columns: &["code", "libelle"],
         pk: &["code"],
     },
     TableDef {
         api_name: "rate_sets",
+        label: "Jeux de taux",
         sql_name: "dim_rate_set",
         columns: &["code", "libelle"],
         pk: &["code"],
     },
     TableDef {
         api_name: "perimeter_sets",
+        label: "Jeux de périmètre",
         sql_name: "dim_perimeter_set",
         columns: &["code", "libelle"],
         pk: &["code"],
@@ -56,6 +71,7 @@ const TABLES: &[TableDef] = &[
     //     ruleset_code(nullable)/rate_set/statut (cf. SPEC_SCENARIO_V2_TECH §1.2) ---
     TableDef {
         api_name: "scenarios",
+        label: "Définitions de consolidation",
         sql_name: "dim_scenario",
         columns: &[
             "code",
@@ -74,70 +90,102 @@ const TABLES: &[TableDef] = &[
     },
     TableDef {
         api_name: "entities",
+        label: "Entités",
         sql_name: "dim_entity",
-        columns: &["code", "libelle", "devise_fonctionnelle", "entite_parent", "statut"],
+        columns: &[
+            "code",
+            "libelle",
+            "devise_fonctionnelle",
+            "entite_parent",
+            "statut",
+        ],
         pk: &["code"],
     },
     TableDef {
         api_name: "periods",
+        label: "Périodes",
         sql_name: "dim_period",
-        columns: &["code", "libelle", "type", "date_debut", "date_fin", "statut"],
+        columns: &[
+            "code",
+            "libelle",
+            "type",
+            "date_debut",
+            "date_fin",
+            "statut",
+        ],
         pk: &["code"],
     },
     TableDef {
         api_name: "accounts",
+        label: "Comptes",
         sql_name: "dim_account",
         // `compte_parent` (réf. directe) et le regroupement par nature
-        // (caractéristique) ne sont plus des colonnes en dur : ils sont gérés via
-        // la page « Attributs de dimension » (characteristics / custom_references).
+        // (caractéristique) ne sont pas des colonnes en dur : ils sont gérés via
+        // la page « Attributs de dimension » (characteristics / custom_references)
+        // et **découverts dynamiquement** par [`resolve_table`].
         // `flow_scheme` (nullable) sélectionne le schéma de flux du compte (Q32).
         columns: &["code", "libelle", "classe", "sous_classe", "flow_scheme"],
         pk: &["code"],
     },
     TableDef {
         api_name: "sous_classes",
+        label: "Sous-classes",
         sql_name: "dim_sous_classe",
         columns: &["code", "libelle", "classe"],
         pk: &["code"],
     },
     TableDef {
         api_name: "flows",
+        label: "Flux",
         sql_name: "dim_flow",
         columns: &["code", "libelle"],
         pk: &["code"],
     },
     TableDef {
         api_name: "flow_schemes",
+        label: "Schémas de flux",
         sql_name: "dim_flow_scheme",
         columns: &["code", "libelle"],
         pk: &["code"],
     },
     TableDef {
         api_name: "flow_scheme_items",
+        label: "Articulation des flux (par schéma)",
         sql_name: "sat_flow_scheme_item",
-        columns: &["scheme", "flow", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
+        columns: &[
+            "scheme",
+            "flow",
+            "taux_conversion",
+            "flux_ecart",
+            "flux_de_report",
+            "flux_a_nouveau",
+        ],
         pk: &["scheme", "flow"],
     },
     TableDef {
         api_name: "currencies",
+        label: "Devises",
         sql_name: "dim_currency",
         columns: &["code_iso", "libelle", "decimales"],
         pk: &["code_iso"],
     },
     TableDef {
         api_name: "natures",
+        label: "Natures",
         sql_name: "dim_nature",
         columns: &["code", "libelle", "rules"],
         pk: &["code"],
     },
     TableDef {
         api_name: "methods",
+        label: "Méthodes de consolidation",
         sql_name: "dim_method",
         columns: &["code", "libelle", "consolidated"],
         pk: &["code"],
     },
     TableDef {
         api_name: "perimeter",
+        label: "Périmètre",
         sql_name: "sat_perimeter",
         columns: &[
             "perimeter_set",
@@ -155,8 +203,15 @@ const TABLES: &[TableDef] = &[
     // position pour cohérence avec la PK (cf. SPEC_SCENARIO_V2_TECH §1.3).
     TableDef {
         api_name: "rates",
+        label: "Taux de change",
         sql_name: "sat_exchange_rate",
-        columns: &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
+        columns: &[
+            "rate_set",
+            "currency_source",
+            "period",
+            "taux_close",
+            "taux_moyen",
+        ],
         pk: &["rate_set", "currency_source", "period"],
     },
 ];
@@ -168,8 +223,20 @@ fn find_table(api: &str) -> Option<&'static TableDef> {
 /// Nom d'API (master data) correspondant à une table SQL, s'il en existe un.
 /// Sert à traduire les cibles du graphe de références (`references.rs` raisonne
 /// en noms SQL) vers les identifiants que le front consomme (`/api/md/{table}`).
+/// Pour les tables dynamiques (`car_<code>`, `lst_<code>`), le nom SQL est aussi
+/// le nom d'API — on le renvoie tel quel.
+fn sql_to_api(sql: &str) -> String {
+    api_name_for_sql(sql).unwrap_or(sql).to_string()
+}
+
+/// Variante stricte (tables natives uniquement) — utilisée par les endpoints
+/// historiques (`get_references`, `get_data_health`) qui raisonnent sur la
+/// whitelist statique pour produire les noms d'API.
 fn api_name_for_sql(sql: &str) -> Option<&'static str> {
-    TABLES.iter().find(|t| t.sql_name == sql).map(|t| t.api_name)
+    TABLES
+        .iter()
+        .find(|t| t.sql_name == sql)
+        .map(|t| t.api_name)
 }
 
 fn quote_ident(col: &str) -> String {
@@ -268,7 +335,94 @@ pub fn run_query(
     Ok(out)
 }
 
-fn select_all(def: &TableDef, con: &duckdb::Connection) -> Result<Vec<JsonValue>, AppError> {
+// ─────────────────────── Résolution dynamique des tables ───────────────────────
+
+/// Définition de table « possédée » : noms et colonnes alloués à l'exécution
+/// pour pouvoir exprimer :
+/// - les tables natives étendues de leurs colonnes dynamiques (caractéristiques,
+///   références directes ajoutées par ALTER TABLE) ;
+/// - les tables de valeurs `car_<code>` et `lst_<code>` qui ne sont pas dans la
+///   whitelist statique.
+struct OwnedTableDef {
+    api_name: String,
+    label: String,
+    sql_name: String,
+    columns: Vec<String>,
+    pk: Vec<String>,
+}
+
+/// Résout une table demandée par son nom d'API (`/api/md/{table}`) en une
+/// [`OwnedTableDef`] complète, en découvrant dynamiquement :
+/// - pour une table native (`dim_<base>`) : les colonnes ajoutées par les
+///   caractéristiques et les références directes (via le graphe
+///   [`references::all_references`]) ;
+/// - pour `car_<code>` : les attributs N2 de la caractéristique ;
+/// - pour `lst_<code>` : juste `code`, `libelle`.
+///
+/// Renvoie `Ok(None)` si le nom ne correspond à aucune table connue (native ou
+/// enregistrée). La résolution d'une table native ne touche pas la base ; celle
+/// d'une `car_` / `lst_` vérifie l'existence du code dans les registres.
+fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTableDef>, AppError> {
+    // 1. Table native (whitelist statique) étendue des colonnes dynamiques.
+    if let Some(def) = find_table(api) {
+        let native: Vec<String> = def.columns.iter().map(|s| s.to_string()).collect();
+        // On complète avec toute colonne dynamique référencée sur cette table et
+        // absente de la whitelist native (caractéristiques N1 + références
+        // directes patron B). On s'appuie sur le graphe de références, déjà
+        // construit par `references::dynamic_references` à partir des registres.
+        let mut cols = native.clone();
+        for r in references::all_references(con) {
+            if r.table == def.sql_name && !cols.contains(&r.column) {
+                cols.push(r.column);
+            }
+        }
+        return Ok(Some(OwnedTableDef {
+            api_name: def.api_name.to_string(),
+            label: def.label.to_string(),
+            sql_name: def.sql_name.to_string(),
+            columns: cols,
+            pk: def.pk.iter().map(|s| s.to_string()).collect(),
+        }));
+    }
+
+    // 2. Table de valeurs d'une caractéristique : car_<code>.
+    if let Some(code) = api.strip_prefix("car_") {
+        // `load_all` filtre déjà l'absence éventuelle des registres (premier
+        // démarrage). On recherche la caractéristique demandée.
+        let chars = crate::characteristics::load_all(con).map_err(db_err)?;
+        if let Some(c) = chars.into_iter().find(|c| c.code == code) {
+            let mut cols = vec!["code".to_string(), "libelle".to_string()];
+            cols.extend(c.attributes.iter().map(|a| a.name.clone()));
+            return Ok(Some(OwnedTableDef {
+                api_name: format!("car_{code}"),
+                label: c.libelle,
+                sql_name: format!("car_{code}"),
+                columns: cols,
+                pk: vec!["code".to_string()],
+            }));
+        }
+        return Ok(None);
+    }
+
+    // 3. Table de valeurs d'une liste : lst_<code>.
+    if let Some(code) = api.strip_prefix("lst_") {
+        let lists = crate::value_lists::load_all(con).map_err(db_err)?;
+        if let Some(l) = lists.into_iter().find(|l| l.code == code) {
+            return Ok(Some(OwnedTableDef {
+                api_name: format!("lst_{code}"),
+                label: l.libelle,
+                sql_name: format!("lst_{code}"),
+                columns: vec!["code".to_string(), "libelle".to_string()],
+                pk: vec!["code".to_string()],
+            }));
+        }
+        return Ok(None);
+    }
+
+    Ok(None)
+}
+
+fn select_all(def: &OwnedTableDef, con: &duckdb::Connection) -> Result<Vec<JsonValue>, AppError> {
     let cols = def
         .columns
         .iter()
@@ -280,7 +434,7 @@ fn select_all(def: &TableDef, con: &duckdb::Connection) -> Result<Vec<JsonValue>
 }
 
 fn fetch_one(
-    def: &TableDef,
+    def: &OwnedTableDef,
     pk_vals: &[(String, JsonValue)],
     con: &duckdb::Connection,
 ) -> Result<Option<JsonValue>, AppError> {
@@ -304,8 +458,11 @@ fn fetch_one(
 
 /// Rejette les champs JSON qui ne correspondent à aucune colonne connue.
 /// Évite la perte silencieuse de données (ex: `label` au lieu de `libelle`).
-fn reject_unknown_fields(def: &TableDef, obj: &Map<String, JsonValue>) -> Result<(), AppError> {
-    let known: std::collections::HashSet<&str> = def.columns.iter().copied().collect();
+fn reject_unknown_fields(
+    def: &OwnedTableDef,
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    let known: std::collections::HashSet<&str> = def.columns.iter().map(|s| s.as_str()).collect();
     let unknown: Vec<&str> = obj
         .keys()
         .filter(|k| !known.contains(k.as_str()))
@@ -326,14 +483,14 @@ fn reject_unknown_fields(def: &TableDef, obj: &Map<String, JsonValue>) -> Result
 /// ligne elle-même, ex. `dim_flow.flux_de_report = 'F99'` sur la ligne F99) et
 /// ignore les colonnes non-textuelles ou vides.
 fn validate_references(
-    def: &TableDef,
+    def: &OwnedTableDef,
     obj: &Map<String, JsonValue>,
     con: &duckdb::Connection,
 ) -> Result<(), AppError> {
     let mut bad = Vec::new();
     let mut missing: Vec<String> = Vec::new();
     // `all_references` = graphe statique + références dynamiques (caractéristiques
-    // N1/N2). Filtré sur la table éditée.
+    // N1/N2 + références directes patron B). Filtré sur la table éditée.
     let all = references::all_references(con);
     for r in all.iter().filter(|r| r.table == def.sql_name) {
         // Une valeur est « vide » si la colonne est absente, JSON null, ou chaîne
@@ -381,32 +538,38 @@ fn validate_references(
     Ok(())
 }
 
-fn pk_from_body(def: &TableDef, body: &JsonValue) -> Result<Vec<(String, JsonValue)>, AppError> {
+fn pk_from_body(
+    def: &OwnedTableDef,
+    body: &JsonValue,
+) -> Result<Vec<(String, JsonValue)>, AppError> {
     let obj = body
         .as_object()
         .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?;
     let mut out = Vec::with_capacity(def.pk.len());
-    for col in def.pk {
-        let val = obj.get(*col).cloned().ok_or_else(|| {
-            AppError::bad_request(format!("colonne PK manquante : {col}"))
-        })?;
+    for col in &def.pk {
+        let val = obj
+            .get(col.as_str())
+            .cloned()
+            .ok_or_else(|| AppError::bad_request(format!("colonne PK manquante : {col}")))?;
         if val.is_null() {
             return Err(AppError::bad_request(format!("colonne PK nulle : {col}")));
         }
-        out.push((col.to_string(), val));
+        out.push((col.clone(), val));
     }
     Ok(out)
 }
+
+// ───────────────────────────── HTTP — CRUD lignes ──────────────────────────────
 
 async fn list(
     Path(table): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<JsonValue>>, AppError> {
-    let def = find_table(&table)
-        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
     let rows = {
         let con = lock_con(&state)?;
-        select_all(def, &con)?
+        let def = resolve_table(&con, &table)?
+            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+        select_all(&def, &con)?
     };
     Ok(Json(rows))
 }
@@ -416,26 +579,25 @@ async fn create(
     State(state): State<Arc<AppState>>,
     Json(body): Json<JsonValue>,
 ) -> Result<(StatusCode, Json<JsonValue>), AppError> {
-    let def = find_table(&table)
-        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
     let obj = body
         .as_object()
         .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?
         .clone();
 
-    reject_unknown_fields(def, &obj)?;
-
     let result = {
         let con = lock_con(&state)?;
-        let pk_vals = pk_from_body(def, &JsonValue::Object(obj.clone()))?;
-        if fetch_one(def, &pk_vals, &con)?.is_some() {
+        let def = resolve_table(&con, &table)?
+            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+        reject_unknown_fields(&def, &obj)?;
+        let pk_vals = pk_from_body(&def, &JsonValue::Object(obj.clone()))?;
+        if fetch_one(&def, &pk_vals, &con)?.is_some() {
             return Err(AppError::conflict("déjà existant"));
         }
-        validate_references(def, &obj, &con)?;
+        validate_references(&def, &obj, &con)?;
         let mut cols = Vec::new();
         let mut vals: Vec<DbValue> = Vec::new();
-        for col in def.columns {
-            if let Some(v) = obj.get(*col) {
+        for col in &def.columns {
+            if let Some(v) = obj.get(col.as_str()) {
                 cols.push(quote_ident(col));
                 vals.push(json_to_db_value(v));
             }
@@ -451,7 +613,7 @@ async fn create(
             placeholders
         );
         con.execute(&sql, params_from_iter(vals)).map_err(db_err)?;
-        fetch_one(def, &pk_vals, &con)?
+        fetch_one(&def, &pk_vals, &con)?
     };
     match result {
         Some(row) => Ok((StatusCode::CREATED, Json(row))),
@@ -467,29 +629,28 @@ async fn update(
     State(state): State<Arc<AppState>>,
     Json(body): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, AppError> {
-    let def = find_table(&table)
-        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
     let obj = body
         .as_object()
         .ok_or_else(|| AppError::bad_request("body doit être un objet JSON"))?
         .clone();
 
-    reject_unknown_fields(def, &obj)?;
-
     let result = {
         let con = lock_con(&state)?;
-        let pk_vals = pk_from_body(def, &JsonValue::Object(obj.clone()))?;
-        if fetch_one(def, &pk_vals, &con)?.is_none() {
+        let def = resolve_table(&con, &table)?
+            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+        reject_unknown_fields(&def, &obj)?;
+        let pk_vals = pk_from_body(&def, &JsonValue::Object(obj.clone()))?;
+        if fetch_one(&def, &pk_vals, &con)?.is_none() {
             return Err(AppError::not_found("introuvable"));
         }
-        validate_references(def, &obj, &con)?;
+        validate_references(&def, &obj, &con)?;
         let mut sets = Vec::new();
         let mut vals: Vec<DbValue> = Vec::new();
-        for col in def.columns {
-            if def.pk.iter().any(|p| *p == *col) {
+        for col in &def.columns {
+            if def.pk.iter().any(|p| p == col) {
                 continue;
             }
-            if let Some(v) = obj.get(*col) {
+            if let Some(v) = obj.get(col.as_str()) {
                 sets.push(format!("{} = ?", quote_ident(col)));
                 vals.push(json_to_db_value(v));
             }
@@ -512,7 +673,7 @@ async fn update(
             }
             con.execute(&sql, params_from_iter(vals)).map_err(db_err)?;
         }
-        fetch_one(def, &pk_vals, &con)?
+        fetch_one(&def, &pk_vals, &con)?
     };
     match result {
         Some(row) => Ok(Json(row)),
@@ -526,40 +687,42 @@ async fn remove(
     Query(query): Query<Vec<(String, String)>>,
     body_bytes: axum::body::Bytes,
 ) -> Result<Json<JsonValue>, AppError> {
-    let def = find_table(&table)
-        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
-
-    // PK depuis query string ou body JSON (query string prioritaire)
-    let pk_vals: Vec<(String, JsonValue)> = {
-        let from_query: Vec<(String, JsonValue)> = def
-            .pk
-            .iter()
-            .filter_map(|col| {
-                query
-                    .iter()
-                    .find(|(k, _)| k == *col)
-                    .map(|(_, v)| (col.to_string(), JsonValue::String(v.clone())))
-            })
-            .collect();
-
-        if from_query.len() == def.pk.len() {
-            from_query
-        } else if !body_bytes.is_empty() {
-            let body: JsonValue = serde_json::from_slice(&body_bytes)
-                .map_err(|_| AppError::bad_request("body JSON invalide"))?;
-            pk_from_body(def, &body)?
-        } else {
-            let pk_cols = def.pk.join(", ");
-            return Err(AppError::bad_request(format!(
-                "PK manquante. Passez-la en query string (?{pk_cols}=valeur) ou dans le body JSON.\n\
-                 Exemple : DELETE /api/md/{table}?{pk_cols}=valeur"
-            )));
-        }
-    };
-
-    let deleted = {
+    // On a besoin de la définition (notamment la PK) avant de pouvoir interpréter
+    // les paramètres de suppression : on locke la con et on résout la table.
+    let (def, deleted) = {
         let con = lock_con(&state)?;
-        if fetch_one(def, &pk_vals, &con)?.is_none() {
+        let def = resolve_table(&con, &table)?
+            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+
+        // PK depuis query string ou body JSON (query string prioritaire)
+        let pk_vals: Vec<(String, JsonValue)> = {
+            let from_query: Vec<(String, JsonValue)> = def
+                .pk
+                .iter()
+                .filter_map(|col| {
+                    query
+                        .iter()
+                        .find(|(k, _)| k == col)
+                        .map(|(_, v)| (col.clone(), JsonValue::String(v.clone())))
+                })
+                .collect();
+
+            if from_query.len() == def.pk.len() {
+                from_query
+            } else if !body_bytes.is_empty() {
+                let body: JsonValue = serde_json::from_slice(&body_bytes)
+                    .map_err(|_| AppError::bad_request("body JSON invalide"))?;
+                pk_from_body(&def, &body)?
+            } else {
+                let pk_cols = def.pk.join(", ");
+                return Err(AppError::bad_request(format!(
+                    "PK manquante. Passez-la en query string (?{pk_cols}=valeur) ou dans le body JSON.\n\
+                     Exemple : DELETE /api/md/{table}?{pk_cols}=valeur"
+                )));
+            }
+        };
+
+        if fetch_one(&def, &pk_vals, &con)?.is_none() {
             return Err(AppError::not_found("introuvable"));
         }
         let where_clause = def
@@ -570,11 +733,140 @@ async fn remove(
             .join(" AND ");
         let sql = format!("DELETE FROM {} WHERE {}", def.sql_name, where_clause);
         let params: Vec<DbValue> = pk_vals.iter().map(|(_, v)| json_to_db_value(v)).collect();
-        con.execute(&sql, params_from_iter(params))
-            .map_err(db_err)?
+        let n = con
+            .execute(&sql, params_from_iter(params))
+            .map_err(db_err)?;
+        (def, n)
     };
+    let _ = def; // définition déjà consommée pour la PK
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
+
+// ─────────────────────── HTTP — Schéma et liste des tables ─────────────────────
+
+/// Résumé d'une table navigable dans master data.
+#[derive(serde::Serialize)]
+struct TableSummary {
+    /// Nom d'API (`/api/md/{table}`).
+    table: String,
+    /// Libellé affichable.
+    label: String,
+    /// `native` (dimension/satellite builtin), `characteristic` (`car_<code>`),
+    /// ou `value_list` (`lst_<code>`).
+    kind: &'static str,
+}
+
+/// GET /api/md — liste toutes les tables master data navigables : natives +
+/// caractéristiques (`car_<code>`) + listes de valeurs (`lst_<code>`).
+async fn list_tables(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<TableSummary>>, AppError> {
+    let con = lock_con(&state)?;
+    let mut out: Vec<TableSummary> = TABLES
+        .iter()
+        .map(|t| TableSummary {
+            table: t.api_name.to_string(),
+            label: t.label.to_string(),
+            kind: "native",
+        })
+        .collect();
+    for c in crate::characteristics::load_all(&con).map_err(db_err)? {
+        out.push(TableSummary {
+            table: format!("car_{}", c.code),
+            label: c.libelle,
+            kind: "characteristic",
+        });
+    }
+    for l in crate::value_lists::load_all(&con).map_err(db_err)? {
+        out.push(TableSummary {
+            table: format!("lst_{}", l.code),
+            label: l.libelle,
+            kind: "value_list",
+        });
+    }
+    Ok(Json(out))
+}
+
+/// Cible d'une FK : `(api_table, colonne)` + nullabilité.
+#[derive(serde::Serialize)]
+struct FkTarget {
+    /// Nom d'API de la table cible (`accounts`, `car_comportement`, `lst_incoterm`…).
+    table: String,
+    /// Colonne clé de la table cible (`code`, `code_iso`…).
+    column: String,
+    /// `true` si non-nullable (rejette une valeur vide à l'écriture).
+    required: bool,
+}
+
+/// Métadonnées d'une colonne pour le schéma exposé.
+#[derive(serde::Serialize)]
+struct ColumnSchema {
+    name: String,
+    /// `true` si la colonne fait partie de la PK.
+    pk: bool,
+    /// Référence (FK) portée par cette colonne, le cas échéant — sert au front
+    /// à configurer un dropdown d'options depuis `GET /api/md/{fk.table}`.
+    fk: Option<FkTarget>,
+}
+
+/// Schéma complet d'une table, tel qu'exposé par `GET /api/md/{table}/schema`.
+#[derive(serde::Serialize)]
+struct TableSchema {
+    /// Nom d'API.
+    table: String,
+    /// Libellé affichable.
+    label: String,
+    /// Nom SQL sous-jacent (utile pour debug).
+    sql_name: String,
+    /// Colonnes natives + dynamiques, dans l'ordre canonique.
+    columns: Vec<ColumnSchema>,
+    /// Liste des colonnes composant la PK.
+    pk: Vec<String>,
+}
+
+/// GET /api/md/{table}/schema — schéma complet d'une table : colonnes (natives +
+/// dynamiques) avec métadonnées FK, pour permettre au front de construire
+/// dynamiquement la grille et les dropdowns contextuels.
+async fn table_schema(
+    Path(table): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<TableSchema>, AppError> {
+    let con = lock_con(&state)?;
+    let def = resolve_table(&con, &table)?
+        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+    // Graphe de références : on ne garde que celles portées par cette table.
+    let all_refs = references::all_references(&con);
+    let refs: Vec<&references::OwnedReference> = all_refs
+        .iter()
+        .filter(|r| r.table == def.sql_name)
+        .collect();
+    let columns = def
+        .columns
+        .iter()
+        .map(|name| {
+            let pk = def.pk.iter().any(|p| p == name);
+            let fk = refs.iter().find(|r| r.column == *name).map(|r| FkTarget {
+                table: sql_to_api(&r.target_table),
+                column: r.target_column.clone(),
+                required: r.required,
+            });
+            ColumnSchema {
+                name: name.clone(),
+                pk,
+                fk,
+            }
+        })
+        .collect();
+    Ok(Json(TableSchema {
+        table: def.api_name,
+        label: def.label,
+        sql_name: def.sql_name,
+        columns,
+        pk: def.pk,
+    }))
+}
+
+// ───────────────────────── HTTP — Graphe de références ─────────────────────────
 
 /// Ligne renvoyée par `GET /api/meta/references` : une référence du graphe.
 ///
@@ -599,20 +891,13 @@ struct ReferenceDto {
 async fn get_references(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ReferenceDto>>, AppError> {
-    // Traduit un nom de table SQL en nom d'API master data, en conservant le nom
-    // SQL pour les tables sans équivalent CRUD (stg_entry, dim_ruleset, car_…).
-    let to_api = |sql: &str| {
-        api_name_for_sql(sql)
-            .map(str::to_string)
-            .unwrap_or_else(|| sql.to_string())
-    };
     let con = lock_con(&state)?;
     let out = references::all_references(&con)
         .into_iter()
         .map(|r| ReferenceDto {
-            table: to_api(&r.table),
+            table: sql_to_api(&r.table),
             column: r.column,
-            target_table: to_api(&r.target_table),
+            target_table: sql_to_api(&r.target_table),
             target_column: r.target_column,
             required: r.required,
         })
@@ -689,11 +974,9 @@ async fn get_data_health(
         }
         total += count;
         checks.push(OrphanCheck {
-            table: api_name_for_sql(tbl).map(str::to_string).unwrap_or_else(|| tbl.to_string()),
+            table: sql_to_api(tbl),
             column: col.to_string(),
-            target_table: api_name_for_sql(tt)
-                .map(str::to_string)
-                .unwrap_or_else(|| tt.to_string()),
+            target_table: sql_to_api(tt),
             target_column: tc.to_string(),
             count,
             sample,
@@ -708,10 +991,273 @@ async fn get_data_health(
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/api/md", get(list_tables))
         .route(
             "/api/md/{table}",
             get(list).post(create).put(update).delete(remove),
         )
+        .route("/api/md/{table}/schema", get(table_schema))
         .route("/api/meta/references", get(get_references))
         .route("/api/meta/health", get(get_data_health))
+}
+
+// ───────────────────────────────── Tests ────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use duckdb::Connection;
+
+    fn setup() -> Connection {
+        let con = Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        con
+    }
+
+    /// `true` si `api` apparaît dans la liste des tables navigables.
+    fn table_listed(con: &Connection, api: &str) -> bool {
+        // Reproduit le calcul de `list_tables` (synchrone, sans router) en
+        // parcourant les natives + caractéristiques + listes.
+        if TABLES.iter().any(|t| t.api_name == api) {
+            return true;
+        }
+        if api.starts_with("car_") {
+            let code = &api[4..];
+            return crate::characteristics::load_all(con)
+                .unwrap_or_default()
+                .iter()
+                .any(|c| c.code == code);
+        }
+        if api.starts_with("lst_") {
+            let code = &api[4..];
+            return crate::value_lists::load_all(con)
+                .unwrap_or_default()
+                .iter()
+                .any(|l| l.code == code);
+        }
+        false
+    }
+
+    #[test]
+    fn resolve_table_native_basique() {
+        let con = setup();
+        let def = resolve_table(&con, "flows")
+            .unwrap()
+            .expect("flows résolvable");
+        assert_eq!(def.sql_name, "dim_flow");
+        assert_eq!(def.api_name, "flows");
+        assert_eq!(def.pk, vec!["code".to_string()]);
+        // Sans caractéristique/ref directe, colonnes = whitelist native.
+        assert_eq!(def.columns, vec!["code".to_string(), "libelle".to_string()]);
+    }
+
+    #[test]
+    fn resolve_table_etend_avec_caracteristique_et_ref_directe() {
+        let con = setup();
+        // Caractéristique N1 sur account : dim_account.comportement (TEXT).
+        crate::characteristics::create_characteristic(
+            &con,
+            "comportement",
+            "Comportement",
+            "account",
+        )
+        .unwrap();
+        // Référence directe (patron B) sur account : compte_parent.
+        crate::custom_references::create(&con, "account", "compte_parent", "account").unwrap();
+
+        let def = resolve_table(&con, "accounts")
+            .unwrap()
+            .expect("accounts résolvable");
+        assert_eq!(def.sql_name, "dim_account");
+        // Colonnes natives + comportement + compte_parent.
+        assert!(def.columns.contains(&"comportement".to_string()));
+        assert!(def.columns.contains(&"compte_parent".to_string()));
+        // Les natives sont toujours là.
+        assert!(def.columns.contains(&"code".to_string()));
+        assert!(def.columns.contains(&"sous_classe".to_string()));
+    }
+
+    #[test]
+    fn resolve_table_car_code() {
+        let con = setup();
+        crate::characteristics::create_characteristic(
+            &con,
+            "comportement",
+            "Comportement",
+            "account",
+        )
+        .unwrap();
+        crate::characteristics::add_attribute(
+            &con,
+            "comportement",
+            "compte_destination",
+            "C",
+            "account",
+        )
+        .unwrap();
+
+        let def = resolve_table(&con, "car_comportement")
+            .unwrap()
+            .expect("car_comportement résolvable");
+        assert_eq!(def.sql_name, "car_comportement");
+        assert_eq!(def.label, "Comportement");
+        assert_eq!(def.pk, vec!["code".to_string()]);
+        // code, libelle + l'attribut N2.
+        assert_eq!(
+            def.columns,
+            vec![
+                "code".to_string(),
+                "libelle".to_string(),
+                "compte_destination".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_table_lst_code() {
+        let con = setup();
+        crate::value_lists::create_list(&con, "incoterm", "Incoterms").unwrap();
+        let def = resolve_table(&con, "lst_incoterm")
+            .unwrap()
+            .expect("lst_incoterm résolvable");
+        assert_eq!(def.sql_name, "lst_incoterm");
+        assert_eq!(def.label, "Incoterms");
+        assert_eq!(def.columns, vec!["code".to_string(), "libelle".to_string()]);
+        assert_eq!(def.pk, vec!["code".to_string()]);
+    }
+
+    #[test]
+    fn resolve_table_inconnue_renvoie_none() {
+        let con = setup();
+        assert!(resolve_table(&con, "inconnue").unwrap().is_none());
+        // car_<code> inexistant → None (pas de panic sur une table absente).
+        assert!(resolve_table(&con, "car_merveille").unwrap().is_none());
+        assert!(resolve_table(&con, "lst_fantome").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_tables_inclut_car_et_lst() {
+        let con = setup();
+        // Aucune caractéristique/liste : on a juste les natives.
+        assert!(table_listed(&con, "flows"));
+        assert!(table_listed(&con, "accounts"));
+        assert!(!table_listed(&con, "car_x"));
+
+        crate::characteristics::create_characteristic(&con, "comportement", "C", "account")
+            .unwrap();
+        crate::value_lists::create_list(&con, "incoterm", "Incoterms").unwrap();
+
+        assert!(table_listed(&con, "car_comportement"));
+        assert!(table_listed(&con, "lst_incoterm"));
+    }
+
+    /// Vérifie que le CRUD via `resolve_table` fonctionne sur une `car_<code>`,
+    /// en exposant les colonnes `code`, `libelle` et l'attribut N2.
+    #[test]
+    fn crud_sur_car_via_master_data() {
+        let con = setup();
+        // Quelques comptes pour la FK N2.
+        con.execute(
+            "INSERT INTO dim_account (code, libelle, classe) VALUES ('471L', 'Liaison', 'bilan')",
+            [],
+        )
+        .unwrap();
+
+        crate::characteristics::create_characteristic(&con, "comportement", "C", "account")
+            .unwrap();
+        crate::characteristics::add_attribute(
+            &con,
+            "comportement",
+            "compte_destination",
+            "C",
+            "account",
+        )
+        .unwrap();
+
+        let def = resolve_table(&con, "car_comportement")
+            .unwrap()
+            .expect("car_comportement résolvable");
+
+        // Insert via select_all/fetch_one (les helpers utilisés par les handlers).
+        let mut obj = Map::new();
+        obj.insert("code".into(), JsonValue::String("VENTES_IC".into()));
+        obj.insert("libelle".into(), JsonValue::String("Ventes interco".into()));
+        obj.insert(
+            "compte_destination".into(),
+            JsonValue::String("471L".into()),
+        );
+        reject_unknown_fields(&def, &obj).unwrap();
+        validate_references(&def, &obj, &con).unwrap();
+
+        let mut cols = Vec::new();
+        let mut vals: Vec<DbValue> = Vec::new();
+        for col in &def.columns {
+            if let Some(v) = obj.get(col.as_str()) {
+                cols.push(quote_ident(col));
+                vals.push(json_to_db_value(v));
+            }
+        }
+        let sql = format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            def.sql_name,
+            cols.join(", "),
+            cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
+        );
+        con.execute(&sql, params_from_iter(vals)).unwrap();
+
+        // Lecture via select_all.
+        let rows = select_all(&def, &con).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["code"], JsonValue::String("VENTES_IC".into()));
+        assert_eq!(
+            rows[0]["compte_destination"],
+            JsonValue::String("471L".into())
+        );
+
+        // Validation N2 : valeur inexistante rejetée.
+        let mut bad = Map::new();
+        bad.insert("code".into(), JsonValue::String("X".into()));
+        bad.insert(
+            "compte_destination".into(),
+            JsonValue::String("INEXISTANT".into()),
+        );
+        assert!(
+            validate_references(&def, &bad, &con).is_err(),
+            "FK N2 vérifiée via le graphe de références"
+        );
+    }
+
+    /// L'écriture sur une colonne caractéristique (rattachement N1) via la table
+    /// native étendue fonctionne et est validée contre `car_<code>`.
+    #[test]
+    fn update_colonne_caracteristique_via_master_data() {
+        let con = setup();
+        con.execute(
+            "INSERT INTO dim_account (code, libelle, classe) VALUES ('700', 'Ventes', 'resultat')",
+            [],
+        )
+        .unwrap();
+        crate::characteristics::create_characteristic(&con, "comportement", "C", "account")
+            .unwrap();
+        // Une valeur N1 à affecter.
+        let mut v = Map::new();
+        v.insert("code".into(), JsonValue::String("VENTES_IC".into()));
+        crate::characteristics::create_value(&con, "comportement", &v).unwrap();
+
+        let def = resolve_table(&con, "accounts").unwrap().expect("accounts");
+        // La colonne caractéristique est exposée.
+        assert!(def.columns.contains(&"comportement".to_string()));
+
+        // Update via master data : on affecte la valeur N1 au compte 700.
+        let mut upd = Map::new();
+        upd.insert("code".into(), JsonValue::String("700".into()));
+        upd.insert("comportement".into(), JsonValue::String("VENTES_IC".into()));
+        validate_references(&def, &upd, &con).unwrap();
+
+        // Valeur N1 inexistante → rejetée (FK dynamique).
+        let mut bad = Map::new();
+        bad.insert("code".into(), JsonValue::String("700".into()));
+        bad.insert("comportement".into(), JsonValue::String("NOPE".into()));
+        assert!(validate_references(&def, &bad, &con).is_err());
+    }
 }
