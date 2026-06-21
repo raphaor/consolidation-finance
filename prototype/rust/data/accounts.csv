@@ -1,841 +1,841 @@
-code,libelle,classe,sous_classe
-1,COMPTES DE CAPITAUX,bilan,passif
-10,Capital et réserves,bilan,passif
-101,Capital,bilan,passif
-1011,Capital souscrit - non appelé,bilan,passif
-1012,"Capital souscrit - appelé, non versé",bilan,passif
-1013,"Capital souscrit - appelé, versé",bilan,passif
-10131,Capital non amorti,bilan,passif
-10132,Capital amorti,bilan,passif
-1018,Capital souscrit soumis à des réglementations particulières,bilan,passif
-102,Fonds fiduciaires,bilan,passif
-104,Primes liées au capital,bilan,passif
-1041,Primes d'émission,bilan,passif
-1042,Primes de fusion,bilan,passif
-1043,Primes d'apport,bilan,passif
-1044,Primes de conversion d'obligations en actions,bilan,passif
-1045,Bons de souscription de titres en capital,bilan,passif
-105,Écarts de réévaluation,bilan,passif
-106,Réserves,bilan,passif
-1061,Réserve légale,bilan,passif
-1062,Réserves indisponibles,bilan,passif
-1063,Réserves statutaires ou contractuelles,bilan,passif
-1064,Réserves réglementées,bilan,passif
-1068,Autres réserves,bilan,passif
-107,Écart d'équivalence,bilan,passif
-108,Compte de l'exploitant,bilan,passif
-109,Actionnaires : capital souscrit - non appelé,bilan,passif
-11,Report à nouveau,bilan,passif
-110,Report à nouveau - solde créditeur,bilan,passif
-119,Report à nouveau - solde débiteur,bilan,passif
-12,Résultat de l'exercice,bilan,passif
-120,Résultat de l'exercice - bénéfice,bilan,passif
-1209,Acomptes sur dividendes,bilan,passif
-129,Résultat de l'exercice – perte,bilan,passif
-13,Subventions d'investissement,bilan,passif
-131,Subventions d'investissement octroyées,bilan,passif
-139,Subventions d'investissement inscrites au compte de résultat,bilan,passif
-14,Provisions réglementées,bilan,passif
-143,Provisions réglementées pour hausse de prix,bilan,passif
-145,Amortissements dérogatoires,bilan,passif
-148,Autres provisions réglementées,bilan,passif
-15,Provisions,bilan,passif
-151,Provisions pour risques,bilan,passif
-1511,Provisions pour litiges,bilan,passif
-1512,Provisions pour garanties données aux clients,bilan,passif
-1514,Provisions pour amendes et pénalités,bilan,passif
-1515,Provisions pour pertes de change,bilan,passif
-1516,Provisions pour pertes sur contrats,bilan,passif
-1518,Autres provisions pour risques,bilan,passif
-152,Provisions pour charges,bilan,passif
-1521,Provisions pour pensions et obligations similaires,bilan,passif
-1522,Provisions pour restructurations,bilan,passif
-1523,Provisions pour impôts,bilan,passif
-1524,Provisions pour renouvellement des immobilisations - entreprises concessionnaires,bilan,passif
-1525,Provisions pour gros entretien ou grandes révisions,bilan,passif
-1526,Provisions pour remise en état,bilan,passif
-1527,Autres provisions pour charges,bilan,passif
-16,"Emprunts et dettes assimilées, fonds non remboursables et avances conditionnées",bilan,passif
-161,Emprunts obligataires convertibles si non-inscrits dans le compte 167,bilan,passif
-1618,Intérêts courus sur emprunts obligataires convertibles,bilan,passif
-162,Obligations représentatives de passifs nets remis en fiducie si non-inscrites dans le compte 167,bilan,passif
-163,Autres emprunts obligataires si non-inscrits dans le compte 167,bilan,passif
-1638,Intérêts courus sur autres emprunts obligataires,bilan,passif
-164,Emprunts auprès des établissements de crédit si non-inscrits dans le compte 167,bilan,passif
-1648,Intérêts courus sur emprunts auprès des établissements de crédit,bilan,passif
-165,Dépôts et cautionnements reçus,bilan,passif
-1651,Dépôts,bilan,passif
-1655,Cautionnements,bilan,passif
-1658,Intérêts courus sur dépôts et cautionnements reçus,bilan,passif
-166,Participation des salariés aux résultats,bilan,passif
-1661,Comptes bloqués,bilan,passif
-1662,Fonds de participation,bilan,passif
-1668,Intérêts courus sur participation des salariés aux résultats,bilan,passif
-167,Fonds non remboursables et avances conditionnées,bilan,passif
-1671,Fonds non remboursables montant principal,bilan,passif
-16711,Titres participatifs montant principal,bilan,passif
-16712,Autres fonds non remboursables montant principal,bilan,passif
-1673,Avances conditionnées montant principal,bilan,passif
-1674,Avances conditionnées intérêts courus,bilan,passif
-168,Autres emprunts et dettes assimilées,bilan,passif
-1681,Autres emprunts,bilan,passif
-1682,Emprunts participatifs,bilan,passif
-1685,Rentes viagères capitalisées,bilan,passif
-1687,Autres dettes,bilan,passif
-1688,Intérêts courus sur autres emprunts et dettes assimilées,bilan,passif
-169,Primes de remboursement des emprunts,bilan,passif
-17,Dettes rattachées à des participations,bilan,passif
-171,Dettes rattachées à des participations - groupe,bilan,passif
-174,Dettes rattachées à des participations - hors groupe,bilan,passif
-178,Dettes rattachées à des sociétés en participation,bilan,passif
-18,Comptes de liaison des établissements et sociétés en participation,bilan,passif
-181,Comptes de liaison des établissements,bilan,passif
-186,Biens et prestations de services échangés entre établissements - charges,bilan,passif
-187,Biens et prestations de services échangés entre établissements - produits,bilan,passif
-188,Comptes de liaison des sociétés en participation,bilan,passif
-2,COMPTES D'IMMOBILISATIONS,bilan,actif
-20,Immobilisations incorporelles et frais d'établissement,bilan,actif
-201,Frais d'établissement,bilan,actif
-2011,Frais de constitution,bilan,actif
-2012,Frais de premier établissement,bilan,actif
-20121,Frais de prospection,bilan,actif
-20122,Frais de publicité,bilan,actif
-2013,"Frais d'augmentation de capital et d'opérations diverses - fusions, scissions, transformations",bilan,actif
-203,Frais de développement,bilan,actif
-205,"Concessions et droits similaires, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",bilan,actif
-206,Droit au bail,bilan,actif
-207,Fonds commercial,bilan,actif
-208,Autres immobilisations incorporelles,bilan,actif
-2081,Mali de fusion sur actifs incorporels,bilan,actif
-21,Immobilisations corporelles,bilan,actif
-211,Terrains,bilan,actif
-2111,Terrains nus,bilan,actif
-2112,Terrains aménagés,bilan,actif
-2113,Sous-sols et sur-sols,bilan,actif
-2114,Terrains de carrières (Tréfonds),bilan,actif
-2115,Terrains bâtis,bilan,actif
-212,Agencements et aménagements de terrains,bilan,actif
-213,Constructions,bilan,actif
-2131,Bâtiments,bilan,actif
-2135,Installations générales - agencements - aménagements des constructions,bilan,actif
-2138,Ouvrages d'infrastructure,bilan,actif
-214,Constructions sur sol d'autrui,bilan,actif
-215,"Installations techniques, matériels et outillages industriels",bilan,actif
-2151,Installations complexes spécialisées,bilan,actif
-21511,Installations complexes spécialisées sur sol propre,bilan,actif
-21514,Installations complexes spécialisées sur sol d'autrui,bilan,actif
-2153,Installations à caractère spécifique,bilan,actif
-21531,Installations à caractère spécifique sur sol propre,bilan,actif
-21534,Installations à caractère spécifique sur sol d'autrui,bilan,actif
-2154,Matériels industriels,bilan,actif
-2155,Outillages industriels,bilan,actif
-2157,Agencements et aménagements des matériels et outillages industriels,bilan,actif
-218,Autres immobilisations corporelles,bilan,actif
-2181,"Installations générales, agencements, aménagements divers",bilan,actif
-2182,Matériel de transport,bilan,actif
-2183,Matériel de bureau et matériel informatique,bilan,actif
-2184,Mobilier,bilan,actif
-2185,Cheptel,bilan,actif
-2186,Emballages récupérables,bilan,actif
-2187,Mali de fusion sur actifs corporels,bilan,actif
-22,Immobilisations mises en concession,bilan,actif
-229,Droits du concédant,bilan,actif
-23,"Immobilisations en cours, avances et acomptes",bilan,actif
-231,Immobilisations corporelles en cours,bilan,actif
-232,Immobilisations incorporelles en cours,bilan,actif
-237,Avances et acomptes versés sur commandes d'immobilisations incorporelles,bilan,actif
-238,Avances et acomptes versés sur commandes d'immobilisations corporelles,bilan,actif
-26,Participations et créances rattachées à des participations,bilan,actif
-261,Titres de participation,bilan,actif
-2611,Actions,bilan,actif
-2618,Autres titres,bilan,actif
-262,Titres évalués par équivalence,bilan,actif
-266,Autres formes de participation,bilan,actif
-2661,Droits représentatifs d'actifs nets remis en fiducie,bilan,actif
-267,Créances rattachées à des participations,bilan,actif
-2671,Créances rattachées à des participations - groupe,bilan,actif
-2674,Créances rattachées à des participations - hors groupe,bilan,actif
-2675,Versements représentatifs d'apports non capitalisés - appel de fonds,bilan,actif
-2676,Avances consolidables,bilan,actif
-2677,Autres créances rattachées à des participations,bilan,actif
-2678,Intérêts courus,bilan,actif
-268,Créances rattachées à des sociétés en participation,bilan,actif
-2681,Principal,bilan,actif
-2688,Intérêts courus,bilan,actif
-269,Versements restant à effectuer sur titres de participation non libérés,bilan,actif
-27,Autres immobilisations financières,bilan,actif
-271,Titres immobilisés autres que les titres immobilisés de l'activité de portefeuille,bilan,actif
-2711,Actions,bilan,actif
-2718,Autres titres,bilan,actif
-272,Titres immobilisés (droit de créance),bilan,actif
-2721,Obligations,bilan,actif
-2722,Bons,bilan,actif
-273,Titres immobilisés de l'activité de portefeuille,bilan,actif
-274,Prêts,bilan,actif
-2741,Prêts participatifs,bilan,actif
-2742,Prêts aux associés,bilan,actif
-2743,Prêts au personnel,bilan,actif
-2748,Autres prêts,bilan,actif
-275,Dépôts et cautionnements versés,bilan,actif
-2751,Dépôts,bilan,actif
-2755,Cautionnements,bilan,actif
-276,Autres créances immobilisées,bilan,actif
-2761,Créances diverses,bilan,actif
-2768,Intérêts courus,bilan,actif
-27682,Intérêts courus sur titres immobilisés,bilan,actif
-27684,Intérêts courus sur prêts,bilan,actif
-27685,Intérêts courus sur dépôts et cautionnements,bilan,actif
-27688,Intérêts courus sur créances diverses,bilan,actif
-277,Actions propres ou parts propres,bilan,actif
-2771,Actions propres ou parts propres,bilan,actif
-2772,Actions propres ou parts propres en voie d'annulation,bilan,actif
-278,Mali de fusion sur actifs financiers,bilan,actif
-279,Versements restant à effectuer sur titres immobilisés non libérés,bilan,actif
-28,Amortissements des immobilisations,bilan,actif
-280,Amortissements des immobilisations incorporelles et des frais d'établissement,bilan,actif
-2801,Frais d'établissement,bilan,actif
-2803,Frais de développement,bilan,actif
-2805,"Concessions et droits similaires, brevets, licences, solutions informatiques, droits et valeurs similaires",bilan,actif
-2806,Droit au bail,bilan,actif
-2807,Fonds commercial,bilan,actif
-2808,Autres immobilisations incorporelles,bilan,actif
-281,Amortissements des immobilisations corporelles,bilan,actif
-2812,"Agencements, aménagements de terrains",bilan,actif
-2813,Constructions,bilan,actif
-2814,Constructions sur sol d'autrui,bilan,actif
-2815,"Installations, matériel et outillage industriels",bilan,actif
-2818,Autres immobilisations corporelles,bilan,actif
-28187,Amortissement du mali de fusion sur actifs corporels,bilan,actif
-282,Amortissements des immobilisations mises en concession,bilan,actif
-29,Dépréciations des immobilisations,bilan,actif
-290,Dépréciations des immobilisations incorporelles,bilan,actif
-2901,Frais d'établissement,bilan,actif
-2903,Frais de développement,bilan,actif
-2905,"Marques, procédés, droits et valeurs similaires",bilan,actif
-2906,Droit au bail,bilan,actif
-2907,Fonds commercial,bilan,actif
-2908,Autres immobilisations incorporelles,bilan,actif
-29081,Dépréciation du mali de fusion sur actifs incorporels,bilan,actif
-291,Dépréciations des immobilisations corporelles,bilan,actif
-2911,Terrains,bilan,actif
-2912,Agencements et aménagements de terrains,bilan,actif
-2913,Constructions,bilan,actif
-2914,Constructions sur sol d'autrui,bilan,actif
-2915,"Installations techniques, matériels et outillages industriels",bilan,actif
-2918,Autres immobilisations corporelles,bilan,actif
-29187,Dépréciation du mali de fusion sur actifs corporels,bilan,actif
-292,Dépréciations des immobilisations mises en concession,bilan,actif
-293,Dépréciations des immobilisations en cours,bilan,actif
-2931,Immobilisations corporelles en cours,bilan,actif
-2932,Immobilisations incorporelles en cours,bilan,actif
-296,Dépréciations des participations et créances rattachées à des participations,bilan,actif
-2961,Titres de participation,bilan,actif
-2962,Titres évalués par équivalence,bilan,actif
-2966,Autres formes de participation,bilan,actif
-2967,Créances rattachées à des participations,bilan,actif
-2968,Créances rattachées à des sociétés en participation,bilan,actif
-297,Dépréciations des autres immobilisations financières,bilan,actif
-2971,Titres immobilisés autres que les titres immobilisés de l'activité de portefeuille,bilan,actif
-2972,Titres immobilisés (droit de créance),bilan,actif
-2973,Titres immobilisés de l'activité de portefeuille,bilan,actif
-2974,Prêts,bilan,actif
-2975,Dépôts et cautionnements versés,bilan,actif
-2976,Autres créances immobilisées,bilan,actif
-3,COMPTES DE STOCKS ET EN-COURS,bilan,actif
-31,Matières premières et fournitures,bilan,actif
-32,Autres approvisionnements,bilan,actif
-321,Matières consommables,bilan,actif
-322,Fournitures consommables,bilan,actif
-3221,Combustibles,bilan,actif
-3222,Produits d'entretien,bilan,actif
-3223,Fournitures d'atelier et d'usine,bilan,actif
-3224,Fournitures de magasin,bilan,actif
-3225,Fournitures de bureau,bilan,actif
-326,Emballages,bilan,actif
-3261,Emballages perdus,bilan,actif
-3265,Emballages récupérables non identifiables,bilan,actif
-3267,Emballages à usage mixte,bilan,actif
-33,En-cours de production de biens,bilan,actif
-331,Produits en cours,bilan,actif
-335,Travaux en cours,bilan,actif
-34,En-cours de production de services,bilan,actif
-341,Études en cours,bilan,actif
-345,Prestations de services en cours,bilan,actif
-35,Stocks de produits,bilan,actif
-351,Produits intermédiaires,bilan,actif
-355,Produits finis,bilan,actif
-358,Produits résiduels ou matières de récupération,bilan,actif
-3581,Déchets,bilan,actif
-3585,Rebuts,bilan,actif
-3586,Matières de récupération,bilan,actif
-36,Stocks provenant d'immobilisations,bilan,actif
-37,Stocks de marchandises,bilan,actif
-38,"Stocks en voie d'acheminement, mis en dépôt ou donnés en consignation",bilan,actif
-39,Dépréciations des stocks et en-cours,bilan,actif
-391,Dépréciations des matières premières et fournitures,bilan,actif
-392,Dépréciations des autres approvisionnements,bilan,actif
-393,Dépréciations des en-cours de production de biens,bilan,actif
-394,Dépréciations des en-cours de production de services,bilan,actif
-395,Dépréciations des stocks de produits,bilan,actif
-397,Dépréciations des stocks de marchandises,bilan,actif
-4P,COMPTES DE TIERS - PASSIF,bilan,passif
-4A,COMPTES DE TIERS - ACTIF,bilan,actif
-40,Fournisseurs et comptes rattachés,bilan,passif
-401,Fournisseurs,bilan,passif
-4011,Fournisseurs - Achats de biens et prestations de services,bilan,passif
-4017,Fournisseurs - Retenues de garantie,bilan,passif
-403,Fournisseurs - Effets à payer,bilan,passif
-404,Fournisseurs d'immobilisations,bilan,passif
-4041,Fournisseurs - Achats d'immobilisations,bilan,passif
-4047,Fournisseurs d'immobilisations - Retenues de garantie,bilan,passif
-405,Fournisseurs d'immobilisations - Effets à payer,bilan,passif
-408,Fournisseurs - Factures non parvenues,bilan,passif
-4081,Fournisseurs,bilan,passif
-4084,Fournisseurs d'immobilisations,bilan,passif
-4088,Fournisseurs - Intérêts courus,bilan,passif
-409,Fournisseurs débiteurs,bilan,passif
-4091,Fournisseurs - Avances et acomptes versés sur commandes,bilan,passif
-4096,Fournisseurs - Créances pour emballages et matériel à rendre,bilan,passif
-4097,Fournisseurs - Autres avoirs,bilan,passif
-40971,Fournisseurs d'exploitation,bilan,passif
-40974,Fournisseurs d'immobilisations,bilan,passif
-4098,"Rabais, remises, ristournes à obtenir et autres avoirs non encore reçus",bilan,passif
-41,Clients et comptes rattachés,bilan,actif
-411,Clients,bilan,actif
-4111,Clients - Ventes de biens ou de prestations de services,bilan,actif
-4117,Clients - Retenues de garantie,bilan,actif
-413,Clients - Effets à recevoir,bilan,actif
-416,Clients douteux ou litigieux,bilan,actif
-418,Clients - Produits non encore facturés,bilan,actif
-4181,Clients - Factures à établir,bilan,actif
-4188,Clients - Intérêts courus,bilan,actif
-419,Clients créditeurs,bilan,actif
-4191,Clients - Avances et acomptes reçus sur commandes,bilan,actif
-4196,Clients - Dettes sur emballages et matériels consignés,bilan,actif
-4197,Clients - Autres avoirs,bilan,actif
-4198,"Rabais, remises, ristournes à accorder et autres avoirs à établir",bilan,actif
-42,Personnel et comptes rattachés,bilan,passif
-421,Personnel - Rémunérations dues,bilan,passif
-422,Comité social et économique,bilan,passif
-424,Participation des salariés aux résultats,bilan,passif
-4246,Réserve spéciale,bilan,passif
-4248,Comptes courants,bilan,passif
-425,Personnel - Avances et acomptes et autres comptes débiteurs,bilan,passif
-426,Personnel - Dépôts,bilan,passif
-427,Personnel - Oppositions,bilan,passif
-428,Personnel - Charges à payer,bilan,passif
-4282,Dettes provisionnées pour congés à payer,bilan,passif
-4284,Dettes provisionnées pour participation des salariés aux résultats,bilan,passif
-4286,Autres charges à payer,bilan,passif
-43,Sécurité sociale et autres organismes sociaux,bilan,passif
-431,Sécurité sociale,bilan,passif
-437,Autres organismes sociaux,bilan,passif
-438,Organismes sociaux - Charges à payer,bilan,passif
-4382,Charges sociales sur congés à payer,bilan,passif
-4386,Autres charges à payer,bilan,passif
-439,Organismes sociaux - Produits à recevoir,bilan,passif
-44,État et autres collectivités publiques,bilan,passif
-441,État - Subventions et aides à recevoir,bilan,passif
-442,"Contributions, impôts et taxes recouvrés pour le compte de l'État",bilan,passif
-4421,Prélèvements à la source (Impôt sur le revenu),bilan,passif
-4422,Prélèvements forfaitaires non libératoires,bilan,passif
-4423,Retenues et prélèvements sur les distributions,bilan,passif
-444,État - Impôts sur les bénéfices,bilan,passif
-445,État - Taxes sur le chiffre d'affaires,bilan,passif
-4452,TVA due intracommunautaire,bilan,passif
-4455,Taxes sur le chiffre d'affaires à décaisser,bilan,passif
-44551,TVA à décaisser,bilan,passif
-44558,Taxes assimilées à la TVA,bilan,passif
-4456,Taxes sur le chiffre d'affaires déductibles,bilan,passif
-44562,TVA sur immobilisations,bilan,passif
-44563,TVA transférée par d'autres entités,bilan,passif
-44566,TVA sur autres biens et services,bilan,passif
-44567,Crédit de TVA à reporter,bilan,passif
-44568,Taxes assimilées à la TVA,bilan,passif
-4457,Taxes sur le chiffre d'affaires collectées,bilan,passif
-44571,TVA collectée,bilan,passif
-44578,Taxes assimilées à la TVA,bilan,passif
-4458,Taxes sur le chiffre d'affaires à régulariser ou en attente,bilan,passif
-44581,Acomptes - Régime simplifié d'imposition,bilan,passif
-44583,Remboursement de taxes sur le chiffre d'affaires demandé,bilan,passif
-44584,TVA récupérée d'avance,bilan,passif
-44586,Taxes sur le chiffre d'affaires sur factures non parvenues,bilan,passif
-44587,Taxes sur le chiffre d'affaires sur factures à établir,bilan,passif
-446,Obligations cautionnées,bilan,passif
-447,"Autres impôts, taxes et versements assimilés",bilan,passif
-448,État - Charges à payer et produits à recevoir,bilan,passif
-4481,État - Charges à Payer,bilan,passif
-44811,Charges fiscales sur congés à payer,bilan,passif
-44812,Charges à payer,bilan,passif
-4482,État - Produits à recevoir,bilan,passif
-449,Quotas d'émission à acquérir,bilan,passif
-45,Groupe et associés,bilan,passif
-451,Groupe,bilan,passif
-455,Associés - Comptes courants,bilan,passif
-4551,Principal,bilan,passif
-4558,Intérêts courus,bilan,passif
-456,Associés - Opérations sur le capital,bilan,passif
-4561,Associés - Comptes d'apport en société,bilan,passif
-45611,Apports en nature,bilan,passif
-45615,Apports en numéraire,bilan,passif
-4562,"Apporteurs - Capital appelé, non versé",bilan,passif
-45621,"Actionnaires - Capital souscrit et appelé, non versé",bilan,passif
-45625,"Associés - Capital appelé, non versé",bilan,passif
-4563,Associés - Versements reçus sur augmentation de capital,bilan,passif
-4564,Associés - Versements anticipés,bilan,passif
-4566,Actionnaires défaillants,bilan,passif
-4567,Associés - Capital à rembourser,bilan,passif
-457,Associés - Dividendes à payer,bilan,passif
-458,Associés - Opérations faites en commun et en GIE,bilan,passif
-4581,Opérations courantes,bilan,passif
-4588,Intérêts courus,bilan,passif
-46,Débiteurs divers et créditeurs divers,bilan,actif
-462,Créances sur cessions d'immobilisations,bilan,actif
-464,Dettes sur acquisitions de valeurs mobilières de placement,bilan,actif
-465,Créances sur cessions de valeurs mobilières de placement,bilan,actif
-467,Divers comptes débiteurs et produits à recevoir,bilan,actif
-468,Divers comptes créditeurs et charges à payer,bilan,actif
-47,Comptes transitoires ou d'attente,bilan,actif
-471,Comptes d'attente,bilan,actif
-471L,Compte de Liaison Bilan,bilan,actif
-472,Comptes d'attente,bilan,actif
-473,Comptes d'attente,bilan,actif
-474,Différences d'évaluation – Actif,bilan,actif
-4741,Différences d'évaluation sur instruments financiers à terme - Actif,bilan,actif
-4742,Différences d'évaluation sur jetons détenus - Actif,bilan,actif
-4746,Différences d'évaluation de jetons sur des passifs - Actif,bilan,actif
-475,Différences d'évaluation – Passif,bilan,actif
-4751,Différences d'évaluation sur instruments financiers à terme - Passif,bilan,actif
-4752,Différences d'évaluation sur jetons détenus - Passif,bilan,actif
-4756,Différences d'évaluation de jetons sur des passifs - Passif,bilan,actif
-476,Différence de conversion - Actif,bilan,actif
-4761,Diminution des créances,bilan,actif
-4762,Augmentation des dettes,bilan,actif
-4768,Différences compensées par couverture de change,bilan,actif
-477,Différences de conversion - Passif,bilan,actif
-4771,Augmentation des créances,bilan,actif
-4772,Diminution des dettes,bilan,actif
-4778,Différences compensées par couverture de change,bilan,actif
-478,Autres comptes transitoires,bilan,actif
-4781,Mali de fusion sur actif circulant,bilan,actif
-48,Comptes de régularisation,bilan,actif
-481,Frais d'émission des emprunts,bilan,actif
-486,Charges constatées d'avance,bilan,actif
-487,Produits constatés d'avance,bilan,actif
-4871,Produits constatés d'avance sur jetons émis,bilan,actif
-488,Comptes de répartition périodique des charges et des produits,bilan,actif
-4886,Charges,bilan,actif
-4887,Produits,bilan,actif
-49,Dépréciations des comptes de tiers,bilan,actif
-491,Dépréciations des comptes de clients,bilan,actif
-495,Dépréciations des comptes du groupe et des associés,bilan,actif
-4951,Comptes du groupe,bilan,actif
-4955,Comptes courants des associés,bilan,actif
-4958,Opérations faites en commun et en GIE,bilan,actif
-496,Dépréciations des comptes de débiteurs divers,bilan,actif
-4962,Créances sur cessions d'immobilisations,bilan,actif
-4965,Créances sur cessions de valeurs mobilières de placement,bilan,actif
-4967,Autres comptes débiteurs,bilan,actif
-5,COMPTES FINANCIERS,bilan,actif
-50,Valeurs mobilières de placement,bilan,actif
-502,Actions propres,bilan,actif
-5021,Actions destinées à être attribuées aux employés et affectées à des plans déterminés,bilan,actif
-5022,Actions disponibles pour être attribuées aux employés ou pour la régularisation des cours de bourse,bilan,actif
-503,Actions,bilan,actif
-5031,Titres cotés,bilan,actif
-5035,Titres non cotés,bilan,actif
-504,Autres titres conférant un droit de propriété,bilan,actif
-505,Obligations et bons émis par la société et rachetés par elle,bilan,actif
-506,Obligations,bilan,actif
-5061,Titres cotés,bilan,actif
-5065,Titres non cotés,bilan,actif
-507,Bons du Trésor et bons de caisse à court terme,bilan,actif
-508,Autres valeurs mobilières de placement et autres créances assimilées,bilan,actif
-5081,Autres valeurs mobilières,bilan,actif
-5082,Bons de souscription,bilan,actif
-5088,"Intérêts courus sur obligations, bons et valeurs assimilés",bilan,actif
-509,Versements restant à effectuer sur valeurs mobilières de placement non libérées,bilan,actif
-51,"Banques, établissements financiers et assimilés",bilan,actif
-511,Valeurs à l'encaissement,bilan,actif
-5111,Coupons échus à l'encaissement,bilan,actif
-5112,Chèques à encaisser,bilan,actif
-5113,Effets à l'encaissement,bilan,actif
-5114,Effets à l'escompte,bilan,actif
-512,Banques,bilan,actif
-5121,Comptes en euros,bilan,actif
-5124,Comptes en devises,bilan,actif
-517,Autres organismes financiers,bilan,actif
-518,Intérêts courus,bilan,actif
-5181,Intérêts courus à payer,bilan,actif
-5188,Intérêts courus à recevoir,bilan,actif
-519,Concours bancaires courants,bilan,actif
-5191,Crédit de mobilisation de créances commerciales,bilan,actif
-5193,Mobilisation de créances nées à l'étranger,bilan,actif
-5198,Intérêts courus sur concours bancaires courants,bilan,actif
-52,Instruments financiers à terme et jetons détenus,bilan,actif
-521,Instruments financiers à terme,bilan,actif
-522,Jetons détenus,bilan,actif
-523,Jetons auto-détenus,bilan,actif
-524,Jetons empruntés,bilan,actif
-53,Caisse,bilan,actif
-58,Virements internes,bilan,actif
-59,Dépréciations des comptes financiers,bilan,actif
-590,Dépréciations des valeurs mobilières de placement,bilan,actif
-5903,Actions,bilan,actif
-5904,Autres titres conférant un droit de propriété,bilan,actif
-5906,Obligations,bilan,actif
-5908,Autres valeurs mobilières de placement et créances assimilées,bilan,actif
-6,COMPTES DE CHARGES,resultat,charges
-60,Achats (sauf 603),resultat,charges
-601,Achats stockés - Matières premières et fournitures,resultat,charges
-602,Achats stockés - Autres approvisionnements,resultat,charges
-6021,Matières consommables,resultat,charges
-6022,Fournitures consommables,resultat,charges
-60221,Combustibles,resultat,charges
-60222,Produits d'entretien,resultat,charges
-60223,Fournitures d'atelier et d'usine,resultat,charges
-60224,Fournitures de magasin,resultat,charges
-60225,Fourniture de bureau,resultat,charges
-6026,Emballages,resultat,charges
-60261,Emballages perdus,resultat,charges
-60262,Malis sur emballage,resultat,charges
-60265,Emballages récupérables non identifiables,resultat,charges
-60267,Emballages à usage mixte,resultat,charges
-604,Achats d'études et prestations de services,resultat,charges
-605,"Achats de matériel, équipements et travaux",resultat,charges
-606,Achats non stockés de matière et fournitures,resultat,charges
-6061,"Fournitures non stockables (eau, énergie, etc.)",resultat,charges
-6063,Fournitures d'entretien et de petit équipement,resultat,charges
-6064,Fournitures administratives,resultat,charges
-6068,Autres matières et fournitures,resultat,charges
-607,Achats de marchandises,resultat,charges
-608,Frais accessoires incorporés aux achats,resultat,charges
-609,"Rabais, remises et ristournes obtenus sur achats",resultat,charges
-6098,"Rabais, remises et ristournes non affectés",resultat,charges
-603,Variation des stocks d'approvisionnements et de marchandises,resultat,charges
-6031,Variation des stocks de matières premières et fournitures,resultat,charges
-6032,Variation des stocks des autres approvisionnements,resultat,charges
-6037,Variation des stocks de marchandises,resultat,charges
-61,Services extérieurs,resultat,charges
-611,Sous-traitance générale,resultat,charges
-612,Redevances de crédit-bail,resultat,charges
-6122,Crédit-bail mobilier,resultat,charges
-6125,Crédit-bail immobilier,resultat,charges
-613,Locations,resultat,charges
-6132,Locations immobilières,resultat,charges
-6135,Locations mobilières,resultat,charges
-614,Charges locatives et de copropriété,resultat,charges
-615,Entretien et réparation,resultat,charges
-6152,Entretien et réparation sur biens immobiliers,resultat,charges
-6155,Entretien et réparation sur biens mobiliers,resultat,charges
-6156,Maintenance,resultat,charges
-616,Primes d'assurances,resultat,charges
-6161,Multirisques,resultat,charges
-6162,Assurance obligatoire dommage construction,resultat,charges
-6163,Assurance - transport,resultat,charges
-61636,sur achats,resultat,charges
-61637,sur ventes,resultat,charges
-61638,sur autres biens,resultat,charges
-6164,Risques d'exploitation,resultat,charges
-6165,Insolvabilité clients,resultat,charges
-617,Études et recherches,resultat,charges
-618,Divers,resultat,charges
-6181,Documentation générale,resultat,charges
-6183,Documentation technique,resultat,charges
-6185,"Frais de colloques, séminaires, conférences",resultat,charges
-619,"Rabais, remises et ristournes obtenus sur services extérieurs",resultat,charges
-62,Autres services extérieurs,resultat,charges
-621,Personnel extérieur à l'entité,resultat,charges
-6211,Personnel intérimaire,resultat,charges
-6214,Personnel détaché ou prêté à l'entité,resultat,charges
-622,Rémunérations d'intermédiaires et honoraires,resultat,charges
-6221,Commissions et courtages sur achats,resultat,charges
-6222,Commissions et courtages sur ventes,resultat,charges
-6224,Rémunérations des transitaires,resultat,charges
-6225,Rémunérations d'affacturage,resultat,charges
-6226,Honoraires,resultat,charges
-6227,Frais d'actes et de contentieux,resultat,charges
-6228,Divers,resultat,charges
-623,"Publicité, publications, relations publiques",resultat,charges
-6231,Annonces et insertions,resultat,charges
-6232,Échantillons,resultat,charges
-6233,Foires et expositions,resultat,charges
-6234,Cadeaux à la clientèle,resultat,charges
-6235,Primes,resultat,charges
-6236,Catalogues et imprimés,resultat,charges
-6237,Publications,resultat,charges
-6238,"Divers (pourboires, dons courants)",resultat,charges
-624,Transports de biens et transports collectifs du personnel,resultat,charges
-6241,Transports sur achats,resultat,charges
-6242,Transports sur ventes,resultat,charges
-6243,Transports entre établissements ou chantiers,resultat,charges
-6244,Transports administratifs,resultat,charges
-6247,Transports collectifs du personnel,resultat,charges
-6248,Divers,resultat,charges
-625,"Déplacements, missions et réceptions",resultat,charges
-6251,Voyages et déplacements,resultat,charges
-6255,Frais de déménagement,resultat,charges
-6256,Missions,resultat,charges
-6257,Réceptions,resultat,charges
-626,Frais postaux et de télécommunications,resultat,charges
-627,Services bancaires et assimilés,resultat,charges
-6271,"Frais sur titres (achat, vente, garde)",resultat,charges
-6272,Commissions et frais sur émission d'emprunts,resultat,charges
-6275,Frais sur effets,resultat,charges
-6276,Location de coffres,resultat,charges
-6278,Autres frais et commissions sur prestations de services,resultat,charges
-628,Divers,resultat,charges
-6281,Concours divers (cotisations),resultat,charges
-6284,Frais de recrutement de personnel,resultat,charges
-629,"Rabais, remises et ristournes obtenus sur autres services extérieurs",resultat,charges
-63,"Impôts, taxes et versements assimilés",resultat,charges
-631,"Impôts, taxes et versements assimilés sur rémunérations (administrations des impôts)",resultat,charges
-6311,Taxe sur les salaires,resultat,charges
-6314,Cotisation pour défaut d'investissement obligatoire dans la construction,resultat,charges
-6318,Autres,resultat,charges
-633,"Impôts, taxes et versements assimilés sur rémunérations (autres organismes)",resultat,charges
-6331,Versement de transport,resultat,charges
-6332,Allocations logement,resultat,charges
-6333,Contribution unique des employeurs à la formation professionnelle,resultat,charges
-6334,Participation des employeurs à l'effort de construction,resultat,charges
-6335,Versements libératoires ouvrant droit à l'exonération de la taxe d'apprentissage,resultat,charges
-6338,Autres,resultat,charges
-635,"Autres impôts, taxes et versements assimilés (administrations des impôts)",resultat,charges
-6351,Impôts directs (sauf impôts sur les bénéfices),resultat,charges
-63511,Contribution économique territoriale,resultat,charges
-63512,Taxes foncières,resultat,charges
-63513,Autres impôts locaux,resultat,charges
-63514,Taxe sur les véhicules des sociétés,resultat,charges
-6352,Taxe sur le chiffre d'affaires non récupérables,resultat,charges
-6353,Impôts indirects,resultat,charges
-6354,Droits d'enregistrement et de timbre,resultat,charges
-63541,Droits de mutation,resultat,charges
-6358,Autres droits,resultat,charges
-637,"Autres impôts, taxes et versements assimilés (autres organismes)",resultat,charges
-6371,Contribution sociale de solidarité à la charge des sociétés,resultat,charges
-6372,Taxes perçues par les organismes publics internationaux,resultat,charges
-6374,Impôts et taxes exigibles à l'étranger,resultat,charges
-6378,Taxes diverses,resultat,charges
-638,Rappel d'impôts (autres qu'impôts sur les bénéfices),resultat,charges
-64,Charges de personnel,resultat,charges
-641,Rémunérations du personnel,resultat,charges
-6411,"Salaires, appointements",resultat,charges
-6412,Congés payés,resultat,charges
-6413,Primes et gratifications,resultat,charges
-6414,Indemnités et avantages divers,resultat,charges
-6415,Supplément familial,resultat,charges
-644,Rémunération du travail de l'exploitant,resultat,charges
-645,Cotisations de sécurité sociale et de prévoyance,resultat,charges
-6451,Cotisations à l'Urssaf,resultat,charges
-6452,Cotisations aux mutuelles,resultat,charges
-6453,Cotisations aux caisses de retraites,resultat,charges
-6454,Cotisations à Pôle emploi,resultat,charges
-6458,Cotisations aux autres organismes sociaux,resultat,charges
-646,Cotisations sociales personnelles de l'exploitant,resultat,charges
-647,Autres cotisations sociales,resultat,charges
-6471,Prestations directes,resultat,charges
-6472,Versements au comité social et économique,resultat,charges
-6474,Versements aux autres œuvres sociales,resultat,charges
-6475,"Médecine du travail, pharmacie",resultat,charges
-648,Autres charges de personnel,resultat,charges
-649,Remboursements de charges de personnel,resultat,charges
-65,Autres charges de gestion courante,resultat,charges
-651,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",resultat,charges
-6511,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques",resultat,charges
-6516,Droits d'auteur et de reproduction,resultat,charges
-6518,Autres droits et valeurs similaires,resultat,charges
-653,Rémunérations de l'activité des administrateurs et des gérants,resultat,charges
-654,Pertes sur créances irrécouvrables,resultat,charges
-6541,Créances de l'exercice,resultat,charges
-6544,Créances des exercices antérieurs,resultat,charges
-655,Quote-part de résultat sur opérations faites en commun,resultat,charges
-6551,Quote-part de bénéfice transférée - comptabilité du gérant,resultat,charges
-6555,Quote-part de perte supportée - comptabilité des associés non gérants,resultat,charges
-656,Pertes de change sur créances et dettes commerciales,resultat,charges
-657,Valeurs comptables des immobilisations incorporelles et corporelles cédées,resultat,charges
-658,Pénalités et autres charges,resultat,charges
-6581,Pénalités sur marchés (et dédits payés sur achats et ventes),resultat,charges
-6582,"Pénalités, amendes fiscales et pénales",resultat,charges
-6583,Malis provenant de clauses d'indexation,resultat,charges
-6584,Lots,resultat,charges
-6588,Opérations de constitution ou liquidation des fiducies,resultat,charges
-66,Charges financières,resultat,charges
-661,Charges d'intérêts,resultat,charges
-6611,Intérêts des emprunts et dettes,resultat,charges
-66116,Intérêts des emprunts et dettes assimilées,resultat,charges
-66117,Intérêts des dettes rattachées à des participations,resultat,charges
-6612,"Charges de la fiducie, résultat de la période",resultat,charges
-6615,Intérêts des comptes courants et des dépôts créditeurs,resultat,charges
-6616,Intérêts bancaires et sur opérations de financement (escompte…),resultat,charges
-6617,Intérêts des obligations cautionnées,resultat,charges
-6618,Intérêts des autres dettes,resultat,charges
-66181,Intérêts des dettes commerciales,resultat,charges
-66188,Intérêts des dettes diverses,resultat,charges
-664,Pertes sur créances liées à des participations,resultat,charges
-665,Escomptes accordés,resultat,charges
-666,Pertes de change financières,resultat,charges
-666L,Compte de liaison Résultat,resultat,charges
-667,Charges sur cession d'éléments financiers,resultat,charges
-6671,Valeurs comptables des immobilisations financières cédées,resultat,charges
-6672,Charges nettes sur cessions de titres immobilisés de l'activité de portefeuille,resultat,charges
-6673,Charges nettes sur cessions de valeurs mobilières de placement,resultat,charges
-6674,Charges nettes sur cessions de jetons,resultat,charges
-668,Autres charges financières,resultat,charges
-67,Charges exceptionnelles,resultat,charges
-672,Charges sur exercices antérieurs,resultat,charges
-678,Autres charges exceptionnelles,resultat,charges
-68,"Dotations aux amortissements, aux dépréciations et aux provisions",resultat,charges
-681,"Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges d'exploitation)",resultat,charges
-6811,Dotations aux amortissements sur immobilisations incorporelles et corporelles,resultat,charges
-68111,Immobilisations incorporelles et frais d'établissement,resultat,charges
-68112,Immobilisations corporelles,resultat,charges
-6815,Dotations aux provisions d'exploitation,resultat,charges
-6816,Dotations pour dépréciations des immobilisations incorporelles et corporelles,resultat,charges
-68161,Immobilisations incorporelles,resultat,charges
-68162,Immobilisations corporelles,resultat,charges
-6817,Dotations pour dépréciations des actifs circulants,resultat,charges
-68173,Stocks et en-cours,resultat,charges
-68174,Créances,resultat,charges
-686,"Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges financières)",resultat,charges
-6861,Dotations aux amortissements des primes de remboursement des emprunts,resultat,charges
-6862,Dotations aux amortissements des frais d'émission des emprunts,resultat,charges
-6865,Dotations aux provisions financières,resultat,charges
-6866,Dotations pour dépréciation des éléments financiers,resultat,charges
-68662,Immobilisations financières,resultat,charges
-68665,Valeurs mobilières de placement,resultat,charges
-687,"Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges exceptionnelles)",resultat,charges
-6871,Dotations aux amortissements exceptionnels des immobilisations,resultat,charges
-6872,Dotations aux provisions réglementées (immobilisations),resultat,charges
-68725,Amortissements dérogatoires,resultat,charges
-6873,Dotations aux provisions réglementées (stocks),resultat,charges
-6874,Dotations aux autres provisions réglementées,resultat,charges
-6875,Dotations aux provisions exceptionnelles,resultat,charges
-6876,Dotations pour dépréciations exceptionnelles,resultat,charges
-69,Participation des salariés - Impôts sur les bénéfices et assimilés,resultat,charges
-691,Participation des salariés aux résultats,resultat,charges
-695,Impôts sur les bénéfices,resultat,charges
-6951,Impôts dus en France,resultat,charges
-6952,Contribution additionnelle à l'impôt sur les bénéfices,resultat,charges
-6954,Impôts dus à l'étranger,resultat,charges
-696,Suppléments d'impôt sur les sociétés liés aux distributions,resultat,charges
-698,Intégration fiscale,resultat,charges
-6981,Intégration fiscale - Charges,resultat,charges
-6989,Intégration fiscale - Produits,resultat,charges
-699,Produits - Reports en arrière des déficits,resultat,charges
-7,COMPTES DE PRODUITS,resultat,produits
-70,"Ventes de produits fabriqués, prestations de services, marchandises",resultat,produits
-701,Ventes de produits finis,resultat,produits
-702,Ventes de produits intermédiaires,resultat,produits
-703,Ventes de produits résiduels,resultat,produits
-704,Travaux,resultat,produits
-705,Études,resultat,produits
-706,Prestations de services,resultat,produits
-707,Ventes de marchandises,resultat,produits
-708,Produits des activités annexes,resultat,produits
-7081,Produits des services exploités dans l'intérêt du personnel,resultat,produits
-7082,Commissions et courtages,resultat,produits
-7083,Locations diverses,resultat,produits
-7084,Mise à disposition de personnel facturée,resultat,produits
-7085,Ports et frais accessoires facturés,resultat,produits
-7086,Bonis sur reprises d'emballages consignés,resultat,produits
-7087,Bonifications obtenues des clients et primes sur ventes,resultat,produits
-7088,Autres produits d'activités annexes (cessions d'approvisionnements),resultat,produits
-709,"Rabais, remises et ristournes accordés",resultat,produits
-7091,"Rabais, remises et ristournes accordés sur ventes de produits finis",resultat,produits
-7092,"Rabais, remises et ristournes accordés sur ventes de produits intermédiaires",resultat,produits
-7094,"Rabais, remises et ristournes accordés sur travaux",resultat,produits
-7095,"Rabais, remises et ristournes accordés sur études",resultat,produits
-7096,"Rabais, remises et ristournes accordés sur prestations de services",resultat,produits
-7097,"Rabais, remises et ristournes accordés sur ventes de marchandises",resultat,produits
-7098,"Rabais, remises et ristournes accordés sur produits des activités annexes",resultat,produits
-71,Production stockée (ou déstockage),resultat,produits
-713,Variation des stocks des en-cours de production et de produits,resultat,produits
-7133,Variation des en-cours de production de biens,resultat,produits
-71331,Produits en cours,resultat,produits
-71335,Travaux en cours,resultat,produits
-7134,Variation des en-cours de production de services,resultat,produits
-71341,Études en cours,resultat,produits
-71345,Prestations de services en cours,resultat,produits
-7135,Variation des stocks de produits,resultat,produits
-71351,Produits intermédiaires,resultat,produits
-71355,Produits finis,resultat,produits
-71358,Produits résiduels,resultat,produits
-72,Production immobilisée,resultat,produits
-721,Immobilisations incorporelles,resultat,produits
-722,Immobilisations corporelles,resultat,produits
-74,Subventions,resultat,produits
-741,Subventions d'exploitation,resultat,produits
-742,Subventions d'équilibre,resultat,produits
-747,Quote-part des subventions d'investissement virée au résultat de l'exercice,resultat,produits
-75,Autres produits de gestion courante,resultat,produits
-751,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",resultat,produits
-7511,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques",resultat,produits
-7516,Droits d'auteur et de reproduction,resultat,produits
-7518,Autres droits et valeurs similaires,resultat,produits
-752,Revenus des immeubles non affectés à des activités professionnelles,resultat,produits
-753,Rémunérations de l'activité des administrateurs et des gérants,resultat,produits
-754,Ristournes perçues des coopératives provenant des excédents,resultat,produits
-755,Quote-part de résultat sur opérations faites en commun,resultat,produits
-7551,Quote-part de perte transférée - comptabilité du gérant,resultat,produits
-7555,Quote-part de bénéfice attribuée - comptabilité des associés non-gérants,resultat,produits
-756,Gains de change sur créances et dettes commerciales,resultat,produits
-757,Produits des cessions d'immobilisations incorporelles et corporelles,resultat,produits
-758,Indemnités et autres produits,resultat,produits
-7581,Dédits et pénalités perçus sur achats et ventes,resultat,produits
-7582,Libéralités reçues,resultat,produits
-7583,Rentrées sur créances amorties,resultat,produits
-7584,Dégrèvements d'impôts autres qu'impôts sur les bénéfices,resultat,produits
-7585,Bonis provenant de clauses d'indexation,resultat,produits
-7586,Lots,resultat,produits
-7587,Indemnités d'assurance,resultat,produits
-7588,Opérations de constitution ou liquidation des fiducies,resultat,produits
-76,Produits financiers,resultat,produits
-761,Produits de participations,resultat,produits
-7611,Revenus des titres de participation,resultat,produits
-7612,"Produits de la fiducie, résultat de la période",resultat,produits
-7616,Revenus sur autres formes de participation,resultat,produits
-7617,Revenus des créances rattachées à des participations,resultat,produits
-762,Produits des autres immobilisations financières,resultat,produits
-7621,Revenus des titres immobilisés,resultat,produits
-7626,Revenus des prêts,resultat,produits
-7627,Revenus des créances immobilisées,resultat,produits
-763,Revenus des autres créances,resultat,produits
-7631,Revenus des créances commerciales,resultat,produits
-7638,Revenus des créances diverses,resultat,produits
-764,Revenus des valeurs mobilières de placement,resultat,produits
-765,Escomptes obtenus,resultat,produits
-766,Gains de change financiers,resultat,produits
-767,Produits sur cession d'éléments financiers,resultat,produits
-7671,Produits des cessions d'immobilisations financières,resultat,produits
-7672,Produits nets sur cessions de titres immobilisés de l'activité de portefeuille,resultat,produits
-7673,Produits nets sur cessions de valeurs mobilières de placement,resultat,produits
-7674,Produits nets sur cessions de jetons,resultat,produits
-768,Autres produits financiers,resultat,produits
-7683,Bonis provenant du rachat par l'entreprise d'actions et d'obligations émises par elle-même,resultat,produits
-77,Produits exceptionnels,resultat,produits
-772,Produits sur exercices antérieurs,resultat,produits
-778,Autres produits exceptionnels,resultat,produits
-78,"Reprises sur amortissements, dépréciations et provisions",resultat,produits
-781,"Reprises sur amortissements, dépréciations et provisions (à inscrire dans les produits d'exploitation)",resultat,produits
-7811,Reprises sur amortissements des immobilisations incorporelles et corporelles,resultat,produits
-78111,Immobilisations incorporelles,resultat,produits
-78112,Immobilisations corporelles,resultat,produits
-7815,Reprises sur provisions d'exploitation,resultat,produits
-7816,Reprises sur dépréciations des immobilisations incorporelles et corporelles,resultat,produits
-78161,Immobilisations incorporelles,resultat,produits
-78162,Immobilisations corporelles,resultat,produits
-7817,Reprises sur dépréciations des actifs circulants,resultat,produits
-78173,Stocks et en-cours,resultat,produits
-78174,Créances,resultat,produits
-786,Reprises sur dépréciations et provisions (à inscrire dans les produits financiers),resultat,produits
-7865,Reprises sur provisions financières,resultat,produits
-7866,Reprises sur dépréciations des éléments financiers,resultat,produits
-78662,Immobilisations financières,resultat,produits
-78665,Valeurs mobilières de placement,resultat,produits
-787,Reprises sur dépréciations et provisions (à inscrire dans les produits exceptionnels),resultat,produits
-7872,Reprises sur provisions réglementées (immobilisations),resultat,produits
-78725,Amortissements dérogatoires,resultat,produits
-7873,Reprises sur provisions réglementées (stocks),resultat,produits
-7874,Reprises sur autres provisions réglementées,resultat,produits
-7875,Reprises sur provisions exceptionnelles,resultat,produits
-7876,Reprises sur dépréciations exceptionnelles,resultat,produits
+code,libelle,classe,sous_classe,flow_scheme
+1,COMPTES DE CAPITAUX,bilan,passif,BILAN
+10,Capital et réserves,bilan,passif,BILAN
+101,Capital,bilan,passif,BILAN
+1011,Capital souscrit - non appelé,bilan,passif,BILAN
+1012,"Capital souscrit - appelé, non versé",bilan,passif,BILAN
+1013,"Capital souscrit - appelé, versé",bilan,passif,BILAN
+10131,Capital non amorti,bilan,passif,BILAN
+10132,Capital amorti,bilan,passif,BILAN
+1018,Capital souscrit soumis à des réglementations particulières,bilan,passif,BILAN
+102,Fonds fiduciaires,bilan,passif,BILAN
+104,Primes liées au capital,bilan,passif,BILAN
+1041,Primes d'émission,bilan,passif,BILAN
+1042,Primes de fusion,bilan,passif,BILAN
+1043,Primes d'apport,bilan,passif,BILAN
+1044,Primes de conversion d'obligations en actions,bilan,passif,BILAN
+1045,Bons de souscription de titres en capital,bilan,passif,BILAN
+105,Écarts de réévaluation,bilan,passif,BILAN
+106,Réserves,bilan,passif,BILAN
+1061,Réserve légale,bilan,passif,BILAN
+1062,Réserves indisponibles,bilan,passif,BILAN
+1063,Réserves statutaires ou contractuelles,bilan,passif,BILAN
+1064,Réserves réglementées,bilan,passif,BILAN
+1068,Autres réserves,bilan,passif,BILAN
+107,Écart d'équivalence,bilan,passif,BILAN
+108,Compte de l'exploitant,bilan,passif,BILAN
+109,Actionnaires : capital souscrit - non appelé,bilan,passif,BILAN
+11,Report à nouveau,bilan,passif,BILAN
+110,Report à nouveau - solde créditeur,bilan,passif,BILAN
+119,Report à nouveau - solde débiteur,bilan,passif,BILAN
+12,Résultat de l'exercice,bilan,passif,BILAN
+120,Résultat de l'exercice - bénéfice,bilan,passif,BILAN
+1209,Acomptes sur dividendes,bilan,passif,BILAN
+129,Résultat de l'exercice – perte,bilan,passif,BILAN
+13,Subventions d'investissement,bilan,passif,BILAN
+131,Subventions d'investissement octroyées,bilan,passif,BILAN
+139,Subventions d'investissement inscrites au compte de résultat,bilan,passif,BILAN
+14,Provisions réglementées,bilan,passif,BILAN
+143,Provisions réglementées pour hausse de prix,bilan,passif,BILAN
+145,Amortissements dérogatoires,bilan,passif,BILAN
+148,Autres provisions réglementées,bilan,passif,BILAN
+15,Provisions,bilan,passif,BILAN
+151,Provisions pour risques,bilan,passif,BILAN
+1511,Provisions pour litiges,bilan,passif,BILAN
+1512,Provisions pour garanties données aux clients,bilan,passif,BILAN
+1514,Provisions pour amendes et pénalités,bilan,passif,BILAN
+1515,Provisions pour pertes de change,bilan,passif,BILAN
+1516,Provisions pour pertes sur contrats,bilan,passif,BILAN
+1518,Autres provisions pour risques,bilan,passif,BILAN
+152,Provisions pour charges,bilan,passif,BILAN
+1521,Provisions pour pensions et obligations similaires,bilan,passif,BILAN
+1522,Provisions pour restructurations,bilan,passif,BILAN
+1523,Provisions pour impôts,bilan,passif,BILAN
+1524,Provisions pour renouvellement des immobilisations - entreprises concessionnaires,bilan,passif,BILAN
+1525,Provisions pour gros entretien ou grandes révisions,bilan,passif,BILAN
+1526,Provisions pour remise en état,bilan,passif,BILAN
+1527,Autres provisions pour charges,bilan,passif,BILAN
+16,"Emprunts et dettes assimilées, fonds non remboursables et avances conditionnées",bilan,passif,BILAN
+161,Emprunts obligataires convertibles si non-inscrits dans le compte 167,bilan,passif,BILAN
+1618,Intérêts courus sur emprunts obligataires convertibles,bilan,passif,BILAN
+162,Obligations représentatives de passifs nets remis en fiducie si non-inscrites dans le compte 167,bilan,passif,BILAN
+163,Autres emprunts obligataires si non-inscrits dans le compte 167,bilan,passif,BILAN
+1638,Intérêts courus sur autres emprunts obligataires,bilan,passif,BILAN
+164,Emprunts auprès des établissements de crédit si non-inscrits dans le compte 167,bilan,passif,BILAN
+1648,Intérêts courus sur emprunts auprès des établissements de crédit,bilan,passif,BILAN
+165,Dépôts et cautionnements reçus,bilan,passif,BILAN
+1651,Dépôts,bilan,passif,BILAN
+1655,Cautionnements,bilan,passif,BILAN
+1658,Intérêts courus sur dépôts et cautionnements reçus,bilan,passif,BILAN
+166,Participation des salariés aux résultats,bilan,passif,BILAN
+1661,Comptes bloqués,bilan,passif,BILAN
+1662,Fonds de participation,bilan,passif,BILAN
+1668,Intérêts courus sur participation des salariés aux résultats,bilan,passif,BILAN
+167,Fonds non remboursables et avances conditionnées,bilan,passif,BILAN
+1671,Fonds non remboursables montant principal,bilan,passif,BILAN
+16711,Titres participatifs montant principal,bilan,passif,BILAN
+16712,Autres fonds non remboursables montant principal,bilan,passif,BILAN
+1673,Avances conditionnées montant principal,bilan,passif,BILAN
+1674,Avances conditionnées intérêts courus,bilan,passif,BILAN
+168,Autres emprunts et dettes assimilées,bilan,passif,BILAN
+1681,Autres emprunts,bilan,passif,BILAN
+1682,Emprunts participatifs,bilan,passif,BILAN
+1685,Rentes viagères capitalisées,bilan,passif,BILAN
+1687,Autres dettes,bilan,passif,BILAN
+1688,Intérêts courus sur autres emprunts et dettes assimilées,bilan,passif,BILAN
+169,Primes de remboursement des emprunts,bilan,passif,BILAN
+17,Dettes rattachées à des participations,bilan,passif,BILAN
+171,Dettes rattachées à des participations - groupe,bilan,passif,BILAN
+174,Dettes rattachées à des participations - hors groupe,bilan,passif,BILAN
+178,Dettes rattachées à des sociétés en participation,bilan,passif,BILAN
+18,Comptes de liaison des établissements et sociétés en participation,bilan,passif,BILAN
+181,Comptes de liaison des établissements,bilan,passif,BILAN
+186,Biens et prestations de services échangés entre établissements - charges,bilan,passif,BILAN
+187,Biens et prestations de services échangés entre établissements - produits,bilan,passif,BILAN
+188,Comptes de liaison des sociétés en participation,bilan,passif,BILAN
+2,COMPTES D'IMMOBILISATIONS,bilan,actif,BILAN
+20,Immobilisations incorporelles et frais d'établissement,bilan,actif,BILAN
+201,Frais d'établissement,bilan,actif,BILAN
+2011,Frais de constitution,bilan,actif,BILAN
+2012,Frais de premier établissement,bilan,actif,BILAN
+20121,Frais de prospection,bilan,actif,BILAN
+20122,Frais de publicité,bilan,actif,BILAN
+2013,"Frais d'augmentation de capital et d'opérations diverses - fusions, scissions, transformations",bilan,actif,BILAN
+203,Frais de développement,bilan,actif,BILAN
+205,"Concessions et droits similaires, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",bilan,actif,BILAN
+206,Droit au bail,bilan,actif,BILAN
+207,Fonds commercial,bilan,actif,BILAN
+208,Autres immobilisations incorporelles,bilan,actif,BILAN
+2081,Mali de fusion sur actifs incorporels,bilan,actif,BILAN
+21,Immobilisations corporelles,bilan,actif,BILAN
+211,Terrains,bilan,actif,BILAN
+2111,Terrains nus,bilan,actif,BILAN
+2112,Terrains aménagés,bilan,actif,BILAN
+2113,Sous-sols et sur-sols,bilan,actif,BILAN
+2114,Terrains de carrières (Tréfonds),bilan,actif,BILAN
+2115,Terrains bâtis,bilan,actif,BILAN
+212,Agencements et aménagements de terrains,bilan,actif,BILAN
+213,Constructions,bilan,actif,BILAN
+2131,Bâtiments,bilan,actif,BILAN
+2135,Installations générales - agencements - aménagements des constructions,bilan,actif,BILAN
+2138,Ouvrages d'infrastructure,bilan,actif,BILAN
+214,Constructions sur sol d'autrui,bilan,actif,BILAN
+215,"Installations techniques, matériels et outillages industriels",bilan,actif,BILAN
+2151,Installations complexes spécialisées,bilan,actif,BILAN
+21511,Installations complexes spécialisées sur sol propre,bilan,actif,BILAN
+21514,Installations complexes spécialisées sur sol d'autrui,bilan,actif,BILAN
+2153,Installations à caractère spécifique,bilan,actif,BILAN
+21531,Installations à caractère spécifique sur sol propre,bilan,actif,BILAN
+21534,Installations à caractère spécifique sur sol d'autrui,bilan,actif,BILAN
+2154,Matériels industriels,bilan,actif,BILAN
+2155,Outillages industriels,bilan,actif,BILAN
+2157,Agencements et aménagements des matériels et outillages industriels,bilan,actif,BILAN
+218,Autres immobilisations corporelles,bilan,actif,BILAN
+2181,"Installations générales, agencements, aménagements divers",bilan,actif,BILAN
+2182,Matériel de transport,bilan,actif,BILAN
+2183,Matériel de bureau et matériel informatique,bilan,actif,BILAN
+2184,Mobilier,bilan,actif,BILAN
+2185,Cheptel,bilan,actif,BILAN
+2186,Emballages récupérables,bilan,actif,BILAN
+2187,Mali de fusion sur actifs corporels,bilan,actif,BILAN
+22,Immobilisations mises en concession,bilan,actif,BILAN
+229,Droits du concédant,bilan,actif,BILAN
+23,"Immobilisations en cours, avances et acomptes",bilan,actif,BILAN
+231,Immobilisations corporelles en cours,bilan,actif,BILAN
+232,Immobilisations incorporelles en cours,bilan,actif,BILAN
+237,Avances et acomptes versés sur commandes d'immobilisations incorporelles,bilan,actif,BILAN
+238,Avances et acomptes versés sur commandes d'immobilisations corporelles,bilan,actif,BILAN
+26,Participations et créances rattachées à des participations,bilan,actif,BILAN
+261,Titres de participation,bilan,actif,BILAN
+2611,Actions,bilan,actif,BILAN
+2618,Autres titres,bilan,actif,BILAN
+262,Titres évalués par équivalence,bilan,actif,BILAN
+266,Autres formes de participation,bilan,actif,BILAN
+2661,Droits représentatifs d'actifs nets remis en fiducie,bilan,actif,BILAN
+267,Créances rattachées à des participations,bilan,actif,BILAN
+2671,Créances rattachées à des participations - groupe,bilan,actif,BILAN
+2674,Créances rattachées à des participations - hors groupe,bilan,actif,BILAN
+2675,Versements représentatifs d'apports non capitalisés - appel de fonds,bilan,actif,BILAN
+2676,Avances consolidables,bilan,actif,BILAN
+2677,Autres créances rattachées à des participations,bilan,actif,BILAN
+2678,Intérêts courus,bilan,actif,BILAN
+268,Créances rattachées à des sociétés en participation,bilan,actif,BILAN
+2681,Principal,bilan,actif,BILAN
+2688,Intérêts courus,bilan,actif,BILAN
+269,Versements restant à effectuer sur titres de participation non libérés,bilan,actif,BILAN
+27,Autres immobilisations financières,bilan,actif,BILAN
+271,Titres immobilisés autres que les titres immobilisés de l'activité de portefeuille,bilan,actif,BILAN
+2711,Actions,bilan,actif,BILAN
+2718,Autres titres,bilan,actif,BILAN
+272,Titres immobilisés (droit de créance),bilan,actif,BILAN
+2721,Obligations,bilan,actif,BILAN
+2722,Bons,bilan,actif,BILAN
+273,Titres immobilisés de l'activité de portefeuille,bilan,actif,BILAN
+274,Prêts,bilan,actif,BILAN
+2741,Prêts participatifs,bilan,actif,BILAN
+2742,Prêts aux associés,bilan,actif,BILAN
+2743,Prêts au personnel,bilan,actif,BILAN
+2748,Autres prêts,bilan,actif,BILAN
+275,Dépôts et cautionnements versés,bilan,actif,BILAN
+2751,Dépôts,bilan,actif,BILAN
+2755,Cautionnements,bilan,actif,BILAN
+276,Autres créances immobilisées,bilan,actif,BILAN
+2761,Créances diverses,bilan,actif,BILAN
+2768,Intérêts courus,bilan,actif,BILAN
+27682,Intérêts courus sur titres immobilisés,bilan,actif,BILAN
+27684,Intérêts courus sur prêts,bilan,actif,BILAN
+27685,Intérêts courus sur dépôts et cautionnements,bilan,actif,BILAN
+27688,Intérêts courus sur créances diverses,bilan,actif,BILAN
+277,Actions propres ou parts propres,bilan,actif,BILAN
+2771,Actions propres ou parts propres,bilan,actif,BILAN
+2772,Actions propres ou parts propres en voie d'annulation,bilan,actif,BILAN
+278,Mali de fusion sur actifs financiers,bilan,actif,BILAN
+279,Versements restant à effectuer sur titres immobilisés non libérés,bilan,actif,BILAN
+28,Amortissements des immobilisations,bilan,actif,BILAN
+280,Amortissements des immobilisations incorporelles et des frais d'établissement,bilan,actif,BILAN
+2801,Frais d'établissement,bilan,actif,BILAN
+2803,Frais de développement,bilan,actif,BILAN
+2805,"Concessions et droits similaires, brevets, licences, solutions informatiques, droits et valeurs similaires",bilan,actif,BILAN
+2806,Droit au bail,bilan,actif,BILAN
+2807,Fonds commercial,bilan,actif,BILAN
+2808,Autres immobilisations incorporelles,bilan,actif,BILAN
+281,Amortissements des immobilisations corporelles,bilan,actif,BILAN
+2812,"Agencements, aménagements de terrains",bilan,actif,BILAN
+2813,Constructions,bilan,actif,BILAN
+2814,Constructions sur sol d'autrui,bilan,actif,BILAN
+2815,"Installations, matériel et outillage industriels",bilan,actif,BILAN
+2818,Autres immobilisations corporelles,bilan,actif,BILAN
+28187,Amortissement du mali de fusion sur actifs corporels,bilan,actif,BILAN
+282,Amortissements des immobilisations mises en concession,bilan,actif,BILAN
+29,Dépréciations des immobilisations,bilan,actif,BILAN
+290,Dépréciations des immobilisations incorporelles,bilan,actif,BILAN
+2901,Frais d'établissement,bilan,actif,BILAN
+2903,Frais de développement,bilan,actif,BILAN
+2905,"Marques, procédés, droits et valeurs similaires",bilan,actif,BILAN
+2906,Droit au bail,bilan,actif,BILAN
+2907,Fonds commercial,bilan,actif,BILAN
+2908,Autres immobilisations incorporelles,bilan,actif,BILAN
+29081,Dépréciation du mali de fusion sur actifs incorporels,bilan,actif,BILAN
+291,Dépréciations des immobilisations corporelles,bilan,actif,BILAN
+2911,Terrains,bilan,actif,BILAN
+2912,Agencements et aménagements de terrains,bilan,actif,BILAN
+2913,Constructions,bilan,actif,BILAN
+2914,Constructions sur sol d'autrui,bilan,actif,BILAN
+2915,"Installations techniques, matériels et outillages industriels",bilan,actif,BILAN
+2918,Autres immobilisations corporelles,bilan,actif,BILAN
+29187,Dépréciation du mali de fusion sur actifs corporels,bilan,actif,BILAN
+292,Dépréciations des immobilisations mises en concession,bilan,actif,BILAN
+293,Dépréciations des immobilisations en cours,bilan,actif,BILAN
+2931,Immobilisations corporelles en cours,bilan,actif,BILAN
+2932,Immobilisations incorporelles en cours,bilan,actif,BILAN
+296,Dépréciations des participations et créances rattachées à des participations,bilan,actif,BILAN
+2961,Titres de participation,bilan,actif,BILAN
+2962,Titres évalués par équivalence,bilan,actif,BILAN
+2966,Autres formes de participation,bilan,actif,BILAN
+2967,Créances rattachées à des participations,bilan,actif,BILAN
+2968,Créances rattachées à des sociétés en participation,bilan,actif,BILAN
+297,Dépréciations des autres immobilisations financières,bilan,actif,BILAN
+2971,Titres immobilisés autres que les titres immobilisés de l'activité de portefeuille,bilan,actif,BILAN
+2972,Titres immobilisés (droit de créance),bilan,actif,BILAN
+2973,Titres immobilisés de l'activité de portefeuille,bilan,actif,BILAN
+2974,Prêts,bilan,actif,BILAN
+2975,Dépôts et cautionnements versés,bilan,actif,BILAN
+2976,Autres créances immobilisées,bilan,actif,BILAN
+3,COMPTES DE STOCKS ET EN-COURS,bilan,actif,BILAN
+31,Matières premières et fournitures,bilan,actif,BILAN
+32,Autres approvisionnements,bilan,actif,BILAN
+321,Matières consommables,bilan,actif,BILAN
+322,Fournitures consommables,bilan,actif,BILAN
+3221,Combustibles,bilan,actif,BILAN
+3222,Produits d'entretien,bilan,actif,BILAN
+3223,Fournitures d'atelier et d'usine,bilan,actif,BILAN
+3224,Fournitures de magasin,bilan,actif,BILAN
+3225,Fournitures de bureau,bilan,actif,BILAN
+326,Emballages,bilan,actif,BILAN
+3261,Emballages perdus,bilan,actif,BILAN
+3265,Emballages récupérables non identifiables,bilan,actif,BILAN
+3267,Emballages à usage mixte,bilan,actif,BILAN
+33,En-cours de production de biens,bilan,actif,BILAN
+331,Produits en cours,bilan,actif,BILAN
+335,Travaux en cours,bilan,actif,BILAN
+34,En-cours de production de services,bilan,actif,BILAN
+341,Études en cours,bilan,actif,BILAN
+345,Prestations de services en cours,bilan,actif,BILAN
+35,Stocks de produits,bilan,actif,BILAN
+351,Produits intermédiaires,bilan,actif,BILAN
+355,Produits finis,bilan,actif,BILAN
+358,Produits résiduels ou matières de récupération,bilan,actif,BILAN
+3581,Déchets,bilan,actif,BILAN
+3585,Rebuts,bilan,actif,BILAN
+3586,Matières de récupération,bilan,actif,BILAN
+36,Stocks provenant d'immobilisations,bilan,actif,BILAN
+37,Stocks de marchandises,bilan,actif,BILAN
+38,"Stocks en voie d'acheminement, mis en dépôt ou donnés en consignation",bilan,actif,BILAN
+39,Dépréciations des stocks et en-cours,bilan,actif,BILAN
+391,Dépréciations des matières premières et fournitures,bilan,actif,BILAN
+392,Dépréciations des autres approvisionnements,bilan,actif,BILAN
+393,Dépréciations des en-cours de production de biens,bilan,actif,BILAN
+394,Dépréciations des en-cours de production de services,bilan,actif,BILAN
+395,Dépréciations des stocks de produits,bilan,actif,BILAN
+397,Dépréciations des stocks de marchandises,bilan,actif,BILAN
+4P,COMPTES DE TIERS - PASSIF,bilan,passif,BILAN
+4A,COMPTES DE TIERS - ACTIF,bilan,actif,BILAN
+40,Fournisseurs et comptes rattachés,bilan,passif,BILAN
+401,Fournisseurs,bilan,passif,BILAN
+4011,Fournisseurs - Achats de biens et prestations de services,bilan,passif,BILAN
+4017,Fournisseurs - Retenues de garantie,bilan,passif,BILAN
+403,Fournisseurs - Effets à payer,bilan,passif,BILAN
+404,Fournisseurs d'immobilisations,bilan,passif,BILAN
+4041,Fournisseurs - Achats d'immobilisations,bilan,passif,BILAN
+4047,Fournisseurs d'immobilisations - Retenues de garantie,bilan,passif,BILAN
+405,Fournisseurs d'immobilisations - Effets à payer,bilan,passif,BILAN
+408,Fournisseurs - Factures non parvenues,bilan,passif,BILAN
+4081,Fournisseurs,bilan,passif,BILAN
+4084,Fournisseurs d'immobilisations,bilan,passif,BILAN
+4088,Fournisseurs - Intérêts courus,bilan,passif,BILAN
+409,Fournisseurs débiteurs,bilan,passif,BILAN
+4091,Fournisseurs - Avances et acomptes versés sur commandes,bilan,passif,BILAN
+4096,Fournisseurs - Créances pour emballages et matériel à rendre,bilan,passif,BILAN
+4097,Fournisseurs - Autres avoirs,bilan,passif,BILAN
+40971,Fournisseurs d'exploitation,bilan,passif,BILAN
+40974,Fournisseurs d'immobilisations,bilan,passif,BILAN
+4098,"Rabais, remises, ristournes à obtenir et autres avoirs non encore reçus",bilan,passif,BILAN
+41,Clients et comptes rattachés,bilan,actif,BILAN
+411,Clients,bilan,actif,BILAN
+4111,Clients - Ventes de biens ou de prestations de services,bilan,actif,BILAN
+4117,Clients - Retenues de garantie,bilan,actif,BILAN
+413,Clients - Effets à recevoir,bilan,actif,BILAN
+416,Clients douteux ou litigieux,bilan,actif,BILAN
+418,Clients - Produits non encore facturés,bilan,actif,BILAN
+4181,Clients - Factures à établir,bilan,actif,BILAN
+4188,Clients - Intérêts courus,bilan,actif,BILAN
+419,Clients créditeurs,bilan,actif,BILAN
+4191,Clients - Avances et acomptes reçus sur commandes,bilan,actif,BILAN
+4196,Clients - Dettes sur emballages et matériels consignés,bilan,actif,BILAN
+4197,Clients - Autres avoirs,bilan,actif,BILAN
+4198,"Rabais, remises, ristournes à accorder et autres avoirs à établir",bilan,actif,BILAN
+42,Personnel et comptes rattachés,bilan,passif,BILAN
+421,Personnel - Rémunérations dues,bilan,passif,BILAN
+422,Comité social et économique,bilan,passif,BILAN
+424,Participation des salariés aux résultats,bilan,passif,BILAN
+4246,Réserve spéciale,bilan,passif,BILAN
+4248,Comptes courants,bilan,passif,BILAN
+425,Personnel - Avances et acomptes et autres comptes débiteurs,bilan,passif,BILAN
+426,Personnel - Dépôts,bilan,passif,BILAN
+427,Personnel - Oppositions,bilan,passif,BILAN
+428,Personnel - Charges à payer,bilan,passif,BILAN
+4282,Dettes provisionnées pour congés à payer,bilan,passif,BILAN
+4284,Dettes provisionnées pour participation des salariés aux résultats,bilan,passif,BILAN
+4286,Autres charges à payer,bilan,passif,BILAN
+43,Sécurité sociale et autres organismes sociaux,bilan,passif,BILAN
+431,Sécurité sociale,bilan,passif,BILAN
+437,Autres organismes sociaux,bilan,passif,BILAN
+438,Organismes sociaux - Charges à payer,bilan,passif,BILAN
+4382,Charges sociales sur congés à payer,bilan,passif,BILAN
+4386,Autres charges à payer,bilan,passif,BILAN
+439,Organismes sociaux - Produits à recevoir,bilan,passif,BILAN
+44,État et autres collectivités publiques,bilan,passif,BILAN
+441,État - Subventions et aides à recevoir,bilan,passif,BILAN
+442,"Contributions, impôts et taxes recouvrés pour le compte de l'État",bilan,passif,BILAN
+4421,Prélèvements à la source (Impôt sur le revenu),bilan,passif,BILAN
+4422,Prélèvements forfaitaires non libératoires,bilan,passif,BILAN
+4423,Retenues et prélèvements sur les distributions,bilan,passif,BILAN
+444,État - Impôts sur les bénéfices,bilan,passif,BILAN
+445,État - Taxes sur le chiffre d'affaires,bilan,passif,BILAN
+4452,TVA due intracommunautaire,bilan,passif,BILAN
+4455,Taxes sur le chiffre d'affaires à décaisser,bilan,passif,BILAN
+44551,TVA à décaisser,bilan,passif,BILAN
+44558,Taxes assimilées à la TVA,bilan,passif,BILAN
+4456,Taxes sur le chiffre d'affaires déductibles,bilan,passif,BILAN
+44562,TVA sur immobilisations,bilan,passif,BILAN
+44563,TVA transférée par d'autres entités,bilan,passif,BILAN
+44566,TVA sur autres biens et services,bilan,passif,BILAN
+44567,Crédit de TVA à reporter,bilan,passif,BILAN
+44568,Taxes assimilées à la TVA,bilan,passif,BILAN
+4457,Taxes sur le chiffre d'affaires collectées,bilan,passif,BILAN
+44571,TVA collectée,bilan,passif,BILAN
+44578,Taxes assimilées à la TVA,bilan,passif,BILAN
+4458,Taxes sur le chiffre d'affaires à régulariser ou en attente,bilan,passif,BILAN
+44581,Acomptes - Régime simplifié d'imposition,bilan,passif,BILAN
+44583,Remboursement de taxes sur le chiffre d'affaires demandé,bilan,passif,BILAN
+44584,TVA récupérée d'avance,bilan,passif,BILAN
+44586,Taxes sur le chiffre d'affaires sur factures non parvenues,bilan,passif,BILAN
+44587,Taxes sur le chiffre d'affaires sur factures à établir,bilan,passif,BILAN
+446,Obligations cautionnées,bilan,passif,BILAN
+447,"Autres impôts, taxes et versements assimilés",bilan,passif,BILAN
+448,État - Charges à payer et produits à recevoir,bilan,passif,BILAN
+4481,État - Charges à Payer,bilan,passif,BILAN
+44811,Charges fiscales sur congés à payer,bilan,passif,BILAN
+44812,Charges à payer,bilan,passif,BILAN
+4482,État - Produits à recevoir,bilan,passif,BILAN
+449,Quotas d'émission à acquérir,bilan,passif,BILAN
+45,Groupe et associés,bilan,passif,BILAN
+451,Groupe,bilan,passif,BILAN
+455,Associés - Comptes courants,bilan,passif,BILAN
+4551,Principal,bilan,passif,BILAN
+4558,Intérêts courus,bilan,passif,BILAN
+456,Associés - Opérations sur le capital,bilan,passif,BILAN
+4561,Associés - Comptes d'apport en société,bilan,passif,BILAN
+45611,Apports en nature,bilan,passif,BILAN
+45615,Apports en numéraire,bilan,passif,BILAN
+4562,"Apporteurs - Capital appelé, non versé",bilan,passif,BILAN
+45621,"Actionnaires - Capital souscrit et appelé, non versé",bilan,passif,BILAN
+45625,"Associés - Capital appelé, non versé",bilan,passif,BILAN
+4563,Associés - Versements reçus sur augmentation de capital,bilan,passif,BILAN
+4564,Associés - Versements anticipés,bilan,passif,BILAN
+4566,Actionnaires défaillants,bilan,passif,BILAN
+4567,Associés - Capital à rembourser,bilan,passif,BILAN
+457,Associés - Dividendes à payer,bilan,passif,BILAN
+458,Associés - Opérations faites en commun et en GIE,bilan,passif,BILAN
+4581,Opérations courantes,bilan,passif,BILAN
+4588,Intérêts courus,bilan,passif,BILAN
+46,Débiteurs divers et créditeurs divers,bilan,actif,BILAN
+462,Créances sur cessions d'immobilisations,bilan,actif,BILAN
+464,Dettes sur acquisitions de valeurs mobilières de placement,bilan,actif,BILAN
+465,Créances sur cessions de valeurs mobilières de placement,bilan,actif,BILAN
+467,Divers comptes débiteurs et produits à recevoir,bilan,actif,BILAN
+468,Divers comptes créditeurs et charges à payer,bilan,actif,BILAN
+47,Comptes transitoires ou d'attente,bilan,actif,BILAN
+471,Comptes d'attente,bilan,actif,BILAN
+471L,Compte de Liaison Bilan,bilan,actif,BILAN
+472,Comptes d'attente,bilan,actif,BILAN
+473,Comptes d'attente,bilan,actif,BILAN
+474,Différences d'évaluation – Actif,bilan,actif,BILAN
+4741,Différences d'évaluation sur instruments financiers à terme - Actif,bilan,actif,BILAN
+4742,Différences d'évaluation sur jetons détenus - Actif,bilan,actif,BILAN
+4746,Différences d'évaluation de jetons sur des passifs - Actif,bilan,actif,BILAN
+475,Différences d'évaluation – Passif,bilan,actif,BILAN
+4751,Différences d'évaluation sur instruments financiers à terme - Passif,bilan,actif,BILAN
+4752,Différences d'évaluation sur jetons détenus - Passif,bilan,actif,BILAN
+4756,Différences d'évaluation de jetons sur des passifs - Passif,bilan,actif,BILAN
+476,Différence de conversion - Actif,bilan,actif,BILAN
+4761,Diminution des créances,bilan,actif,BILAN
+4762,Augmentation des dettes,bilan,actif,BILAN
+4768,Différences compensées par couverture de change,bilan,actif,BILAN
+477,Différences de conversion - Passif,bilan,actif,BILAN
+4771,Augmentation des créances,bilan,actif,BILAN
+4772,Diminution des dettes,bilan,actif,BILAN
+4778,Différences compensées par couverture de change,bilan,actif,BILAN
+478,Autres comptes transitoires,bilan,actif,BILAN
+4781,Mali de fusion sur actif circulant,bilan,actif,BILAN
+48,Comptes de régularisation,bilan,actif,BILAN
+481,Frais d'émission des emprunts,bilan,actif,BILAN
+486,Charges constatées d'avance,bilan,actif,BILAN
+487,Produits constatés d'avance,bilan,actif,BILAN
+4871,Produits constatés d'avance sur jetons émis,bilan,actif,BILAN
+488,Comptes de répartition périodique des charges et des produits,bilan,actif,BILAN
+4886,Charges,bilan,actif,BILAN
+4887,Produits,bilan,actif,BILAN
+49,Dépréciations des comptes de tiers,bilan,actif,BILAN
+491,Dépréciations des comptes de clients,bilan,actif,BILAN
+495,Dépréciations des comptes du groupe et des associés,bilan,actif,BILAN
+4951,Comptes du groupe,bilan,actif,BILAN
+4955,Comptes courants des associés,bilan,actif,BILAN
+4958,Opérations faites en commun et en GIE,bilan,actif,BILAN
+496,Dépréciations des comptes de débiteurs divers,bilan,actif,BILAN
+4962,Créances sur cessions d'immobilisations,bilan,actif,BILAN
+4965,Créances sur cessions de valeurs mobilières de placement,bilan,actif,BILAN
+4967,Autres comptes débiteurs,bilan,actif,BILAN
+5,COMPTES FINANCIERS,bilan,actif,BILAN
+50,Valeurs mobilières de placement,bilan,actif,BILAN
+502,Actions propres,bilan,actif,BILAN
+5021,Actions destinées à être attribuées aux employés et affectées à des plans déterminés,bilan,actif,BILAN
+5022,Actions disponibles pour être attribuées aux employés ou pour la régularisation des cours de bourse,bilan,actif,BILAN
+503,Actions,bilan,actif,BILAN
+5031,Titres cotés,bilan,actif,BILAN
+5035,Titres non cotés,bilan,actif,BILAN
+504,Autres titres conférant un droit de propriété,bilan,actif,BILAN
+505,Obligations et bons émis par la société et rachetés par elle,bilan,actif,BILAN
+506,Obligations,bilan,actif,BILAN
+5061,Titres cotés,bilan,actif,BILAN
+5065,Titres non cotés,bilan,actif,BILAN
+507,Bons du Trésor et bons de caisse à court terme,bilan,actif,BILAN
+508,Autres valeurs mobilières de placement et autres créances assimilées,bilan,actif,BILAN
+5081,Autres valeurs mobilières,bilan,actif,BILAN
+5082,Bons de souscription,bilan,actif,BILAN
+5088,"Intérêts courus sur obligations, bons et valeurs assimilés",bilan,actif,BILAN
+509,Versements restant à effectuer sur valeurs mobilières de placement non libérées,bilan,actif,BILAN
+51,"Banques, établissements financiers et assimilés",bilan,actif,BILAN
+511,Valeurs à l'encaissement,bilan,actif,BILAN
+5111,Coupons échus à l'encaissement,bilan,actif,BILAN
+5112,Chèques à encaisser,bilan,actif,BILAN
+5113,Effets à l'encaissement,bilan,actif,BILAN
+5114,Effets à l'escompte,bilan,actif,BILAN
+512,Banques,bilan,actif,BILAN
+5121,Comptes en euros,bilan,actif,BILAN
+5124,Comptes en devises,bilan,actif,BILAN
+517,Autres organismes financiers,bilan,actif,BILAN
+518,Intérêts courus,bilan,actif,BILAN
+5181,Intérêts courus à payer,bilan,actif,BILAN
+5188,Intérêts courus à recevoir,bilan,actif,BILAN
+519,Concours bancaires courants,bilan,actif,BILAN
+5191,Crédit de mobilisation de créances commerciales,bilan,actif,BILAN
+5193,Mobilisation de créances nées à l'étranger,bilan,actif,BILAN
+5198,Intérêts courus sur concours bancaires courants,bilan,actif,BILAN
+52,Instruments financiers à terme et jetons détenus,bilan,actif,BILAN
+521,Instruments financiers à terme,bilan,actif,BILAN
+522,Jetons détenus,bilan,actif,BILAN
+523,Jetons auto-détenus,bilan,actif,BILAN
+524,Jetons empruntés,bilan,actif,BILAN
+53,Caisse,bilan,actif,BILAN
+58,Virements internes,bilan,actif,BILAN
+59,Dépréciations des comptes financiers,bilan,actif,BILAN
+590,Dépréciations des valeurs mobilières de placement,bilan,actif,BILAN
+5903,Actions,bilan,actif,BILAN
+5904,Autres titres conférant un droit de propriété,bilan,actif,BILAN
+5906,Obligations,bilan,actif,BILAN
+5908,Autres valeurs mobilières de placement et créances assimilées,bilan,actif,BILAN
+6,COMPTES DE CHARGES,resultat,charges,RESULTAT
+60,Achats (sauf 603),resultat,charges,RESULTAT
+601,Achats stockés - Matières premières et fournitures,resultat,charges,RESULTAT
+602,Achats stockés - Autres approvisionnements,resultat,charges,RESULTAT
+6021,Matières consommables,resultat,charges,RESULTAT
+6022,Fournitures consommables,resultat,charges,RESULTAT
+60221,Combustibles,resultat,charges,RESULTAT
+60222,Produits d'entretien,resultat,charges,RESULTAT
+60223,Fournitures d'atelier et d'usine,resultat,charges,RESULTAT
+60224,Fournitures de magasin,resultat,charges,RESULTAT
+60225,Fourniture de bureau,resultat,charges,RESULTAT
+6026,Emballages,resultat,charges,RESULTAT
+60261,Emballages perdus,resultat,charges,RESULTAT
+60262,Malis sur emballage,resultat,charges,RESULTAT
+60265,Emballages récupérables non identifiables,resultat,charges,RESULTAT
+60267,Emballages à usage mixte,resultat,charges,RESULTAT
+604,Achats d'études et prestations de services,resultat,charges,RESULTAT
+605,"Achats de matériel, équipements et travaux",resultat,charges,RESULTAT
+606,Achats non stockés de matière et fournitures,resultat,charges,RESULTAT
+6061,"Fournitures non stockables (eau, énergie, etc.)",resultat,charges,RESULTAT
+6063,Fournitures d'entretien et de petit équipement,resultat,charges,RESULTAT
+6064,Fournitures administratives,resultat,charges,RESULTAT
+6068,Autres matières et fournitures,resultat,charges,RESULTAT
+607,Achats de marchandises,resultat,charges,RESULTAT
+608,Frais accessoires incorporés aux achats,resultat,charges,RESULTAT
+609,"Rabais, remises et ristournes obtenus sur achats",resultat,charges,RESULTAT
+6098,"Rabais, remises et ristournes non affectés",resultat,charges,RESULTAT
+603,Variation des stocks d'approvisionnements et de marchandises,resultat,charges,RESULTAT
+6031,Variation des stocks de matières premières et fournitures,resultat,charges,RESULTAT
+6032,Variation des stocks des autres approvisionnements,resultat,charges,RESULTAT
+6037,Variation des stocks de marchandises,resultat,charges,RESULTAT
+61,Services extérieurs,resultat,charges,RESULTAT
+611,Sous-traitance générale,resultat,charges,RESULTAT
+612,Redevances de crédit-bail,resultat,charges,RESULTAT
+6122,Crédit-bail mobilier,resultat,charges,RESULTAT
+6125,Crédit-bail immobilier,resultat,charges,RESULTAT
+613,Locations,resultat,charges,RESULTAT
+6132,Locations immobilières,resultat,charges,RESULTAT
+6135,Locations mobilières,resultat,charges,RESULTAT
+614,Charges locatives et de copropriété,resultat,charges,RESULTAT
+615,Entretien et réparation,resultat,charges,RESULTAT
+6152,Entretien et réparation sur biens immobiliers,resultat,charges,RESULTAT
+6155,Entretien et réparation sur biens mobiliers,resultat,charges,RESULTAT
+6156,Maintenance,resultat,charges,RESULTAT
+616,Primes d'assurances,resultat,charges,RESULTAT
+6161,Multirisques,resultat,charges,RESULTAT
+6162,Assurance obligatoire dommage construction,resultat,charges,RESULTAT
+6163,Assurance - transport,resultat,charges,RESULTAT
+61636,sur achats,resultat,charges,RESULTAT
+61637,sur ventes,resultat,charges,RESULTAT
+61638,sur autres biens,resultat,charges,RESULTAT
+6164,Risques d'exploitation,resultat,charges,RESULTAT
+6165,Insolvabilité clients,resultat,charges,RESULTAT
+617,Études et recherches,resultat,charges,RESULTAT
+618,Divers,resultat,charges,RESULTAT
+6181,Documentation générale,resultat,charges,RESULTAT
+6183,Documentation technique,resultat,charges,RESULTAT
+6185,"Frais de colloques, séminaires, conférences",resultat,charges,RESULTAT
+619,"Rabais, remises et ristournes obtenus sur services extérieurs",resultat,charges,RESULTAT
+62,Autres services extérieurs,resultat,charges,RESULTAT
+621,Personnel extérieur à l'entité,resultat,charges,RESULTAT
+6211,Personnel intérimaire,resultat,charges,RESULTAT
+6214,Personnel détaché ou prêté à l'entité,resultat,charges,RESULTAT
+622,Rémunérations d'intermédiaires et honoraires,resultat,charges,RESULTAT
+6221,Commissions et courtages sur achats,resultat,charges,RESULTAT
+6222,Commissions et courtages sur ventes,resultat,charges,RESULTAT
+6224,Rémunérations des transitaires,resultat,charges,RESULTAT
+6225,Rémunérations d'affacturage,resultat,charges,RESULTAT
+6226,Honoraires,resultat,charges,RESULTAT
+6227,Frais d'actes et de contentieux,resultat,charges,RESULTAT
+6228,Divers,resultat,charges,RESULTAT
+623,"Publicité, publications, relations publiques",resultat,charges,RESULTAT
+6231,Annonces et insertions,resultat,charges,RESULTAT
+6232,Échantillons,resultat,charges,RESULTAT
+6233,Foires et expositions,resultat,charges,RESULTAT
+6234,Cadeaux à la clientèle,resultat,charges,RESULTAT
+6235,Primes,resultat,charges,RESULTAT
+6236,Catalogues et imprimés,resultat,charges,RESULTAT
+6237,Publications,resultat,charges,RESULTAT
+6238,"Divers (pourboires, dons courants)",resultat,charges,RESULTAT
+624,Transports de biens et transports collectifs du personnel,resultat,charges,RESULTAT
+6241,Transports sur achats,resultat,charges,RESULTAT
+6242,Transports sur ventes,resultat,charges,RESULTAT
+6243,Transports entre établissements ou chantiers,resultat,charges,RESULTAT
+6244,Transports administratifs,resultat,charges,RESULTAT
+6247,Transports collectifs du personnel,resultat,charges,RESULTAT
+6248,Divers,resultat,charges,RESULTAT
+625,"Déplacements, missions et réceptions",resultat,charges,RESULTAT
+6251,Voyages et déplacements,resultat,charges,RESULTAT
+6255,Frais de déménagement,resultat,charges,RESULTAT
+6256,Missions,resultat,charges,RESULTAT
+6257,Réceptions,resultat,charges,RESULTAT
+626,Frais postaux et de télécommunications,resultat,charges,RESULTAT
+627,Services bancaires et assimilés,resultat,charges,RESULTAT
+6271,"Frais sur titres (achat, vente, garde)",resultat,charges,RESULTAT
+6272,Commissions et frais sur émission d'emprunts,resultat,charges,RESULTAT
+6275,Frais sur effets,resultat,charges,RESULTAT
+6276,Location de coffres,resultat,charges,RESULTAT
+6278,Autres frais et commissions sur prestations de services,resultat,charges,RESULTAT
+628,Divers,resultat,charges,RESULTAT
+6281,Concours divers (cotisations),resultat,charges,RESULTAT
+6284,Frais de recrutement de personnel,resultat,charges,RESULTAT
+629,"Rabais, remises et ristournes obtenus sur autres services extérieurs",resultat,charges,RESULTAT
+63,"Impôts, taxes et versements assimilés",resultat,charges,RESULTAT
+631,"Impôts, taxes et versements assimilés sur rémunérations (administrations des impôts)",resultat,charges,RESULTAT
+6311,Taxe sur les salaires,resultat,charges,RESULTAT
+6314,Cotisation pour défaut d'investissement obligatoire dans la construction,resultat,charges,RESULTAT
+6318,Autres,resultat,charges,RESULTAT
+633,"Impôts, taxes et versements assimilés sur rémunérations (autres organismes)",resultat,charges,RESULTAT
+6331,Versement de transport,resultat,charges,RESULTAT
+6332,Allocations logement,resultat,charges,RESULTAT
+6333,Contribution unique des employeurs à la formation professionnelle,resultat,charges,RESULTAT
+6334,Participation des employeurs à l'effort de construction,resultat,charges,RESULTAT
+6335,Versements libératoires ouvrant droit à l'exonération de la taxe d'apprentissage,resultat,charges,RESULTAT
+6338,Autres,resultat,charges,RESULTAT
+635,"Autres impôts, taxes et versements assimilés (administrations des impôts)",resultat,charges,RESULTAT
+6351,Impôts directs (sauf impôts sur les bénéfices),resultat,charges,RESULTAT
+63511,Contribution économique territoriale,resultat,charges,RESULTAT
+63512,Taxes foncières,resultat,charges,RESULTAT
+63513,Autres impôts locaux,resultat,charges,RESULTAT
+63514,Taxe sur les véhicules des sociétés,resultat,charges,RESULTAT
+6352,Taxe sur le chiffre d'affaires non récupérables,resultat,charges,RESULTAT
+6353,Impôts indirects,resultat,charges,RESULTAT
+6354,Droits d'enregistrement et de timbre,resultat,charges,RESULTAT
+63541,Droits de mutation,resultat,charges,RESULTAT
+6358,Autres droits,resultat,charges,RESULTAT
+637,"Autres impôts, taxes et versements assimilés (autres organismes)",resultat,charges,RESULTAT
+6371,Contribution sociale de solidarité à la charge des sociétés,resultat,charges,RESULTAT
+6372,Taxes perçues par les organismes publics internationaux,resultat,charges,RESULTAT
+6374,Impôts et taxes exigibles à l'étranger,resultat,charges,RESULTAT
+6378,Taxes diverses,resultat,charges,RESULTAT
+638,Rappel d'impôts (autres qu'impôts sur les bénéfices),resultat,charges,RESULTAT
+64,Charges de personnel,resultat,charges,RESULTAT
+641,Rémunérations du personnel,resultat,charges,RESULTAT
+6411,"Salaires, appointements",resultat,charges,RESULTAT
+6412,Congés payés,resultat,charges,RESULTAT
+6413,Primes et gratifications,resultat,charges,RESULTAT
+6414,Indemnités et avantages divers,resultat,charges,RESULTAT
+6415,Supplément familial,resultat,charges,RESULTAT
+644,Rémunération du travail de l'exploitant,resultat,charges,RESULTAT
+645,Cotisations de sécurité sociale et de prévoyance,resultat,charges,RESULTAT
+6451,Cotisations à l'Urssaf,resultat,charges,RESULTAT
+6452,Cotisations aux mutuelles,resultat,charges,RESULTAT
+6453,Cotisations aux caisses de retraites,resultat,charges,RESULTAT
+6454,Cotisations à Pôle emploi,resultat,charges,RESULTAT
+6458,Cotisations aux autres organismes sociaux,resultat,charges,RESULTAT
+646,Cotisations sociales personnelles de l'exploitant,resultat,charges,RESULTAT
+647,Autres cotisations sociales,resultat,charges,RESULTAT
+6471,Prestations directes,resultat,charges,RESULTAT
+6472,Versements au comité social et économique,resultat,charges,RESULTAT
+6474,Versements aux autres œuvres sociales,resultat,charges,RESULTAT
+6475,"Médecine du travail, pharmacie",resultat,charges,RESULTAT
+648,Autres charges de personnel,resultat,charges,RESULTAT
+649,Remboursements de charges de personnel,resultat,charges,RESULTAT
+65,Autres charges de gestion courante,resultat,charges,RESULTAT
+651,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",resultat,charges,RESULTAT
+6511,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques",resultat,charges,RESULTAT
+6516,Droits d'auteur et de reproduction,resultat,charges,RESULTAT
+6518,Autres droits et valeurs similaires,resultat,charges,RESULTAT
+653,Rémunérations de l'activité des administrateurs et des gérants,resultat,charges,RESULTAT
+654,Pertes sur créances irrécouvrables,resultat,charges,RESULTAT
+6541,Créances de l'exercice,resultat,charges,RESULTAT
+6544,Créances des exercices antérieurs,resultat,charges,RESULTAT
+655,Quote-part de résultat sur opérations faites en commun,resultat,charges,RESULTAT
+6551,Quote-part de bénéfice transférée - comptabilité du gérant,resultat,charges,RESULTAT
+6555,Quote-part de perte supportée - comptabilité des associés non gérants,resultat,charges,RESULTAT
+656,Pertes de change sur créances et dettes commerciales,resultat,charges,RESULTAT
+657,Valeurs comptables des immobilisations incorporelles et corporelles cédées,resultat,charges,RESULTAT
+658,Pénalités et autres charges,resultat,charges,RESULTAT
+6581,Pénalités sur marchés (et dédits payés sur achats et ventes),resultat,charges,RESULTAT
+6582,"Pénalités, amendes fiscales et pénales",resultat,charges,RESULTAT
+6583,Malis provenant de clauses d'indexation,resultat,charges,RESULTAT
+6584,Lots,resultat,charges,RESULTAT
+6588,Opérations de constitution ou liquidation des fiducies,resultat,charges,RESULTAT
+66,Charges financières,resultat,charges,RESULTAT
+661,Charges d'intérêts,resultat,charges,RESULTAT
+6611,Intérêts des emprunts et dettes,resultat,charges,RESULTAT
+66116,Intérêts des emprunts et dettes assimilées,resultat,charges,RESULTAT
+66117,Intérêts des dettes rattachées à des participations,resultat,charges,RESULTAT
+6612,"Charges de la fiducie, résultat de la période",resultat,charges,RESULTAT
+6615,Intérêts des comptes courants et des dépôts créditeurs,resultat,charges,RESULTAT
+6616,Intérêts bancaires et sur opérations de financement (escompte…),resultat,charges,RESULTAT
+6617,Intérêts des obligations cautionnées,resultat,charges,RESULTAT
+6618,Intérêts des autres dettes,resultat,charges,RESULTAT
+66181,Intérêts des dettes commerciales,resultat,charges,RESULTAT
+66188,Intérêts des dettes diverses,resultat,charges,RESULTAT
+664,Pertes sur créances liées à des participations,resultat,charges,RESULTAT
+665,Escomptes accordés,resultat,charges,RESULTAT
+666,Pertes de change financières,resultat,charges,RESULTAT
+666L,Compte de liaison Résultat,resultat,charges,RESULTAT
+667,Charges sur cession d'éléments financiers,resultat,charges,RESULTAT
+6671,Valeurs comptables des immobilisations financières cédées,resultat,charges,RESULTAT
+6672,Charges nettes sur cessions de titres immobilisés de l'activité de portefeuille,resultat,charges,RESULTAT
+6673,Charges nettes sur cessions de valeurs mobilières de placement,resultat,charges,RESULTAT
+6674,Charges nettes sur cessions de jetons,resultat,charges,RESULTAT
+668,Autres charges financières,resultat,charges,RESULTAT
+67,Charges exceptionnelles,resultat,charges,RESULTAT
+672,Charges sur exercices antérieurs,resultat,charges,RESULTAT
+678,Autres charges exceptionnelles,resultat,charges,RESULTAT
+68,"Dotations aux amortissements, aux dépréciations et aux provisions",resultat,charges,RESULTAT
+681,"Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges d'exploitation)",resultat,charges,RESULTAT
+6811,Dotations aux amortissements sur immobilisations incorporelles et corporelles,resultat,charges,RESULTAT
+68111,Immobilisations incorporelles et frais d'établissement,resultat,charges,RESULTAT
+68112,Immobilisations corporelles,resultat,charges,RESULTAT
+6815,Dotations aux provisions d'exploitation,resultat,charges,RESULTAT
+6816,Dotations pour dépréciations des immobilisations incorporelles et corporelles,resultat,charges,RESULTAT
+68161,Immobilisations incorporelles,resultat,charges,RESULTAT
+68162,Immobilisations corporelles,resultat,charges,RESULTAT
+6817,Dotations pour dépréciations des actifs circulants,resultat,charges,RESULTAT
+68173,Stocks et en-cours,resultat,charges,RESULTAT
+68174,Créances,resultat,charges,RESULTAT
+686,"Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges financières)",resultat,charges,RESULTAT
+6861,Dotations aux amortissements des primes de remboursement des emprunts,resultat,charges,RESULTAT
+6862,Dotations aux amortissements des frais d'émission des emprunts,resultat,charges,RESULTAT
+6865,Dotations aux provisions financières,resultat,charges,RESULTAT
+6866,Dotations pour dépréciation des éléments financiers,resultat,charges,RESULTAT
+68662,Immobilisations financières,resultat,charges,RESULTAT
+68665,Valeurs mobilières de placement,resultat,charges,RESULTAT
+687,"Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges exceptionnelles)",resultat,charges,RESULTAT
+6871,Dotations aux amortissements exceptionnels des immobilisations,resultat,charges,RESULTAT
+6872,Dotations aux provisions réglementées (immobilisations),resultat,charges,RESULTAT
+68725,Amortissements dérogatoires,resultat,charges,RESULTAT
+6873,Dotations aux provisions réglementées (stocks),resultat,charges,RESULTAT
+6874,Dotations aux autres provisions réglementées,resultat,charges,RESULTAT
+6875,Dotations aux provisions exceptionnelles,resultat,charges,RESULTAT
+6876,Dotations pour dépréciations exceptionnelles,resultat,charges,RESULTAT
+69,Participation des salariés - Impôts sur les bénéfices et assimilés,resultat,charges,RESULTAT
+691,Participation des salariés aux résultats,resultat,charges,RESULTAT
+695,Impôts sur les bénéfices,resultat,charges,RESULTAT
+6951,Impôts dus en France,resultat,charges,RESULTAT
+6952,Contribution additionnelle à l'impôt sur les bénéfices,resultat,charges,RESULTAT
+6954,Impôts dus à l'étranger,resultat,charges,RESULTAT
+696,Suppléments d'impôt sur les sociétés liés aux distributions,resultat,charges,RESULTAT
+698,Intégration fiscale,resultat,charges,RESULTAT
+6981,Intégration fiscale - Charges,resultat,charges,RESULTAT
+6989,Intégration fiscale - Produits,resultat,charges,RESULTAT
+699,Produits - Reports en arrière des déficits,resultat,charges,RESULTAT
+7,COMPTES DE PRODUITS,resultat,produits,RESULTAT
+70,"Ventes de produits fabriqués, prestations de services, marchandises",resultat,produits,RESULTAT
+701,Ventes de produits finis,resultat,produits,RESULTAT
+702,Ventes de produits intermédiaires,resultat,produits,RESULTAT
+703,Ventes de produits résiduels,resultat,produits,RESULTAT
+704,Travaux,resultat,produits,RESULTAT
+705,Études,resultat,produits,RESULTAT
+706,Prestations de services,resultat,produits,RESULTAT
+707,Ventes de marchandises,resultat,produits,RESULTAT
+708,Produits des activités annexes,resultat,produits,RESULTAT
+7081,Produits des services exploités dans l'intérêt du personnel,resultat,produits,RESULTAT
+7082,Commissions et courtages,resultat,produits,RESULTAT
+7083,Locations diverses,resultat,produits,RESULTAT
+7084,Mise à disposition de personnel facturée,resultat,produits,RESULTAT
+7085,Ports et frais accessoires facturés,resultat,produits,RESULTAT
+7086,Bonis sur reprises d'emballages consignés,resultat,produits,RESULTAT
+7087,Bonifications obtenues des clients et primes sur ventes,resultat,produits,RESULTAT
+7088,Autres produits d'activités annexes (cessions d'approvisionnements),resultat,produits,RESULTAT
+709,"Rabais, remises et ristournes accordés",resultat,produits,RESULTAT
+7091,"Rabais, remises et ristournes accordés sur ventes de produits finis",resultat,produits,RESULTAT
+7092,"Rabais, remises et ristournes accordés sur ventes de produits intermédiaires",resultat,produits,RESULTAT
+7094,"Rabais, remises et ristournes accordés sur travaux",resultat,produits,RESULTAT
+7095,"Rabais, remises et ristournes accordés sur études",resultat,produits,RESULTAT
+7096,"Rabais, remises et ristournes accordés sur prestations de services",resultat,produits,RESULTAT
+7097,"Rabais, remises et ristournes accordés sur ventes de marchandises",resultat,produits,RESULTAT
+7098,"Rabais, remises et ristournes accordés sur produits des activités annexes",resultat,produits,RESULTAT
+71,Production stockée (ou déstockage),resultat,produits,RESULTAT
+713,Variation des stocks des en-cours de production et de produits,resultat,produits,RESULTAT
+7133,Variation des en-cours de production de biens,resultat,produits,RESULTAT
+71331,Produits en cours,resultat,produits,RESULTAT
+71335,Travaux en cours,resultat,produits,RESULTAT
+7134,Variation des en-cours de production de services,resultat,produits,RESULTAT
+71341,Études en cours,resultat,produits,RESULTAT
+71345,Prestations de services en cours,resultat,produits,RESULTAT
+7135,Variation des stocks de produits,resultat,produits,RESULTAT
+71351,Produits intermédiaires,resultat,produits,RESULTAT
+71355,Produits finis,resultat,produits,RESULTAT
+71358,Produits résiduels,resultat,produits,RESULTAT
+72,Production immobilisée,resultat,produits,RESULTAT
+721,Immobilisations incorporelles,resultat,produits,RESULTAT
+722,Immobilisations corporelles,resultat,produits,RESULTAT
+74,Subventions,resultat,produits,RESULTAT
+741,Subventions d'exploitation,resultat,produits,RESULTAT
+742,Subventions d'équilibre,resultat,produits,RESULTAT
+747,Quote-part des subventions d'investissement virée au résultat de l'exercice,resultat,produits,RESULTAT
+75,Autres produits de gestion courante,resultat,produits,RESULTAT
+751,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",resultat,produits,RESULTAT
+7511,"Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques",resultat,produits,RESULTAT
+7516,Droits d'auteur et de reproduction,resultat,produits,RESULTAT
+7518,Autres droits et valeurs similaires,resultat,produits,RESULTAT
+752,Revenus des immeubles non affectés à des activités professionnelles,resultat,produits,RESULTAT
+753,Rémunérations de l'activité des administrateurs et des gérants,resultat,produits,RESULTAT
+754,Ristournes perçues des coopératives provenant des excédents,resultat,produits,RESULTAT
+755,Quote-part de résultat sur opérations faites en commun,resultat,produits,RESULTAT
+7551,Quote-part de perte transférée - comptabilité du gérant,resultat,produits,RESULTAT
+7555,Quote-part de bénéfice attribuée - comptabilité des associés non-gérants,resultat,produits,RESULTAT
+756,Gains de change sur créances et dettes commerciales,resultat,produits,RESULTAT
+757,Produits des cessions d'immobilisations incorporelles et corporelles,resultat,produits,RESULTAT
+758,Indemnités et autres produits,resultat,produits,RESULTAT
+7581,Dédits et pénalités perçus sur achats et ventes,resultat,produits,RESULTAT
+7582,Libéralités reçues,resultat,produits,RESULTAT
+7583,Rentrées sur créances amorties,resultat,produits,RESULTAT
+7584,Dégrèvements d'impôts autres qu'impôts sur les bénéfices,resultat,produits,RESULTAT
+7585,Bonis provenant de clauses d'indexation,resultat,produits,RESULTAT
+7586,Lots,resultat,produits,RESULTAT
+7587,Indemnités d'assurance,resultat,produits,RESULTAT
+7588,Opérations de constitution ou liquidation des fiducies,resultat,produits,RESULTAT
+76,Produits financiers,resultat,produits,RESULTAT
+761,Produits de participations,resultat,produits,RESULTAT
+7611,Revenus des titres de participation,resultat,produits,RESULTAT
+7612,"Produits de la fiducie, résultat de la période",resultat,produits,RESULTAT
+7616,Revenus sur autres formes de participation,resultat,produits,RESULTAT
+7617,Revenus des créances rattachées à des participations,resultat,produits,RESULTAT
+762,Produits des autres immobilisations financières,resultat,produits,RESULTAT
+7621,Revenus des titres immobilisés,resultat,produits,RESULTAT
+7626,Revenus des prêts,resultat,produits,RESULTAT
+7627,Revenus des créances immobilisées,resultat,produits,RESULTAT
+763,Revenus des autres créances,resultat,produits,RESULTAT
+7631,Revenus des créances commerciales,resultat,produits,RESULTAT
+7638,Revenus des créances diverses,resultat,produits,RESULTAT
+764,Revenus des valeurs mobilières de placement,resultat,produits,RESULTAT
+765,Escomptes obtenus,resultat,produits,RESULTAT
+766,Gains de change financiers,resultat,produits,RESULTAT
+767,Produits sur cession d'éléments financiers,resultat,produits,RESULTAT
+7671,Produits des cessions d'immobilisations financières,resultat,produits,RESULTAT
+7672,Produits nets sur cessions de titres immobilisés de l'activité de portefeuille,resultat,produits,RESULTAT
+7673,Produits nets sur cessions de valeurs mobilières de placement,resultat,produits,RESULTAT
+7674,Produits nets sur cessions de jetons,resultat,produits,RESULTAT
+768,Autres produits financiers,resultat,produits,RESULTAT
+7683,Bonis provenant du rachat par l'entreprise d'actions et d'obligations émises par elle-même,resultat,produits,RESULTAT
+77,Produits exceptionnels,resultat,produits,RESULTAT
+772,Produits sur exercices antérieurs,resultat,produits,RESULTAT
+778,Autres produits exceptionnels,resultat,produits,RESULTAT
+78,"Reprises sur amortissements, dépréciations et provisions",resultat,produits,RESULTAT
+781,"Reprises sur amortissements, dépréciations et provisions (à inscrire dans les produits d'exploitation)",resultat,produits,RESULTAT
+7811,Reprises sur amortissements des immobilisations incorporelles et corporelles,resultat,produits,RESULTAT
+78111,Immobilisations incorporelles,resultat,produits,RESULTAT
+78112,Immobilisations corporelles,resultat,produits,RESULTAT
+7815,Reprises sur provisions d'exploitation,resultat,produits,RESULTAT
+7816,Reprises sur dépréciations des immobilisations incorporelles et corporelles,resultat,produits,RESULTAT
+78161,Immobilisations incorporelles,resultat,produits,RESULTAT
+78162,Immobilisations corporelles,resultat,produits,RESULTAT
+7817,Reprises sur dépréciations des actifs circulants,resultat,produits,RESULTAT
+78173,Stocks et en-cours,resultat,produits,RESULTAT
+78174,Créances,resultat,produits,RESULTAT
+786,Reprises sur dépréciations et provisions (à inscrire dans les produits financiers),resultat,produits,RESULTAT
+7865,Reprises sur provisions financières,resultat,produits,RESULTAT
+7866,Reprises sur dépréciations des éléments financiers,resultat,produits,RESULTAT
+78662,Immobilisations financières,resultat,produits,RESULTAT
+78665,Valeurs mobilières de placement,resultat,produits,RESULTAT
+787,Reprises sur dépréciations et provisions (à inscrire dans les produits exceptionnels),resultat,produits,RESULTAT
+7872,Reprises sur provisions réglementées (immobilisations),resultat,produits,RESULTAT
+78725,Amortissements dérogatoires,resultat,produits,RESULTAT
+7873,Reprises sur provisions réglementées (stocks),resultat,produits,RESULTAT
+7874,Reprises sur autres provisions réglementées,resultat,produits,RESULTAT
+7875,Reprises sur provisions exceptionnelles,resultat,produits,RESULTAT
+7876,Reprises sur dépréciations exceptionnelles,resultat,produits,RESULTAT

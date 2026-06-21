@@ -153,11 +153,13 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         use_explicit_schema: false,
     },
     // 9. dim_account : plan de compte. Schéma explicite + null_padding car le
-    //    fichier peut contenir des lignes incomplètes (sous_classe vide).
+    //    fichier peut contenir des lignes incomplètes (sous_classe vide). La 5e
+    //    colonne `flow_scheme` est aujourd'hui peuplée explicitement par compte
+    //    (BILAN / RESULTAT dérivé de la classe) — cf. v_flow_behavior.
     CsvMapping {
         file: "accounts.csv",
         table: "dim_account",
-        columns: &["code", "libelle", "classe", "sous_classe"],
+        columns: &["code", "libelle", "classe", "sous_classe", "flow_scheme"],
         casts: &[],
         use_explicit_schema: true,
     },
