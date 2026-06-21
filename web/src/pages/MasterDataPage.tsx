@@ -1,5 +1,16 @@
 // Page « Master data » : CRUD générique sur les tables de référentiel.
-// Les colonnes et le formulaire sont générés depuis MASTER_TABLES (types.ts).
+//
+// Les tables et colonnes sont découvertes dynamiquement :
+// - `GET /api/md` fournit la liste des tables navigables (natives +
+//   `car_<code>` caractéristiques + `lst_<code>` listes de valeurs) ;
+// - `GET /api/md/{table}/schema` fournit le schéma complet (colonnes natives +
+//   dynamiques avec métadonnées FK).
+//
+// Pour les tables natives, on fusionne le schéma runtime avec MASTER_TABLES
+// (qui porte les labels et types riches : bool, date, options codées en dur
+// comme `classe` ou `statut`). Pour les tables dynamiques (`car_*`, `lst_*`),
+// tout est construit depuis le schéma (colonnes `code`, `libelle` + attributs
+// N2 typés comme FK).
 
 import {
   type FormEvent,
@@ -17,9 +28,13 @@ import {
 } from '@tanstack/react-table';
 import { api } from '../api';
 import type {
+  ColumnDef,
+  ColumnSchema,
   DataHealthReport,
   MasterTable,
   TableDef,
+  TableSchema,
+  TableSummary,
 } from '../types';
 import { MASTER_TABLES } from '../types';
 import { FieldInput } from '../components/FieldInput';
@@ -29,6 +44,63 @@ import { findReferenceDrift } from '../utils/referenceCheck';
 type Row = Record<string, unknown>;
 type FormState = { mode: 'create' } | { mode: 'edit'; row: Row } | null;
 type Notice = { kind: 'success' | 'error'; text: string } | null;
+
+// ───────────── Construction runtime d'un TableDef depuis le schéma ─────────────
+
+// Capitalise un identifiant technique pour fallback de libellé : `compte_parent`
+// → `Compte parent`, `code` → `Code`.
+function capitalize(name: string): string {
+  return name
+    .split('_')
+    .map((p) => (p.length === 0 ? p : p[0].toUpperCase() + p.slice(1)))
+    .join(' ');
+}
+
+// Convertit une colonne du schéma serveur en ColumnDef front. Les colonnes avec
+// FK deviennent un `select` alimenté par la table cible ; les autres sont du
+// texte libre (les types riches natifs — bool, number, date — sont fournis par
+// MASTER_TABLES pour les tables natives).
+function columnSchemaToColumnDef(cs: ColumnSchema): ColumnDef {
+  if (cs.fk) {
+    return {
+      name: cs.name,
+      label: capitalize(cs.name),
+      type: 'select',
+      nullable: !cs.fk.required,
+      optionsFrom: { table: cs.fk.table, value: cs.fk.column, label: 'libelle' },
+      pk: cs.pk,
+    };
+  }
+  return {
+    name: cs.name,
+    label: capitalize(cs.name),
+    type: cs.pk ? 'text' : 'text',
+    nullable: !cs.pk,
+    pk: cs.pk,
+  };
+}
+
+// Construit un `TableDef` runtime en fusionnant :
+// - la définition statique MASTER_TABLES si elle existe (labels et types riches
+//   pour les tables natives : bool, date, options codées en dur…) ;
+// - les colonnes dynamiques du schéma (caractéristiques N1, références directes
+//   patron B, attributs N2 des `car_*`) non déjà présentes dans la définition
+//   statique.
+export function buildTableDef(
+  schema: TableSchema,
+  staticDef: TableDef | undefined,
+): TableDef {
+  const staticCols = staticDef?.columns ?? [];
+  const staticColNames = new Set(staticCols.map((c) => c.name));
+  const dynCols: ColumnDef[] = schema.columns
+    .filter((cs) => !staticColNames.has(cs.name))
+    .map(columnSchemaToColumnDef);
+  return {
+    table: schema.table,
+    label: staticDef?.label ?? schema.label,
+    columns: [...staticCols, ...dynCols],
+  };
+}
 
 function initialValues(
   def: TableDef,
@@ -168,14 +240,19 @@ function RowForm({
 
 export function MasterDataPage() {
   const [table, setTable] = useState<MasterTable>('accounts');
-  const tableDef = useMemo(
-    () => MASTER_TABLES.find((t) => t.table === table)!,
-    [table],
-  );
+  // Liste des tables navigables servie par `GET /api/md` (natives + car_* + lst_*).
+  // Tant qu'elle n'est pas chargée, on retombe sur MASTER_TABLES (labels statiques).
+  const [tableList, setTableList] = useState<TableSummary[]>([]);
+  // `tableDef` est construit au runtime en fusionnant MASTER_TABLES (si la table
+  // est native) et le schéma serveur (`GET /api/md/{table}/schema`). Nul tant que
+  // le schéma n'est pas chargé.
+  const [tableDef, setTableDef] = useState<TableDef | null>(null);
+  const [schema, setSchema] = useState<TableSchema | null>(null);
 
   const [data, setData] = useState<Row[]>([]);
   const [optionsData, setOptionsData] = useState<Record<string, Row[]>>({});
   const [loading, setLoading] = useState(false);
+  const [schemaLoading, setSchemaLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [formState, setFormState] = useState<FormState>(null);
@@ -199,6 +276,36 @@ export function MasterDataPage() {
     } finally {
       setHealthLoading(false);
     }
+  }, []);
+
+  // Charge une fois la liste des tables navigables au montage. Si le serveur
+  // expose de nouvelles tables (caractéristiques/listes créées ailleurs dans
+  // l'app), on les découvre ici. On ne force pas le re-chargement au moindre
+  // changement de table : un `Rafraîchir` manuel reste possible.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const list = await api.masterData.listTables();
+        if (cancelled) return;
+        // Les natives d'abord (ordre backend), puis caractéristiques et listes.
+        setTableList(list);
+      } catch {
+        // Serveur obsolète sans endpoint /api/md : on retombe sur MASTER_TABLES.
+        if (!cancelled) {
+          setTableList(
+            MASTER_TABLES.map((t) => ({
+              table: t.table,
+              label: t.label,
+              kind: 'native' as const,
+            })),
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -226,17 +333,29 @@ export function MasterDataPage() {
     setLoading(true);
     setError(null);
     try {
+      // Schéma runtime + données en parallèle. Le schéma apporte les colonnes
+      // dynamiques (caractéristiques + patron B) absentes de MASTER_TABLES.
+      const [schemaResult, rows] = await Promise.all([
+        api.masterData.schema(table),
+        api.masterData.list(table),
+      ]);
+      setSchema(schemaResult);
+      const staticDef = MASTER_TABLES.find((t) => t.table === table);
+      const def = buildTableDef(schemaResult, staticDef);
+      setTableDef(def);
+
+      // Options pour les select basés sur optionsFrom (tables master data).
+      // On ne recharge pas les options API dédiées (rulesets) tant qu'aucune
+      // colonne n'en dépend.
       const sourceTables = Array.from(
         new Set(
-          tableDef.columns
+          def.columns
             .map((c) => c.optionsFrom?.table)
-            .filter((t): t is MasterTable => t !== undefined),
+            .filter((t): t is string => t !== undefined),
         ),
       );
-      // Options chargées hors master data (ex. rulesets via /api/rulesets).
-      const needsRulesets = tableDef.columns.some((c) => c.optionsApi === 'rulesets');
-      const [rows, rulesets, ...optResults] = await Promise.all([
-        api.masterData.list(table),
+      const needsRulesets = def.columns.some((c) => c.optionsApi === 'rulesets');
+      const [rulesets, ...optResults] = await Promise.all([
         needsRulesets ? api.rulesets.list() : Promise.resolve([]),
         ...sourceTables.map((t) => api.masterData.list(t)),
       ]);
@@ -251,19 +370,23 @@ export function MasterDataPage() {
       setError(err instanceof Error ? err.message : 'erreur');
       setData([]);
       setOptionsData({});
+      setTableDef(null);
+      setSchema(null);
     } finally {
       setLoading(false);
     }
-  }, [table, tableDef]);
+  }, [table]);
 
   useEffect(() => {
     setNotice(null);
     setFormState(null);
-    void load();
+    setSchemaLoading(true);
+    void load().finally(() => setSchemaLoading(false));
   }, [load]);
 
   const handleDelete = useCallback(
     async (row: Row) => {
+      if (tableDef === null) return;
       const pk: Record<string, string> = {};
       for (const col of tableDef.columns) {
         if (col.pk) pk[col.name] = String(row[col.name] ?? '');
@@ -281,6 +404,7 @@ export function MasterDataPage() {
   );
 
   const columns = useMemo<RTColumnDef<Row>[]>(() => {
+    if (tableDef === null) return [];
     const cols: RTColumnDef<Row>[] = tableDef.columns.map((col) => ({
       header: col.label,
       accessorKey: col.name,
@@ -322,6 +446,7 @@ export function MasterDataPage() {
   });
 
   async function handleSubmit(values: Record<string, string>) {
+    if (tableDef === null) return;
     const payload: Record<string, unknown> = {};
     for (const col of tableDef.columns) {
       payload[col.name] = coerceValue(col, values[col.name] ?? '');
@@ -337,6 +462,26 @@ export function MasterDataPage() {
     await load();
   }
 
+  // Tables groupées par kind pour le dropdown. Si l'endpoint /api/md n'a rien
+  // renvoyé (serveur obsolète), tableList contient les natives via MASTER_TABLES.
+  const groupedTables = useMemo(() => {
+    const groups: { label: string; items: TableSummary[] }[] = [];
+    const byKind: Record<string, TableSummary[]> = {};
+    for (const t of tableList) {
+      (byKind[t.kind] ??= []).push(t);
+    }
+    if (byKind['native']) {
+      groups.push({ label: 'Référentiels', items: byKind['native'] });
+    }
+    if (byKind['characteristic']) {
+      groups.push({ label: 'Caractéristiques', items: byKind['characteristic'] });
+    }
+    if (byKind['value_list']) {
+      groups.push({ label: 'Listes de valeurs', items: byKind['value_list'] });
+    }
+    return groups;
+  }, [tableList]);
+
   return (
     <section className="page">
       <div className="page__header">
@@ -346,13 +491,17 @@ export function MasterDataPage() {
             <span>Table</span>
             <select
               value={table}
-              onChange={(e) => setTable(e.target.value as MasterTable)}
-              disabled={loading}
+              onChange={(e) => setTable(e.target.value)}
+              disabled={loading || schemaLoading}
             >
-              {MASTER_TABLES.map((t) => (
-                <option key={t.table} value={t.table}>
-                  {t.label}
-                </option>
+              {groupedTables.map((g) => (
+                <optgroup key={g.label} label={g.label}>
+                  {g.items.map((t) => (
+                    <option key={t.table} value={t.table}>
+                      {t.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>
@@ -360,11 +509,16 @@ export function MasterDataPage() {
             type="button"
             className="btn btn--primary"
             onClick={() => setFormState({ mode: 'create' })}
-            disabled={loading}
+            disabled={loading || schemaLoading || tableDef === null}
           >
             Ajouter
           </button>
-          <button type="button" className="btn" onClick={load} disabled={loading}>
+          <button
+            type="button"
+            className="btn"
+            onClick={load}
+            disabled={loading || schemaLoading}
+          >
             {loading ? 'Chargement…' : 'Rafraîchir'}
           </button>
           <button
@@ -380,7 +534,15 @@ export function MasterDataPage() {
       </div>
 
       <div className="page__meta">
-        {data.length} ligne(s) — <span className="muted">• = clé primaire</span>
+        {tableDef === null
+          ? 'Chargement du schéma…'
+          : `${data.length} ligne(s) — `}
+        {tableDef !== null && (
+          <span className="muted">• = clé primaire</span>
+        )}
+        {tableDef !== null && schema !== null && schema.sql_name !== table && (
+          <span className="muted"> (table SQL : {schema.sql_name})</span>
+        )}
       </div>
 
       {error && <div className="alert alert--error">Erreur : {error}</div>}
@@ -468,8 +630,10 @@ export function MasterDataPage() {
           <tbody>
             {tableState.getRowModel().rows.length === 0 && (
               <tr>
-                <td className="grid__empty" colSpan={columns.length}>
-                  {loading ? 'Chargement…' : 'Aucune ligne.'}
+                <td className="grid__empty" colSpan={Math.max(columns.length, 1)}>
+                  {loading || schemaLoading || tableDef === null
+                    ? 'Chargement…'
+                    : 'Aucune ligne.'}
                 </td>
               </tr>
             )}
@@ -486,7 +650,7 @@ export function MasterDataPage() {
         </table>
       </div>
 
-      {formState !== null && (
+      {formState !== null && tableDef !== null && (
         <RowForm
           tableDef={tableDef}
           initial={formState.mode === 'edit' ? formState.row : null}

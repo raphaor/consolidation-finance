@@ -27,6 +27,9 @@ import type {
   RulesetDetail,
   RulesetSummary,
   ScenarioSummary,
+  TableSchema,
+  TableSummary,
+  ValueList,
 } from './types';
 
 const BASE = '/api';
@@ -143,6 +146,10 @@ export const api = {
     list: () => getJson<ScenarioSummary[]>('/scenarios'),
   },
   masterData: {
+    // Liste des tables navigables (natives + `car_<code>` + `lst_<code>`).
+    listTables: () => getJson<TableSummary[]>('/md'),
+    // Schéma complet d'une table : colonnes natives + dynamiques avec FK.
+    schema: (table: MasterTable) => getJson<TableSchema>(`/md/${table}/schema`),
     list: (table: MasterTable) => getJson<unknown[]>(`/md/${table}`),
     create: (table: MasterTable, row: Record<string, unknown>) =>
       postJsonRaw<unknown>(`/md/${table}`, row),
@@ -234,6 +241,24 @@ export const api = {
       deleteJson<unknown>(`/meta/characteristics/${code}/values/${value}`),
     assign: (code: string, body: { member: string; value: string | null }) =>
       putJson<unknown>(`/meta/characteristics/${code}/assign`, body),
+  },
+  // Listes de valeurs (référentiels) : nomenclatures code/libellé autonomes,
+  // réutilisables comme cible d'un attribut N2, mais qui ne sont pas des
+  // dimensions. Cf. value_lists.rs.
+  valueLists: {
+    list: () => getJson<ValueList[]>('/meta/value-lists'),
+    create: (body: { code: string; libelle: string }) =>
+      postJsonRaw<{ code: string }>('/meta/value-lists', body),
+    remove: (code: string) =>
+      deleteJson<{ deleted: string }>(`/meta/value-lists/${code}`),
+    listValues: (code: string) =>
+      getJson<Record<string, unknown>[]>(`/meta/value-lists/${code}/values`),
+    createValue: (code: string, row: { code: string; libelle?: string }) =>
+      postJsonRaw<unknown>(`/meta/value-lists/${code}/values`, row),
+    updateValue: (code: string, value: string, row: { libelle?: string }) =>
+      putJson<unknown>(`/meta/value-lists/${code}/values/${value}`, row),
+    removeValue: (code: string, value: string) =>
+      deleteJson<unknown>(`/meta/value-lists/${code}/values/${value}`),
   },
   // Références directes (patron B) : colonne sur une dimension hôte pointant vers
   // une dimension cible (y compris elle-même). Cf. custom_references.rs.

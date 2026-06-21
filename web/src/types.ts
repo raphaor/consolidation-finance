@@ -123,24 +123,34 @@ export type Level = (typeof LEVELS)[number];
 
 // ---------- Master data (CRUD tables référentielles) ----------
 
-export type MasterTable =
-  | 'scenarios'
-  | 'entities'
-  | 'periods'
-  | 'accounts'
-  | 'flows'
-  | 'currencies'
-  | 'natures'
-  | 'methods'
-  | 'perimeter'
-  | 'rates'
-  | 'sous_classes'
-  | 'scenario_categories'
-  | 'variants'
-  | 'rate_sets'
-  | 'perimeter_sets'
-  | 'flow_schemes'
-  | 'flow_scheme_items';
+// Liste statique des tables master data natives (built-in). Servie aussi par
+// `GET /api/md` côté backend. Les tables dynamiques (`car_<code>`,
+// `lst_<code>`) y sont ajoutées à l'exécution (cf. characteristics / value_lists).
+export const NATIVE_MASTER_TABLES = [
+  'scenarios',
+  'entities',
+  'periods',
+  'accounts',
+  'flows',
+  'currencies',
+  'natures',
+  'methods',
+  'perimeter',
+  'rates',
+  'sous_classes',
+  'scenario_categories',
+  'variants',
+  'rate_sets',
+  'perimeter_sets',
+  'flow_schemes',
+  'flow_scheme_items',
+] as const;
+
+export type NativeMasterTable = (typeof NATIVE_MASTER_TABLES)[number];
+
+// Nom d'API d'une table master data : native OU dynamique (`car_<code>`,
+// `lst_<code>`). Les valeurs proviennent de `GET /api/md` (source serveur).
+export type MasterTable = string;
 
 export interface ColumnDef {
   name: string;
@@ -153,6 +163,42 @@ export interface ColumnDef {
   optionsApi?: 'rulesets';
   nullable?: boolean;
   pk?: boolean;
+}
+
+// ---------- Schéma dynamique (GET /api/md et GET /api/md/{table}/schema) ----------
+
+// Résumé d'une table navigable (renvoyé par `GET /api/md`).
+export interface TableSummary {
+  table: string;
+  label: string;
+  kind: 'native' | 'characteristic' | 'value_list';
+}
+
+// Cible d'une FK portée par une colonne : permet au front de configurer un
+// dropdown d'options depuis `GET /api/md/{fk.table}`.
+export interface FkTarget {
+  // Nom d'API de la table cible (`accounts`, `car_comportement`, `lst_incoterm`…).
+  table: string;
+  // Colonne clé de la table cible (`code`, `code_iso`…).
+  column: string;
+  // `true` si non-nullable (rejette une valeur vide à l'écriture).
+  required: boolean;
+}
+
+// Métadonnées d'une colonne telles qu'exposées par `GET /api/md/{table}/schema`.
+export interface ColumnSchema {
+  name: string;
+  pk: boolean;
+  fk: FkTarget | null;
+}
+
+// Schéma complet d'une table : colonnes natives + dynamiques, avec FK.
+export interface TableSchema {
+  table: string;
+  label: string;
+  sql_name: string;
+  columns: ColumnSchema[];
+  pk: string[];
 }
 
 export interface TableDef {
@@ -628,6 +674,17 @@ export interface CustomReference {
   host_dimension: string;
   column: string;
   target_dimension: string;
+}
+
+// ---------- Listes de valeurs (référentiels, GET /api/meta/value-lists) ---------
+// Nomenclature `code/libellé` autonome (`lst_<code>`), réutilisable comme cible
+// d'un attribut N2 de caractéristique, mais qui n'est pas une dimension (aucun
+// axe d'écriture). Cf. value_lists.rs.
+
+export interface ValueList {
+  code: string;
+  libelle: string;
+  value_table: string;
 }
 
 // ---------- Références (graphe de jointures, GET /api/meta/references) ----------
