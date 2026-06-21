@@ -32,7 +32,6 @@ export interface Entry {
 
 export interface PipelineCounts {
   corporate: number;
-  reclassified: number;
   converted: number;
   consolidated: number;
 }
@@ -51,6 +50,7 @@ export interface Scenario {
   ruleset_code: string | null;
   rate_set: string | null;
   statut: string | null;
+  a_nouveau_scenario: string | null;
 }
 
 // Réponse de GET /api/scenarios — scénario v2 « déplié » pour le dropdown
@@ -65,6 +65,7 @@ export interface ScenarioSummary {
   ruleset_code: string | null;
   rate_set: string | null;
   statut: string | null;
+  a_nouveau_scenario: string | null;
 }
 
 export interface Period {
@@ -114,7 +115,6 @@ export type FlowCode = (typeof FLOW_COLUMNS)[number];
 
 export const LEVELS = [
   'corporate',
-  'reclassified',
   'converted',
   'consolidated',
 ] as const;
@@ -223,6 +223,13 @@ export const MASTER_TABLES: TableDef[] = [
         optionsFrom: { table: 'rate_sets', value: 'code', label: 'libelle' },
       },
       { name: 'statut', label: 'Statut', type: 'text' },
+      {
+        name: 'a_nouveau_scenario',
+        label: 'Conso d\'à-nouveau',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'scenarios', value: 'code', label: 'libelle' },
+      },
     ],
   },
   {
@@ -313,6 +320,13 @@ export const MASTER_TABLES: TableDef[] = [
         type: 'select',
         nullable: true,
         options: ['F00', 'F01', 'F20', 'F80', 'F81', 'F98', 'F99'],
+      },
+      {
+        name: 'flux_a_nouveau',
+        label: 'Flux d\'à-nouveau',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
       },
     ],
   },
@@ -447,7 +461,7 @@ export interface SelectionCond {
 // Une opération
 export interface Operation {
   seq: number;
-  level: string; // corporate, reclassified, converted, consolidated
+  level: string; // corporate, converted, consolidated
   selection: SelectionCond[];
   coefficient: { type: string; value?: number }; // pct_integration | pct_interet | constant
   multiplicateur: number;

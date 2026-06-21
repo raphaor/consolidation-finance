@@ -40,7 +40,7 @@ import type {
 
 // Constantes qui ne dépendent pas du registre des dimensions.
 const SCOPE_DIMS = ['methode', 'pct_interet', 'pct_integration', 'entree', 'sortie'];
-const LEVELS_LIST = ['corporate', 'reclassified', 'converted', 'consolidated'];
+const LEVELS_LIST = ['corporate', 'converted', 'consolidated'];
 const OPS = ['=', '!=', '>', '<', '>=', '<=', 'IN', 'IS NULL', 'IS NOT NULL'];
 const COEFF_TYPES = ['pct_integration', 'pct_interet', 'constant'];
 

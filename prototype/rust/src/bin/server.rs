@@ -415,6 +415,7 @@ struct ScenarioSummary {
     ruleset_code: Option<String>,
     rate_set: Option<String>,
     statut: Option<String>,
+    a_nouveau_scenario: Option<String>,
 }
 
 /// GET /api/scenarios — liste de tous les scénarios avec leurs paramètres.
@@ -426,7 +427,7 @@ async fn list_scenarios(
         let mut stmt = con
             .prepare(
                 "SELECT code, libelle, category, entry_period, presentation_currency,
-                        variant, ruleset_code, rate_set, statut
+                        variant, ruleset_code, rate_set, statut, a_nouveau_scenario
                  FROM dim_scenario
                  ORDER BY code",
             )
@@ -443,6 +444,7 @@ async fn list_scenarios(
                     ruleset_code: row.get(6)?,
                     rate_set: row.get(7)?,
                     statut: row.get(8)?,
+                    a_nouveau_scenario: row.get(9)?,
                 })
             })
             .map_err(db_err)?;

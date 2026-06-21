@@ -25,12 +25,7 @@ const STEPS: Step[] = [
   {
     key: 'corporate',
     label: 'Corporate',
-    description: 'Liasses chargées dans le plan de compte du groupe.',
-  },
-  {
-    key: 'reclassified',
-    label: 'Reclassified',
-    description: 'Après reclassements / retraitements.',
+    description: 'Liasses chargées dans le plan de compte du groupe (+ report d\'à-nouveau).',
   },
   {
     key: 'converted',
@@ -53,6 +48,7 @@ function paramRows(s: ScenarioSummary): { label: string; value: string }[] {
     { label: 'Variante', value: s.variant ?? '—' },
     { label: 'Jeu de taux', value: s.rate_set ?? '—' },
     { label: 'Ruleset', value: s.ruleset_code ?? '—' },
+    { label: 'Conso d\'à-nouveau', value: s.a_nouveau_scenario ?? '—' },
     { label: 'Statut', value: s.statut ?? '—' },
   ];
 }

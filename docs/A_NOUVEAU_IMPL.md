@@ -49,7 +49,11 @@
   - [x] `server.rs` : appel après le run → **avertissement** (eprintln), conforme A5 (statut `ouvert` toléré)
   - [x] 2 tests d'intégration (`tests/a_nouveau.rs`) : divergences+orphelins, et cas aligné→vide
   - [x] **suite complète verte** (serveur arrêté) : lib 36 + a_nouveau 4 + pipeline 14/2 ignorés + rules 10.
-- [ ] **Phase 6 — API / UI** : champs `a_nouveau_scenario`, `flux_a_nouveau` ; stats 3 niveaux
+- [x] **Phase 6 — API / UI** ✅ commit
+  - [x] `server.rs` : `ScenarioSummary` (+ SELECT `list_scenarios`) renvoie `a_nouveau_scenario` ; `/api/run` déjà à 3 niveaux (Phase 1)
+  - [x] `types.ts` : `PipelineCounts`/`LEVELS` à 3 niveaux ; `Scenario`/`ScenarioSummary` + `a_nouveau_scenario` ; colonne CRUD `a_nouveau_scenario` (scenarios) + `flux_a_nouveau` (flows)
+  - [x] `PipelinePage.tsx` : STEP `reclassified` retiré, ligne « Conso d'à-nouveau » affichée ; `RulesPage.tsx` : `LEVELS_LIST` à 3 niveaux
+  - [x] `npm run build` (tsc + vite) vert ; suite Rust verte après recompil serveur
 - [ ] **Phase 7 — Tests & règles** : règles corporate (UTILISATEUR), tests Rust, golden, recette Python (écarts préfixe 2)
 
 ## Décisions clés (rappel, détail dans A_NOUVEAU.md)
@@ -71,7 +75,9 @@
 - **Note** : `materialize_closures` reconstruit encore les clôtures de TOUS les scénarios à chaque run (idempotent, valeurs identiques pour le snapshot figé → sans danger ; optimisation possible : scoper par scénario).
 - **Phase 4 faite (2026-06-21)** : staging cible sur 3 niveaux. Préfixes 2 et 3 consommés DANS step_c/step_d (UNION fact_entry + stg) → ils subissent conversion / × pct ; préfixe 4 injecté tel quel après step_d. Test staging réécrit, vert (9 binaires OK, 0 FAILED).
 - **Phase 5 faite (2026-06-21)** : `check_a_nouveau_coherence` (divergence entree/snapshot + orphelins), avertissement non bloquant côté serveur, 2 tests d'intégration. **Suite complète verte** (serveur arrêté) : lib 36 + a_nouveau 4 + pipeline 14/2 ignorés + rules 10.
-- **Moteur de l'à-nouveau terminé (Phases 0→5).** **NEXT** : **Phase 6** (UI/API — exposer `a_nouveau_scenario`/`flux_a_nouveau`, retirer `reclassified` du frontend ; domaine équipier) et **Phase 7** (règles corporate F00→F01/F98/variation % + recette golden serveur).
+- **Moteur de l'à-nouveau terminé (Phases 0→5).**
+- **Phase 6 faite (2026-06-21)** : API (`ScenarioSummary` expose `a_nouveau_scenario`) + frontend (CRUD scenarios/flows avec les nouveaux champs, pipeline/règles à 3 niveaux, affichage conso d'à-nouveau). `npm run build` vert, suite Rust verte. `reclassified` totalement retiré du frontend.
+- **NEXT → Phase 7 (toi/recette)** : règles corporate (F00→F01 entrée, miroir F98 sortie, variation de % d'intégration) à créer dans l'éditeur de règles + recette golden serveur (`golden_test.py`) à recaler sur le pipeline 3 niveaux et le staging 2/3/4. Les 2 tests Rust `#[ignore]` (sortie périmètre, montants consolidés) redeviendront pertinents une fois les règles livrées.
 
 ---
 
