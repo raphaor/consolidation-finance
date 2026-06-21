@@ -116,3 +116,78 @@ fn sans_a_nouveau_le_f00_de_liasse_est_conserve() {
     let f00 = amt(&con, "REEL", "corporate", "M", "100", "F00");
     assert!(f00.abs() > TOL, "sans à-nouveau, le F00 de liasse de M/100 doit subsister");
 }
+
+/// Prépare un snapshot REEL (2024) consolidé (M, A, B) + un scénario CUR (2025)
+/// le référençant en à-nouveau. Le périmètre de CUR est laissé à l'appelant.
+fn snapshot_reel_et_cur() -> Connection {
+    let con = Connection::open_in_memory().expect("open_in_memory");
+    create_schema(&con).expect("create_schema");
+    seed_all(&con).expect("seed_all");
+    con.execute("UPDATE dim_flow SET flux_a_nouveau='F00' WHERE code='F99'", [])
+        .expect("activer flux_a_nouveau");
+    let p = ConvertParams::load_params(&con, "REEL").expect("load_params REEL");
+    run_pipeline(&con, &p).expect("run REEL");
+    con.execute_batch(
+        "INSERT INTO dim_period (code,libelle,type,date_debut,date_fin,statut)
+         VALUES ('2025','Exercice 2025','exercice','2025-01-01','2025-12-31','ouvert');
+         INSERT INTO dim_scenario
+            (code,libelle,category,entry_period,presentation_currency,variant,
+             ruleset_code,rate_set,statut,a_nouveau_scenario)
+         VALUES ('CUR','Réel 2025','REEL','2025','EUR','BASE',NULL,'RATES','ouvert','REEL');",
+    )
+    .expect("seed période + scénario CUR");
+    con
+}
+
+#[test]
+fn coherence_signale_divergences_et_orphelins() {
+    let con = snapshot_reel_et_cur();
+    // Périmètre CUR : M (entree=false, cohérent : M était consolidée en N-1) ;
+    // NEW (entree=false → divergence : marquée continue mais absente de N-1).
+    // A et B sont consolidées en N-1 mais absentes du périmètre CUR → orphelines.
+    con.execute_batch(
+        "INSERT INTO sat_perimeter
+            (entity,scenario,period,methode,pct_interet,pct_integration,entree,sortie)
+         VALUES ('M','CUR','2025','globale',1.0,1.0,FALSE,FALSE),
+                ('NEW','CUR','2025','globale',1.0,1.0,FALSE,FALSE);",
+    )
+    .expect("seed périmètre CUR");
+
+    let anomalies =
+        conso_engine::validate::check_a_nouveau_coherence(&con, "CUR", "REEL", "2025")
+            .expect("check_a_nouveau_coherence");
+
+    let has = |kind: &str, entity: &str| {
+        anomalies.iter().any(|a| a.kind == kind && a.entity == entity)
+    };
+    assert!(has("entree_divergente", "NEW"), "NEW doit diverger : {anomalies:?}");
+    assert!(has("snapshot_orphelin", "A"), "A doit être orpheline : {anomalies:?}");
+    assert!(has("snapshot_orphelin", "B"), "B doit être orpheline : {anomalies:?}");
+    assert!(
+        !anomalies.iter().any(|a| a.entity == "M"),
+        "M est cohérente (continue + consolidée N-1) : {anomalies:?}"
+    );
+}
+
+#[test]
+fn coherence_ok_quand_perimetre_aligne() {
+    let con = snapshot_reel_et_cur();
+    // Périmètre CUR aligné : M, A, B toutes continues (entree=false) et toutes
+    // consolidées en N-1 → aucune anomalie.
+    con.execute_batch(
+        "INSERT INTO sat_perimeter
+            (entity,scenario,period,methode,pct_interet,pct_integration,entree,sortie)
+         VALUES ('M','CUR','2025','globale',1.0,1.0,FALSE,FALSE),
+                ('A','CUR','2025','globale',1.0,1.0,FALSE,FALSE),
+                ('B','CUR','2025','globale',1.0,1.0,FALSE,FALSE);",
+    )
+    .expect("seed périmètre CUR");
+
+    let anomalies =
+        conso_engine::validate::check_a_nouveau_coherence(&con, "CUR", "REEL", "2025")
+            .expect("check_a_nouveau_coherence");
+    assert!(
+        anomalies.is_empty(),
+        "périmètre aligné → aucune anomalie attendue : {anomalies:?}"
+    );
+}

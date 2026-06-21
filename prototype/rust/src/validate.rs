@@ -201,6 +201,103 @@ pub struct NatureCheck {
     pub nature: Option<String>,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cohérence de l'à-nouveau (cf. docs/A_NOUVEAU.md §5.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Anomalie de cohérence entre le périmètre du run courant et le snapshot
+/// d'à-nouveau.
+#[derive(Debug, Clone)]
+pub struct CoherenceAnomaly {
+    /// `entree_divergente` (flag `entree` ≠ absence au snapshot) ou
+    /// `snapshot_orphelin` (consolidée en N-1, hors périmètre courant).
+    pub kind: &'static str,
+    /// Entité concernée.
+    pub entity: String,
+    /// Explication lisible.
+    pub detail: String,
+}
+
+/// Détecte les incohérences entre le flag `sat_perimeter.entree` (saisi) du run
+/// courant et la **présence effective** de l'entité dans la conso d'à-nouveau
+/// (snapshot), ainsi que les entités consolidées en N-1 mais absentes du
+/// périmètre courant.
+///
+/// Source de vérité « consolidée en N-1 » = présence d'une clôture
+/// (flux source d'à-nouveau, ex. F99) au niveau `consolidated` du snapshot —
+/// cohérent avec le carry (`pipeline::a_nouveau`). `entree` devrait valoir
+/// `NON consolidée_en_N1(E)` ; toute divergence est signalée.
+///
+/// Liste vide = cohérent. Le contrôle est **non bloquant** (avertissement) ;
+/// l'appelant décide quoi en faire (cf. A5 : statut `ouvert` toléré).
+///
+/// - `scenario` : run courant ; `a_nouveau` : snapshot ; `period` : entry_period
+///   courant (clé de `sat_perimeter`).
+pub fn check_a_nouveau_coherence(
+    con: &Connection,
+    scenario: &str,
+    a_nouveau: &str,
+    period: &str,
+) -> duckdb::Result<Vec<CoherenceAnomaly>> {
+    let mut out = Vec::new();
+
+    // 1. Divergence `entree` (saisi) vs présence au snapshot, pour les entités
+    //    du périmètre courant. `entree` devrait = NON was_consolidated ; donc
+    //    `entree == was_consolidated` est une divergence.
+    let mut stmt = con.prepare(
+        "SELECT p.entity,
+                COALESCE(p.entree, FALSE) AS entree,
+                EXISTS (
+                    SELECT 1 FROM fact_entry s
+                    WHERE s.scenario = ? AND s.level = 'consolidated'
+                      AND s.flow IN (SELECT code FROM dim_flow WHERE flux_a_nouveau IS NOT NULL)
+                      AND s.entity = p.entity
+                ) AS was_consolidated
+         FROM sat_perimeter p
+         WHERE p.scenario = ? AND p.period = ?
+         ORDER BY p.entity",
+    )?;
+    let rows = stmt.query_map([a_nouveau, scenario, period], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, bool>(1)?,
+            r.get::<_, bool>(2)?,
+        ))
+    })?;
+    for r in rows {
+        let (entity, entree, was_consolidated) = r?;
+        if entree == was_consolidated {
+            let detail = if entree {
+                "marquée entrante (entree=true) mais déjà consolidée en N-1".to_string()
+            } else {
+                "marquée continue (entree=false) mais absente de la conso N-1".to_string()
+            };
+            out.push(CoherenceAnomaly { kind: "entree_divergente", entity, detail });
+        }
+    }
+
+    // 2. Orphelins : entités consolidées en N-1 mais absentes du périmètre courant.
+    let mut stmt2 = con.prepare(
+        "SELECT DISTINCT s.entity FROM fact_entry s
+         WHERE s.scenario = ? AND s.level = 'consolidated'
+           AND s.flow IN (SELECT code FROM dim_flow WHERE flux_a_nouveau IS NOT NULL)
+           AND s.entity NOT IN (
+               SELECT entity FROM sat_perimeter WHERE scenario = ? AND period = ?
+           )
+         ORDER BY s.entity",
+    )?;
+    let rows2 = stmt2.query_map([a_nouveau, scenario, period], |r| r.get::<_, String>(0))?;
+    for r in rows2 {
+        out.push(CoherenceAnomaly {
+            kind: "snapshot_orphelin",
+            entity: r?,
+            detail: "consolidée en N-1 mais absente du périmètre courant".to_string(),
+        });
+    }
+
+    Ok(out)
+}
+
 /// Vérifie que `nature` est **obligatoire** (non-null, non-vide) sur `stg_entry`
 /// et que chaque valeur pointe vers une ligne existante de `dim_nature` (FK).
 ///

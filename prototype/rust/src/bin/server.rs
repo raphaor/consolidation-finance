@@ -529,6 +529,29 @@ async fn run_pipeline_handler(
             None => run_pipeline(&con, &params).map_err(db_err)?.counts(),
         };
 
+        // 5b. À-nouveau : contrôle de cohérence **non bloquant** (cf.
+        //     docs/A_NOUVEAU.md §5.1, A5 : statut `ouvert` toléré → on alerte).
+        if let Some(a_nouveau) = params.a_nouveau_scenario.as_deref() {
+            match conso_engine::validate::check_a_nouveau_coherence(
+                &con,
+                &scenario_code,
+                a_nouveau,
+                &params.current_period,
+            ) {
+                Ok(anomalies) if !anomalies.is_empty() => {
+                    eprintln!(
+                        "⚠ À-nouveau ({scenario_code} ← {a_nouveau}) : {} incohérence(s) de périmètre :",
+                        anomalies.len()
+                    );
+                    for a in &anomalies {
+                        eprintln!("   - [{}] {} : {}", a.kind, a.entity, a.detail);
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("⚠ contrôle de cohérence à-nouveau échoué : {e}"),
+            }
+        }
+
         // 6. Rapport du ruleset (agrégé depuis les niveaux intercalés).
         let ruleset_report = ruleset_code.as_ref().map(|code| RulesetReport {
             ruleset: code.clone(),
