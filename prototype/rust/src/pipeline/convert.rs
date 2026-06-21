@@ -20,14 +20,21 @@
 //! - `fonctionnelle = pivot`        → taux_func = 1.0, cross = 1 / taux_pres
 //!
 //! Pour chaque ligne corporate en devise ≠ présentation :
-//!   1. taux du flux via `dim_flow.taux_conversion` :
+//!   1. taux du flux via le schéma de flux (`taux_conversion`) :
 //!        - `close_n1` → taux_close N-1 (cross-rate)
 //!        - `avg`      → taux_moyen N  (cross-rate)
 //!        - `close_n`  → taux_close N  (cross-rate)
-//!        - `terminal` → taux_close N  (écart propre = 0)
 //!   2. montant converti = `amount × taux_flux`
-//!   3. écart = `amount × (taux_close_n − taux_flux)`, posté sur `flux_ecart`
+//!   3. écart = `amount × (taux_report − taux_flux)`, posté sur `flux_ecart`.
+//!      `taux_report` = taux du **flux de report** du flux (la clôture où il se
+//!      solde), résolu par compte. Générique : la référence suit le schéma de
+//!      flux (`flux_de_report`) au lieu d'être figée sur le taux de clôture.
+//!      Cas usuel : report = F99 au taux de clôture ⇒ référence = clôture N.
 //!   4. lignes en devise de présentation : copie directe, aucun écart
+//!
+//! `terminal` est conservé comme **alias déprécié** de `close_n` (même taux,
+//! écart nul puisque ces flux n'ont pas de `flux_ecart`) ; le seed et l'UI ne le
+//! produisent plus.
 //!
 //! Le niveau *converted* est exprimé en devise de présentation. Tous les flux
 //! sont convertis (clôtures F99 comprises) ; la clôture convertie (portée) est
@@ -134,14 +141,29 @@ conv AS (\n\
                         THEN r_pres_n.taux_close\n\
                 END)\n\
         END AS taux_flux,\n\
-        -- Taux de clôture N (référence pour le calcul d'écart, cross-rate).\n\
+        -- Taux de référence de l'écart = taux du FLUX DE REPORT (la clôture où ce\n\
+        -- flux se solde), résolu par compte via vfb_rep. Générique : la référence\n\
+        -- suit le schéma de flux au lieu d'être codée en dur sur la clôture N.\n\
+        -- Cas usuel (report = F99 en `close_n`) ⇒ retombe sur le taux de clôture.\n\
         CASE\n\
             WHEN f.currency = p.presentation THEN 1.0\n\
             ELSE\n\
-                (CASE WHEN f.currency = p.pivot THEN 1.0 ELSE r_n.taux_close END)\n\
+                (CASE\n\
+                    WHEN f.currency = p.pivot THEN 1.0\n\
+                    WHEN vfb_rep.taux_conversion = 'close_n1' THEN r_n1.taux_close\n\
+                    WHEN vfb_rep.taux_conversion = 'avg'      THEN r_n.taux_moyen\n\
+                    WHEN vfb_rep.taux_conversion IN ('close_n', 'terminal')\n\
+                        THEN r_n.taux_close\n\
+                END)\n\
                 /\n\
-                (CASE WHEN p.presentation = p.pivot THEN 1.0 ELSE r_pres_n.taux_close END)\n\
-        END AS taux_close_n\n\
+                (CASE\n\
+                    WHEN p.presentation = p.pivot THEN 1.0\n\
+                    WHEN vfb_rep.taux_conversion = 'close_n1' THEN r_pres_n1.taux_close\n\
+                    WHEN vfb_rep.taux_conversion = 'avg'      THEN r_pres_n.taux_moyen\n\
+                    WHEN vfb_rep.taux_conversion IN ('close_n', 'terminal')\n\
+                        THEN r_pres_n.taux_close\n\
+                END)\n\
+        END AS taux_report\n\
     FROM (\n\
         SELECT {insert_col_list}, amount FROM fact_entry\n\
         WHERE level = 'corporate' AND scenario = ?\n\
@@ -155,6 +177,11 @@ conv AS (\n\
     -- Comportement du flux résolu PAR COMPTE (taux de conversion + flux d'écart)\n\
     -- via le schéma de flux du compte. Cf. v_flow_behavior (Q32).\n\
     JOIN v_flow_behavior vfb ON vfb.account = f.account AND vfb.flow = f.flow\n\
+    -- Comportement du FLUX DE REPORT du flux (sur le même compte), pour le taux\n\
+    -- de référence de l'écart. LEFT JOIN : sans flux de report, taux_report NULL\n\
+    -- → la ligne d'écart est filtrée (pas d'écart).\n\
+    LEFT JOIN v_flow_behavior vfb_rep\n\
+           ON vfb_rep.account = f.account AND vfb_rep.flow = vfb.flux_de_report\n\
     CROSS JOIN params p\n\
     -- Taux de la devise fonctionnelle vers le pivot (N et N-1)\n\
     LEFT JOIN sat_exchange_rate r_n\n\
@@ -187,11 +214,11 @@ UNION ALL\n\
 -- L'écart F80/F81 hérite de la nature — et du partner — du flux parent.\n\
 SELECT {final_cols_ecart},\n\
        'converted' AS level,\n\
-       amount * (taux_close_n - taux_flux) AS amount\n\
+       amount * (taux_report - taux_flux) AS amount\n\
 FROM conv\n\
 WHERE currency <> ?\n\
   AND flux_ecart IS NOT NULL\n\
-  AND ABS(amount * (taux_close_n - taux_flux)) >= 0.005;"
+  AND ABS(amount * (taux_report - taux_flux)) >= 0.005;"
     );
     con.execute(
         &sql,

@@ -176,8 +176,8 @@ pub const DDL_SAT_FLOW_SCHEME_ITEM: &str = "\
 CREATE TABLE sat_flow_scheme_item (
     scheme          TEXT,
     flow            TEXT,
-    taux_conversion TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n', 'terminal')),
-    flux_ecart      TEXT,           -- flux d'écart associé (NULL = aucun écart / terminal)
+    taux_conversion TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n')),
+    flux_ecart      TEXT,           -- flux d'écart associé (NULL = aucun écart)
     flux_de_report  TEXT,           -- flux de clôture où ce flux se reporte ; auto-référence (flow = flux_de_report) = clôture reconstruite
     flux_a_nouveau  TEXT,           -- flux d'ouverture qui reçoit ce solde à l'exercice suivant (F99 → F00) ; NULL sinon
     PRIMARY KEY (scheme, flow)

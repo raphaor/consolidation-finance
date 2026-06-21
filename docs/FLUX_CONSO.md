@@ -245,13 +245,15 @@ Les **automatismes de consolidation** (conversion, méthodes, variations de pér
 | **F07** | Fusion à l'ouverture | *(à préciser)* | *(à préciser)* | Extourne F00 (`F07 = −F00`) | post-MVP |
 | **F70** | Fusion en cours d'exercice | *(à préciser)* | *(à préciser)* | Extourne F99 (`F70 = −F99`) | post-MVP |
 | **F20** | Variation de bilan | moyen | F81 | Saisie source / agrégation | MVP |
-| **F80** | Écart de conversion (ouverture → clôture) | clôture N (terminal) | — | Conversion (écart de F00) | MVP |
-| **F81** | Conversion taux moyen → clôture | clôture N (terminal) | — | Conversion (écart de F20) | MVP |
+| **F80** | Écart de conversion (ouverture → clôture) | clôture N (close_n) | — | Conversion (écart de F00) | MVP |
+| **F81** | Conversion taux moyen → clôture | clôture N (close_n) | — | Conversion (écart de F20) | MVP |
 | **F95** | Variation de taux d'intérêt | *(à définir)* | *(à définir)* | Règles de consolidation (éditeur) | post-MVP |
-| **F98** | Sortie de périmètre | clôture N (terminal) | — | Variation de périmètre — sortie | MVP |
+| **F98** | Sortie de périmètre | clôture N (close_n) | — | Variation de périmètre — sortie | MVP |
 | **F99** | Clôture | clôture N | — (0) | Reconstruction par identité | MVP |
 
-> Taux de conversion des flux de périmètre confirmés (2026-06-16) : **F01 = clôture N-1** (logique ouverture, écart → F80) ; **F98 = clôture N** (logique clôture, terminal — pas d'écart). Mécanique de reclassification détaillée §9.
+> Taux de conversion des flux de périmètre confirmés (2026-06-16) : **F01 = clôture N-1** (logique ouverture, écart → F80) ; **F98 = clôture N** (`close_n`, logique clôture — pas d'écart). Mécanique de reclassification détaillée §9.
+>
+> **Écart de conversion (générique, 2026-06-21)** : pour un flux porteur d'un `flux_ecart`, l'écart vaut `montant × (taux_report − taux_flux)`, où `taux_report` est le taux du **flux de report** du flux (la clôture où il se solde), résolu par compte via `v_flow_behavior`. La référence n'est donc plus codée en dur sur la clôture : elle suit le schéma de flux. Cas usuel (report = F99 en `close_n`) ⇒ référence = taux de clôture N. Le code `terminal` est **retiré** (alias redondant de `close_n` : même taux, et l'absence d'écart se traduit déjà par `flux_ecart` vide).
 
 ## 7. Logique de numérotation
 

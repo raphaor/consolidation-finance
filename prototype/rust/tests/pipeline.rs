@@ -427,6 +427,69 @@ fn conversion_reconstitue_montant_au_taux_close_n() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  5 bis. Écart de conversion GÉNÉRIQUE (2026-06-21) : la référence de l'écart
+//         n'est pas figée sur le taux de clôture — elle suit le `taux_conversion`
+//         du FLUX DE REPORT du flux (résolu via v_flow_behavior). On bascule le
+//         flux de report du schéma BILAN (F99) en `avg` : l'écart F80 de F00 doit
+//         alors se calculer contre le taux MOYEN, pas le taux de clôture.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn ecart_de_conversion_suit_le_taux_du_flux_de_report() {
+    let con = Connection::open_in_memory().expect("open_in_memory");
+    create_schema(&con).expect("create_schema");
+    seed_all(&con).expect("seed_all");
+
+    // Bascule le taux du flux de report (F99 du schéma BILAN) sur le taux moyen.
+    // Tous les flux de bilan se reportent sur F99 → leur écart se réfère désormais
+    // au taux moyen au lieu du taux de clôture.
+    con.execute_batch(
+        "UPDATE sat_flow_scheme_item SET taux_conversion = 'avg' \
+         WHERE scheme = 'BILAN' AND flow = 'F99';",
+    )
+    .expect("bascule taux du flux de report");
+
+    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    run_pipeline(&con, &params).expect("run_pipeline");
+
+    // A (USD), compte 100 (bilan), F00 : taux du flux = close_n1 (USD 2023 = 0.92).
+    // F00 fonctionnel = 5000 USD ; devise de présentation EUR = pivot ⇒ cross = taux brut.
+    let f00_func: f64 = con
+        .query_row(
+            "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
+             WHERE level='corporate' AND account='100' AND flow='F00' AND entity='A'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        (f00_func - 5000.0).abs() < TOL,
+        "préalable : F00 fonctionnel A/100 = {f00_func} (attendu 5000)"
+    );
+
+    let f80_pres = amount_for(&con, "consolidated", "A", "100", "F80");
+
+    // écart = montant × (taux_report − taux_flux) = 5000 × (avg 0.95 − close_n1 0.92) = +150.
+    // Régression (référence figée sur la clôture) : 5000 × (0.90 − 0.92) = −100.
+    let ecart_attendu = 5000.0 * (0.95 - 0.92);
+    assert!(
+        (f80_pres - ecart_attendu).abs() < TOL,
+        "écart F80 (A/100/F00) = {f80_pres} ; attendu {ecart_attendu} = 5000×(avg − close_n1). \
+         La référence ne suit pas le flux de report (régression = −100 au taux de clôture)."
+    );
+
+    // Reconstitution : converti(F00) + écart = fonctionnel × taux_report (avg), et NON × clôture.
+    let f00_pres = amount_for(&con, "consolidated", "A", "100", "F00");
+    let reconstruit = f00_pres + f80_pres;
+    let attendu_avg = f00_func * 0.95;
+    assert!(
+        (reconstruit - attendu_avg).abs() < TOL,
+        "reconstitution A/100/F00 = {reconstruit} ; attendu {attendu_avg} (× avg). \
+         Au taux de clôture on aurait 4500 — la référence suit bien le flux de report."
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  6. Reproductibilité : un second run (après DELETE de fact_entry) redonne
 //     exactement les mêmes montants et comptes.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -760,7 +823,7 @@ fn sortie_perimetre_donne_f99_zero_et_f98_negatif() {
 
     // À consolidated (devise de présentation EUR), F99 de B doit aussi être 0
     // sur tous ses comptes : les écarts F80/F81 générés à la conversion sont
-    // absorbés par F98 (terminal, taux close_n).
+    // absorbés par F98 (taux close_n).
     let n_nonzero: i64 = con
         .query_row(
             "SELECT COUNT(*) FROM fact_entry \

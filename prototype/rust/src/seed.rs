@@ -125,16 +125,16 @@ const FLOW_SCHEME_ITEMS: &[(&str, &str, &str, Option<&str>, Option<&str>, Option
     ("BILAN", "F00", "close_n1", Some("F80"), Some("F99"), None),
     ("BILAN", "F01", "close_n1", Some("F80"), Some("F99"), None),
     ("BILAN", "F20", "avg",      Some("F81"), Some("F99"), None),
-    ("BILAN", "F80", "terminal", None,        Some("F99"), None),
-    ("BILAN", "F81", "terminal", None,        Some("F99"), None),
-    ("BILAN", "F98", "terminal", None,        Some("F99"), None),
+    ("BILAN", "F80", "close_n", None,        Some("F99"), None),
+    ("BILAN", "F81", "close_n", None,        Some("F99"), None),
+    ("BILAN", "F98", "close_n", None,        Some("F99"), None),
     ("BILAN", "F99", "close_n",  None,        Some("F99"), None),
     // RESULTAT — taux moyen, sans écart, sans à-nouveau.
     ("RESULTAT", "F00", "avg",      None, Some("F99"), None),
     ("RESULTAT", "F01", "avg",      None, Some("F99"), None),
     ("RESULTAT", "F20", "avg",      None, Some("F99"), None),
-    ("RESULTAT", "F80", "terminal", None, Some("F99"), None),
-    ("RESULTAT", "F81", "terminal", None, Some("F99"), None),
+    ("RESULTAT", "F80", "close_n", None, Some("F99"), None),
+    ("RESULTAT", "F81", "close_n", None, Some("F99"), None),
     ("RESULTAT", "F98", "avg",      None, Some("F99"), None),
     ("RESULTAT", "F99", "avg",      None, Some("F99"), None),
 ];
@@ -189,7 +189,7 @@ const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] =
 
 /// Taux de change vers le pivot (EUR).
 ///   - period '2023' : taux clôture N-1 (utilisé par close_n1)
-///   - period '2024' : taux clôture N (close_n / terminal) et taux moyen (avg)
+///   - period '2024' : taux clôture N (close_n) et taux moyen (avg)
 /// (rate_set, currency_source, period, taux_close, taux_moyen).
 ///
 /// Tous rattachés au jeu `'RATES'` (cf. `dim_rate_set`). La PK est désormais

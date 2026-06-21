@@ -148,6 +148,9 @@ export interface ColumnDef {
   type: 'text' | 'number' | 'bool' | 'date' | 'select';
   options?: string[];
   optionsFrom?: { table: MasterTable; value: string; label?: string };
+  // Options chargées via une API dédiée (hors tables master data) : ex.
+  // 'rulesets' alimente le select depuis GET /api/rulesets (cf. masterFields).
+  optionsApi?: 'rulesets';
   nullable?: boolean;
   pk?: boolean;
 }
@@ -225,7 +228,13 @@ export const MASTER_TABLES: TableDef[] = [
         nullable: true,
         optionsFrom: { table: 'variants', value: 'code', label: 'libelle' },
       },
-      { name: 'ruleset_code', label: 'Ruleset', type: 'text', nullable: true },
+      {
+        name: 'ruleset_code',
+        label: 'Jeu de règles',
+        type: 'select',
+        nullable: true,
+        optionsApi: 'rulesets',
+      },
       {
         name: 'rate_set',
         label: 'Jeu de taux',
@@ -240,7 +249,12 @@ export const MASTER_TABLES: TableDef[] = [
         nullable: true,
         optionsFrom: { table: 'perimeter_sets', value: 'code', label: 'libelle' },
       },
-      { name: 'statut', label: 'Statut', type: 'text' },
+      {
+        name: 'statut',
+        label: 'Statut',
+        type: 'select',
+        options: ['brouillon', 'ouvert', 'verrouillé'],
+      },
       {
         name: 'a_nouveau_scenario',
         label: 'Conso d\'à-nouveau',
@@ -340,6 +354,17 @@ export const MASTER_TABLES: TableDef[] = [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
       { name: 'rules', label: 'Règles', type: 'text', nullable: true },
+    ],
+  },
+  {
+    table: 'methods',
+    label: 'Méthodes de consolidation',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+      // `consolidated` = true : méthode intégrée (reprise au niveau consolidated,
+      // pondérée par pct_integration) ; false : mise en équivalence (cf. dim_method).
+      { name: 'consolidated', label: 'Intégrée à la conso', type: 'bool' },
     ],
   },
   {
@@ -452,7 +477,7 @@ export const MASTER_TABLES: TableDef[] = [
         name: 'taux_conversion',
         label: 'Taux conversion',
         type: 'select',
-        options: ['close_n1', 'avg', 'close_n', 'terminal'],
+        options: ['close_n1', 'avg', 'close_n'],
       },
       {
         name: 'flux_ecart',

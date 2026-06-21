@@ -28,9 +28,9 @@
 //! | F00  | Ouverture              | close_n1    | F80        |
 //! | F01  | Entrée périmètre       | close_n1    | F80        |
 //! | F20  | Variation              | avg         | F81        |
-//! | F80  | Écart conv. ouverture  | terminal    | —          |
-//! | F81  | Écart conv. variation  | terminal    | —          |
-//! | F98  | Sortie périmètre       | terminal    | —          |
+//! | F80  | Écart conv. ouverture  | close_n     | —          |
+//! | F81  | Écart conv. variation  | close_n     | —          |
+//! | F98  | Sortie périmètre       | close_n     | —          |
 //! | F99  | Clôture                | close_n     | —          |
 //!
 //! **Reconstruction des clôtures** : un flux auto-référentiel

@@ -3,7 +3,6 @@
 
 import {
   type FormEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -18,23 +17,18 @@ import {
 } from '@tanstack/react-table';
 import { api } from '../api';
 import type {
-  ColumnDef,
   DataHealthReport,
   MasterTable,
   TableDef,
 } from '../types';
 import { MASTER_TABLES } from '../types';
+import { FieldInput } from '../components/FieldInput';
+import { coerceValue, renderCell, toFormValue } from '../components/masterFields';
 import { findReferenceDrift } from '../utils/referenceCheck';
 
 type Row = Record<string, unknown>;
 type FormState = { mode: 'create' } | { mode: 'edit'; row: Row } | null;
 type Notice = { kind: 'success' | 'error'; text: string } | null;
-
-function toFormValue(col: ColumnDef, value: unknown): string {
-  if (col.type === 'bool') return value === true ? 'true' : 'false';
-  if (value === null || value === undefined) return '';
-  return String(value);
-}
 
 function initialValues(
   def: TableDef,
@@ -62,112 +56,6 @@ function initialValues(
     }
   }
   return v;
-}
-
-function coerceValue(col: ColumnDef, raw: string): unknown {
-  if (col.type === 'bool') return raw === 'true';
-  if (col.type === 'number') {
-    if (raw === '') return col.nullable ? null : 0;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : col.nullable ? null : 0;
-  }
-  if (col.nullable && raw === '') return null;
-  return raw;
-}
-
-function renderCell(col: ColumnDef, value: unknown): ReactNode {
-  if (value === null || value === undefined) return <span className="muted">—</span>;
-  if (col.type === 'bool') return value === true ? 'oui' : 'non';
-  return String(value);
-}
-
-function FieldInput({
-  col,
-  value,
-  disabled,
-  onChange,
-  optionsRows,
-  allValues,
-}: {
-  col: ColumnDef;
-  value: string;
-  disabled: boolean;
-  onChange: (v: string) => void;
-  optionsRows?: Row[];
-  allValues: Record<string, string>;
-}): ReactNode {
-  if (col.type === 'select' && col.optionsFrom) {
-    const valueKey = col.optionsFrom.value;
-    const labelKey = col.optionsFrom.label ?? valueKey;
-    const rows = optionsRows ?? [];
-    let filtered = rows;
-    if (
-      col.optionsFrom.table === 'sous_classes' &&
-      col.name === 'sous_classe'
-    ) {
-      const currentClasse = allValues['classe'] ?? '';
-      filtered =
-        currentClasse === ''
-          ? rows
-          : rows.filter((r) => String(r['classe'] ?? '') === currentClasse);
-    }
-    // Placeholder visible quand la valeur courante n'existe pas dans la liste
-    // (ex. donnée vide d'un ancien bug) — évite qu'un select non-nullable fasse
-    // croire que sa 1ʳᵉ option est sélectionnée alors que la valeur est vide.
-    const known = new Set(filtered.map((r) => String(r[valueKey] ?? '')));
-    const showPlaceholder = !col.nullable && !known.has(value);
-    return (
-      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {col.nullable && <option value="">—</option>}
-        {showPlaceholder && (
-          <option value="" disabled>
-            — choisir —
-          </option>
-        )}
-        {filtered.map((r) => {
-          const v = String(r[valueKey] ?? '');
-          const l = String(r[labelKey] ?? v);
-          return (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          );
-        })}
-      </select>
-    );
-  }
-  if (col.type === 'select' && col.options) {
-    return (
-      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {col.nullable && <option value="">—</option>}
-        {col.options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (col.type === 'bool') {
-    return (
-      <input
-        type="checkbox"
-        checked={value === 'true'}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked ? 'true' : 'false')}
-      />
-    );
-  }
-  const inputType =
-    col.type === 'number' ? 'number' : col.type === 'date' ? 'date' : 'text';
-  return (
-    <input
-      type={inputType}
-      value={value}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
 }
 
 interface RowFormProps {
@@ -239,7 +127,7 @@ function RowForm({
           <div className="form-grid">
             {tableDef.columns.map((col) => {
               const locked = isEdit && col.pk === true;
-              const optSource = col.optionsFrom?.table;
+              const optSource = col.optionsApi ?? col.optionsFrom?.table;
               const optRows = optSource ? optionsData[optSource] : undefined;
               return (
                 <label key={col.name} className="field">
@@ -345,8 +233,11 @@ export function MasterDataPage() {
             .filter((t): t is MasterTable => t !== undefined),
         ),
       );
-      const [rows, ...optResults] = await Promise.all([
+      // Options chargées hors master data (ex. rulesets via /api/rulesets).
+      const needsRulesets = tableDef.columns.some((c) => c.optionsApi === 'rulesets');
+      const [rows, rulesets, ...optResults] = await Promise.all([
         api.masterData.list(table),
+        needsRulesets ? api.rulesets.list() : Promise.resolve([]),
         ...sourceTables.map((t) => api.masterData.list(t)),
       ]);
       setData(rows as Row[]);
@@ -354,6 +245,7 @@ export function MasterDataPage() {
       sourceTables.forEach((t, i) => {
         opts[t] = optResults[i] as Row[];
       });
+      if (needsRulesets) opts['rulesets'] = rulesets as unknown as Row[];
       setOptionsData(opts);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'erreur');

@@ -10,6 +10,7 @@ export type PageId =
   | 'ecritures'
   | 'pipeline'
   | 'masterdata'
+  | 'schemas'
   | 'caracteristiques'
   | 'regles'
   | 'import';
@@ -26,6 +27,7 @@ const TABS: { id: PageId; label: string }[] = [
   { id: 'ecritures', label: 'Écritures' },
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'masterdata', label: 'Master data' },
+  { id: 'schemas', label: 'Schémas & jeux' },
   { id: 'caracteristiques', label: 'Attributs de dimension' },
   { id: 'regles', label: 'Règles' },
   { id: 'import', label: 'Import' },

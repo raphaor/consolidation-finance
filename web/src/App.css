@@ -845,3 +845,156 @@
   font-variant-numeric: tabular-nums;
   color: var(--primary);
 }
+
+/* ---------- Onglet « Schémas & jeux » : sélecteur segmenté ---------- */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented__btn {
+  appearance: none;
+  border: none;
+  background: var(--surface);
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-left: 1px solid var(--border);
+}
+
+.segmented__btn:first-child {
+  border-left: none;
+}
+
+.segmented__btn.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ---------- Éditeur liste → détail (MasterDetailEditor) ---------- */
+
+.md-editor__layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.md-editor__list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.md-editor__list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.md-editor__objects {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.md-editor__object {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+}
+
+.md-editor__object.is-active {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.md-editor__object-open {
+  flex: 1;
+  text-align: left;
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.md-editor__object-open:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.md-editor__empty,
+.md-editor__placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px;
+}
+
+.md-editor__new {
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.md-editor__new-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.md-editor__detail {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+  min-height: 200px;
+}
+
+.md-editor__detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.md-editor__detail-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.md-editor__detail-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.md-editor__grid td {
+  vertical-align: middle;
+}
+
+.md-editor__grid select,
+.md-editor__grid input[type='text'],
+.md-editor__grid input[type='number'] {
+  width: 100%;
+  min-width: 90px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: var(--bg, #fff);
+}
