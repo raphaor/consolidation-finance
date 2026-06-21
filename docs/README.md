@@ -10,10 +10,13 @@ Tenus à jour avec le code. À lire avant d'implémenter.
 
 | Document | Rôle |
 |---|---|
+| [`ETAT_AVANCEMENT.md`](./ETAT_AVANCEMENT.md) | **Point d'entrée** : ce qui est fait / partiel / reste à faire, et le comportement de chaque brique. |
 | [`../EXPRESSION_DE_BESOIN.md`](../EXPRESSION_DE_BESOIN.md) | Doc principal (volontairement court). Vision, périmètre, MVP. |
 | [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) | Registre des décisions (priorisé `BLOC`/`TÔT`/`POST`/`HORS`, ID `Qn`). Historique des arbitrages. |
 | [`MODELE_DONNEES.md`](./MODELE_DONNEES.md) | Sémantique des champs CSV, dimensions, satellites. |
-| [`FLUX_CONSO.md`](./FLUX_CONSO.md) | Catalogue des flux F00–F99 et leur traitement générateur. |
+| [`FLUX_CONSO.md`](./FLUX_CONSO.md) | Catalogue des flux F00–F99, schémas de flux, et leur traitement générateur. |
+| [`A_NOUVEAU.md`](./A_NOUVEAU.md) | Spec du report d'ouverture (à-nouveau) : snapshot N-1 figé → F00 N. |
+| [`A_NOUVEAU_IMPL.md`](./A_NOUVEAU_IMPL.md) | Notes d'implémentation de l'à-nouveau (runtime confirmé). |
 | [`REGLES_CONSO.md`](./REGLES_CONSO.md) | Spécification de l'éditeur de règles de consolidation. |
 | [`TECHNIQUE.md`](./TECHNIQUE.md) | Architecture et justifications de la stack. |
 | [`RECETTE_PYTHON.md`](./RECETTE_PYTHON.md) | Recette boîte noire : lancement et rôle des 3 scripts Python (`smoke` / `rules` / `golden`). |

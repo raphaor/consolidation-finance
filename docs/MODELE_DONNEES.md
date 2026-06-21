@@ -38,8 +38,8 @@ Sémantique des champs du CSV et caractéristiques *master data* de chaque dimen
 Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traitements alimentés).
 
 ### `Scenario`
-- **Master** : `code`, `libellé`, `type` (réel / budget / prévision), `exercice_référence`, `statut` (ouvert / verrouillé)
-- **Conso** : sélectionne le jeu d'écritures consolidé ; pilotage multi-scénarios.
+- **Master** (objet composite v2) : `code`, `libellé`, `category` (réel / budget / prévision), `entry_period`, `presentation_currency`, `variant`, `ruleset_code` (nullable), `rate_set` (jeu de taux), `perimeter_set` (jeu de périmètre), `a_nouveau_scenario` (conso N-1 figée, nullable), `statut` (ouvert / verrouillé). La **devise pivot** est applicative (`app_config`), pas par scénario.
+- **Conso** : agrège **toutes les références d'un run** (taux, périmètre, règles, à-nouveau) ; pilotage multi-scénarios.
 
 ### `Entity`
 - **Master** : `code`, `libellé`, `forme_juridique`, `pays`, `devise_fonctionnelle` (→ `Currency`), `entité_parent` (structure de groupe), `statut`
@@ -58,7 +58,7 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 
 ### `Flow`
 - **Rôle** : code de flux identifiant **l'origine d'un montant**. Les automatismes de conso agissent sur les **flux de variation** ; F99 (clôture) est un solde **reconstruit** par identité à chaque niveau de stockage (il transite comme un flux ordinaire, voire saisi en mode formulaire bilan, puis `materialize_closures` le reconstruit/l'écrase) → **cœur de la consolidation par les flux** et traçabilité totale.
-- **Master** : `code`, `libellé`, `taux_conversion` (type de taux), `flux_de_report` (défaut F99, pour **tous** les flux y compris les écarts), `flux_ecart_conversion` (flux d'écart associé ; null pour les écarts eux-mêmes — terminaux : taux clôture → écart propre = 0).
+- **Master** : `code`, `libellé` seulement — `Flow` (`dim_flow`) est une **dimension nue**. Le comportement par flux (`taux_conversion`, `flux_ecart`, `flux_de_report`, `flux_a_nouveau`) est porté par le **schéma de flux** (`sat_flow_scheme_item`), résolu par compte via `v_flow_behavior` (cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) §2 bis et [Q32](./QUESTIONS_OUVERTES.md)).
 - **Catalogue des valeurs + mécanique complète** : voir [`FLUX_CONSO.md`](./FLUX_CONSO.md) (F00 ouverture, F20 variation, F80/F81 écarts de conversion, F01/F98 périmètre, F99 clôture…).
 - **Conso** : alimente la restitution « Bilan par flux » ; identité `F99 = F00 + Σ variations + Σ écarts` (tient avant et après conversion).
 
@@ -112,7 +112,7 @@ Pilotage : variations de périmètre et mise en équivalence (natif MVP) ; inté
 Répond à [Q5](./QUESTIONS_OUVERTES.md).
 
 ### Taux de change
-- Définit, par `Currency_source × Currency_cible × Period` : `taux_clôture` et `taux_moyen` (moyenne **simple** sur la période).
+- **Versionné** : `dim_rate_set` (jeu de taux) référencé par `dim_scenario.rate_set`. `sat_exchange_rate` est clé par `(rate_set, currency_source, period)` et donne `taux_close` + `taux_moyen` (moyenne **simple** sur la période). Tous les taux convertissent vers une **devise pivot** applicative ; la conversion vers la devise de présentation se fait par **cross-rate** (cf. [Q34](./QUESTIONS_OUVERTES.md)).
 - **Application** (conversion multi-devises [B]) : le **taux par flux** est piloté par le **schéma de flux** du compte (`dim_account.flow_scheme` → `sat_flow_scheme_item`), avec repli sur le défaut `dim_flow`. Un compte de **bilan** suit le défaut (`taux_clôture` à la clôture, écart F80/F81) ; un compte de **résultat** suit le schéma `RESULTAT` (`taux_moyen`, **sans écart**). Cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) « Schémas de flux » et [Q32](./QUESTIONS_OUVERTES.md).
 - **Saisie** : écran CRUD + import d'un fichier CSV (format à spécifier). Pas de récupération automatique externe au POC.
 

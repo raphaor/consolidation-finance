@@ -234,6 +234,10 @@ Les **automatismes de consolidation** (conversion, méthodes, variations de pér
 
 ## 6. Catalogue des flux
 
+> Les colonnes **Taux conversion** et **Écart →** décrivent le **schéma `BILAN`**
+> (le défaut). Sous le schéma `RESULTAT`, tous ces flux passent au **taux moyen
+> sans écart** (cf. §2 bis). `dim_flow` lui-même ne porte que `code`/`libellé`.
+
 | Code | Libellé | Taux conversion | Écart → | Généré par | MVP |
 |---|---|---|---|---|---|
 | **F00** | Ouverture | clôture N-1 | F80 | Report d'ouverture (à-nouveau de F99 N-1) | MVP |

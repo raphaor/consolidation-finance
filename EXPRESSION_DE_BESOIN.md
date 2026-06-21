@@ -27,14 +27,14 @@ Les solutions actuelles sont soit professionnelles et coûteuses, soit s'appuien
 - Calcul des **intérêts minoritaires**.
 - Gestion des **entrées / sorties / fusions**, en cours d'exercice ou en début de période.
 
-> Représentation des données du périmètre non définie — voir [Q5](./docs/QUESTIONS_OUVERTES.md).
+> Périmètre = table satellite **versionnée** (`sat_perimeter`, clé `perimeter_set × entity × period`) ; méthode + % par entité, réutilisable entre scénarios ([Q5](./docs/QUESTIONS_OUVERTES.md), [Q35](./docs/QUESTIONS_OUVERTES.md) TRANCHÉES).
 
 ### 3.3 Référentiels & plans de compte
 - Plan de compte **customisable**.
 - Saisie **directement dans le plan du groupe** (pas de mapping — option d'évolution).
-- Conversion de devises : **taux moyens sur la période**.
+- Conversion de devises : **taux clôture / moyen selon le schéma de flux** du compte (bilan vs résultat), via une **devise pivot** applicative.
 
-> Source des taux de change à préciser — voir [Q4](./docs/QUESTIONS_OUVERTES.md).
+> Taux : clôture + moyen par `(jeu de taux, devise, période)`, CRUD + import CSV ([Q4](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE). Taux par flux piloté par le **schéma de flux** ([Q32](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE).
 
 ### 3.4 Opérations de consolidation
 
@@ -45,8 +45,8 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 
 **Traitements natifs — MVP**
 - Agrégation / cumul des comptes
-- Conversion multi-devises (taux clôture → bilan, taux moyen → résultat)
-- Gestion des méthodes de consolidation : intégration **globale**, **proportionnelle** (application native — la mise en **équivalence** et le calcul des **intérêts minoritaires** sont reportés en post-MVP, voir [Q26](./docs/QUESTIONS_OUVERTES.md) et l'éditeur de règles [Q24](./docs/QUESTIONS_OUVERTES.md))
+- Conversion multi-devises — taux par **schéma de flux** du compte (bilan : taux du flux + écarts F80/F81 ; résultat : taux moyen sans écart), voir [Q32](./docs/QUESTIONS_OUVERTES.md)
+- Gestion des méthodes de consolidation **pilotables** (`dim_method`, sans liste en dur) : intégration **globale**, **proportionnelle** (application native — la mise en **équivalence** et le calcul des **intérêts minoritaires** sont reportés en post-MVP, voir [Q26](./docs/QUESTIONS_OUVERTES.md), [Q33](./docs/QUESTIONS_OUVERTES.md) et l'éditeur de règles [Q24](./docs/QUESTIONS_OUVERTES.md))
 - Variations de périmètre : entrées / sorties (par comparaison au scope de la consolidation d'ouverture)
 
 **Traitements natifs — extensions post-MVP**
@@ -117,9 +117,12 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 
 ## MVP / POC — périmètre défini
 
+> **État d'implémentation détaillé** (fait / partiel / reste, et comportements) :
+> [`docs/ETAT_AVANCEMENT.md`](./docs/ETAT_AVANCEMENT.md). La section ci-dessous fixe le **scope**.
+
 **Dans le MVP**
-- Scénario : **réel seul**.
-- Traitements **natifs** : agrégation, conversion multi-devises (clôture → bilan, moyen → résultat), méthodes de conso (globale, proportionnelle), variations de périmètre (entrées/sorties). Mise en équivalence et intérêts minoritaires reportés (post-MVP).
+- Scénario : **réel seul** (objet composite : période, devise, variante, jeu de taux, jeu de périmètre, ruleset, à-nouveau).
+- Traitements **natifs** : agrégation, conversion multi-devises (taux par **schéma de flux** du compte), méthodes de conso **pilotables** (globale, proportionnelle), **report d'à-nouveau** (F99 N-1 → F00 N). Les **variations de périmètre** (entrées/sorties) passent désormais par des **règles** (suppression du niveau natif *reclassifié*). Mise en équivalence et intérêts minoritaires reportés (post-MVP).
 - **Éditeur de règles de consolidation** ([Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE, implémenté par anticipation) : éliminations interco et participations. Spécification dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md). Reste post-MVP : intérêts minoritaires, retraitements, variations de capital, répartition des résultats (catalogue §10).
 - Restitutions : table filtrable, **bilan par flux**, **compte de résultat** (§5).
 - Master data : **CRUD complet** pour chaque dimension et table satellite + import CSV (liasses + taux) (§3.4, [`docs/MODELE_DONNEES.md`](./docs/MODELE_DONNEES.md)).

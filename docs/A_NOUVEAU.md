@@ -20,8 +20,13 @@ n'existe **aucun report** de la conso N-1. Ce document spécifie ce report.
 
 **Principe directeur — généricité.** Le moteur ne code jamais en dur `F00` ni
 `F99`. Le rôle « ouverture issue d'un à-nouveau » est déclaré par une donnée
-(`dim_flow.flux_a_nouveau`), exactement comme le rôle « clôture » l'est déjà par
-`dim_flow.flux_de_report` (auto-référence). Toute la logique en dérive.
+(`flux_a_nouveau`), exactement comme le rôle « clôture » l'est par
+`flux_de_report` (auto-référence). Ces attributs sont aujourd'hui portés par le
+**schéma de flux** (`sat_flow_scheme_item`, résolu par compte via
+`v_flow_behavior` — cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) §2 bis, [Q32](./QUESTIONS_OUVERTES.md)),
+non plus par `dim_flow` ; une conséquence directe est que le **résultat ne
+reporte pas** d'à-nouveau (schéma `RESULTAT` : `flux_a_nouveau` NULL), seul le
+bilan le fait. Toute la logique en dérive.
 
 ---
 
