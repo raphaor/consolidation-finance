@@ -13,6 +13,7 @@
 import type {
   BilanRow,
   Characteristic,
+  CustomReference,
   DataHealthReport,
   DimensionInfo,
   HealthStatus,
@@ -233,5 +234,16 @@ export const api = {
       deleteJson<unknown>(`/meta/characteristics/${code}/values/${value}`),
     assign: (code: string, body: { member: string; value: string | null }) =>
       putJson<unknown>(`/meta/characteristics/${code}/assign`, body),
+  },
+  // Références directes (patron B) : colonne sur une dimension hôte pointant vers
+  // une dimension cible (y compris elle-même). Cf. custom_references.rs.
+  customReferences: {
+    list: () => getJson<CustomReference[]>('/meta/references-custom'),
+    create: (body: { host_dimension: string; column: string; target_dimension: string }) =>
+      postJsonRaw<{ host_dimension: string; column: string }>('/meta/references-custom', body),
+    remove: (host: string, column: string) =>
+      deleteJson<{ deleted: string }>(`/meta/references-custom/${host}/${column}`),
+    assign: (host: string, column: string, body: { member: string; value: string | null }) =>
+      putJson<unknown>(`/meta/references-custom/${host}/${column}/assign`, body),
   },
 };

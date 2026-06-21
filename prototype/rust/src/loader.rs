@@ -144,18 +144,11 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         use_explicit_schema: false,
     },
     // 9. dim_account : plan de compte. Schéma explicite + null_padding car le
-    //    fichier peut contenir des lignes incomplètes (compte_parent vide).
+    //    fichier peut contenir des lignes incomplètes (sous_classe vide).
     CsvMapping {
         file: "accounts.csv",
         table: "dim_account",
-        columns: &[
-            "code",
-            "libelle",
-            "classe",
-            "sous_classe",
-            "technical_grouping",
-            "compte_parent",
-        ],
+        columns: &["code", "libelle", "classe", "sous_classe"],
         casts: &[],
         use_explicit_schema: true,
     },

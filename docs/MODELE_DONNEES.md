@@ -52,7 +52,8 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 - **Conso** : axe temporel d'agrégation et de conversion devise.
 
 ### `Account`
-- **Master** : `code`, `libellé`, `sens` (débit / crédit), `classe` (bilan / résultat / flux / hors-compte), `capitaux_propres` (booléen — identifie les comptes de capitaux propres, utilisés par la **mise en équivalence**), `compte_parent` (hiérarchie d'agrégation)
+- **Master** : `code`, `libellé`, `sens` (débit / crédit), `classe` (bilan / résultat / flux / hors-compte), `sous_classe`
+- **Attributs ajoutés à l'exécution** (plus codés en dur) : le regroupement par nature (ex. `capitaux_propres`, utilisé par la **mise en équivalence**) se déclare comme **caractéristique** ; le **compte parent** (hiérarchie d'agrégation) comme **référence directe** vers `Account` lui-même (cf. §4 ter et la page « Attributs de dimension »).
 - **Conso** : cumul [B], agrégation hiérarchique pour les restitutions.
 
 ### `Flow`
@@ -146,7 +147,8 @@ Conséquence pratique : **une ligne principale ne doit jamais porter de valeur a
 Le modèle n'a pas de FK dures (DuckDB, choix du proto). Les liens entre objets sont déclarés dans un **registre central** (`engine/src/references.rs`) : chaque `(table.colonne) → (table_cible.colonne)`. Il couvre notamment :
 
 - `dim_scenario.{category, entry_period, presentation_currency, variant, ruleset_code, rate_set}`
-- `dim_entity.{devise_fonctionnelle, entite_parent}`, `dim_account.{sous_classe, compte_parent}`, `dim_flow.{flux_ecart, flux_de_report}`
+- `dim_entity.{devise_fonctionnelle, entite_parent}`, `dim_account.sous_classe`, `dim_flow.{flux_ecart, flux_de_report}`
+- **références dynamiques** (ajoutées à l'exécution) : caractéristiques N1/N2 et **références directes** (patron B, ex. `dim_account.compte_parent → dim_account.code`), fusionnées au graphe statique par `references::all_references`
 - `sat_perimeter.{entity, scenario, period, methode}`, `sat_exchange_rate.{rate_set, currency_source, period}`
 - écritures : `{scenario, entity, entry_period, period, account, flow, currency, nature}` + `{partner, share}` → **`dim_entity`** (les trois rôles de la §2.2)
 - `dim_ruleset_item.{ruleset_code, rule_code}`

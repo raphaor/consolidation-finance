@@ -51,10 +51,12 @@ const fn rq(
 
 /// Le graphe complet des références du modèle.
 ///
-/// Les auto-références (`dim_flow.flux_de_report → dim_flow.code`,
-/// `dim_account.compte_parent → dim_account.code`, `dim_entity.entite_parent →
-/// dim_entity.code`) sont incluses : la validation à l'écriture tolère la valeur
-/// égale à la PK de la ligne elle-même (cf. `masterdata::validate_references`).
+/// Les auto-références statiques (`dim_flow.flux_de_report → dim_flow.code`,
+/// `dim_entity.entite_parent → dim_entity.code`) sont incluses : la validation à
+/// l'écriture tolère la valeur égale à la PK de la ligne elle-même (cf.
+/// `masterdata::validate_references`). L'ancienne `dim_account.compte_parent` est
+/// désormais une **référence directe** dynamique (cf. [`dynamic_references`] et
+/// `crate::custom_references`), donc absente de cette liste statique.
 pub const REFERENCES: &[Reference] = &[
     // dim_scenario (v2)
     r("dim_scenario", "category", "dim_scenario_category", "code"),
@@ -68,9 +70,8 @@ pub const REFERENCES: &[Reference] = &[
     // dim_entity
     rq("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso"),
     r("dim_entity", "entite_parent", "dim_entity", "code"),
-    // dim_account
+    // dim_account (compte_parent est désormais une référence directe dynamique)
     r("dim_account", "sous_classe", "dim_sous_classe", "code"),
-    r("dim_account", "compte_parent", "dim_account", "code"),
     // dim_flow (auto-références : flux d'écart / de report / d'à-nouveau)
     r("dim_flow", "flux_ecart", "dim_flow", "code"),
     r("dim_flow", "flux_de_report", "dim_flow", "code"),
@@ -208,7 +209,50 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
         }
     }
 
+    // Références directes (patron B) : dim_<host>.<column> → master data cible.
+    // Auto-références tolérées comme les statiques (ex. compte_parent → account).
+    if custom_reference_registry_exists(con) {
+        if let Ok(mut stmt) = con.prepare(
+            "SELECT host_dimension, column_name, target_dimension \
+             FROM dim_custom_reference ORDER BY host_dimension, column_name",
+        ) {
+            if let Ok(rows) = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            }) {
+                for (host, column, target) in rows.flatten() {
+                    if let (Some((ht, _)), Some((tt, tc))) =
+                        (dimension_master(&host), dimension_master(&target))
+                    {
+                        out.push(OwnedReference {
+                            table: ht.to_string(),
+                            column,
+                            target_table: tt.to_string(),
+                            target_column: tc.to_string(),
+                            required: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     out
+}
+
+/// `true` si le registre des références directes existe (faux au premier
+/// démarrage, avant exécution du DDL).
+fn custom_reference_registry_exists(con: &Connection) -> bool {
+    con.query_row(
+        "SELECT COUNT(*) = 1 FROM information_schema.tables \
+         WHERE table_schema = 'main' AND table_name = 'dim_custom_reference'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap_or(false)
 }
 
 /// Toutes les références : statiques (`REFERENCES`) + dynamiques (caractéristiques).

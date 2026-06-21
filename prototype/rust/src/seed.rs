@@ -67,26 +67,27 @@ const SOUS_CLASSES: &[(&str, &str, &str)] = &[
     ("produits", "Produits", "resultat"),
 ];
 
-/// Plan de compte : (code, libelle, classe, sous_classe, technical_grouping, compte_parent).
+/// Plan de compte : (code, libelle, classe, sous_classe).
 ///
 /// `400` est rangé en `bilan` : c'est le « résultat de l'exercice », solde net
 /// reporté au passif, pas un compte de P&L. Les comptes 6xx/7xx sont les
-/// véritables comptes de produits et charges (classe `resultat`). `100` (Capital)
-/// est un compte de bilan (passif, capitaux propres) tagué via `technical_grouping`.
-const ACCOUNTS: &[(&str, &str, &str, &str, Option<&str>, Option<&str>)] = &[
-    ("100", "Capital",                "bilan",    "passif",   Some("capitaux_propres"), None),
-    ("200", "Immobilisations",        "bilan",    "actif",    None,                     None),
-    ("300", "Stocks",                 "bilan",    "actif",    None,                     None),
-    ("400", "Résultat de l'exercice", "bilan",    "passif",   None,                     None),
-    ("600", "Achats",                 "resultat", "charges",  None,                     None),
-    ("610", "Autres charges",         "resultat", "charges",  None,                     None),
-    ("640", "Dotations aux amort.",   "resultat", "charges",  None,                     None),
-    ("700", "Ventes",                 "resultat", "produits", None,                     None),
-    ("705", "Prestations",            "resultat", "produits", None,                     None),
+/// véritables comptes de produits et charges (classe `resultat`). Le regroupement
+/// par nature (ex. `capitaux_propres` sur `100`) et la hiérarchie de compte
+/// parent ne sont plus des colonnes en dur : ils se posent via [`seed_demo_attributes`].
+const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
+    ("100", "Capital",                "bilan",    "passif"),
+    ("200", "Immobilisations",        "bilan",    "actif"),
+    ("300", "Stocks",                 "bilan",    "actif"),
+    ("400", "Résultat de l'exercice", "bilan",    "passif"),
+    ("600", "Achats",                 "resultat", "charges"),
+    ("610", "Autres charges",         "resultat", "charges"),
+    ("640", "Dotations aux amort.",   "resultat", "charges"),
+    ("700", "Ventes",                 "resultat", "produits"),
+    ("705", "Prestations",            "resultat", "produits"),
     // Comptes de tiers (PCG) pour la modélisation interco bilan.
-    ("467",  "Divers comptes débiteurs et produits à recevoir",  "bilan", "actif",  None, None),
-    ("468",  "Divers comptes créditeurs et charges à payer",     "bilan", "passif", None, None),
-    ("471L", "Liaison élimination intragroupe",                  "bilan", "passif", None, None),
+    ("467",  "Divers comptes débiteurs et produits à recevoir",  "bilan", "actif"),
+    ("468",  "Divers comptes créditeurs et charges à payer",     "bilan", "passif"),
+    ("471L", "Liaison élimination intragroupe",                  "bilan", "passif"),
 ];
 
 /// Catalogue des flux — cf. docs/FLUX_CONSO.md §6.
@@ -287,8 +288,8 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for a in ACCOUNTS {
         con.execute(
-            "INSERT INTO dim_account VALUES (?, ?, ?, ?, ?, ?)",
-            params![a.0, a.1, a.2, a.3, a.4, a.5],
+            "INSERT INTO dim_account VALUES (?, ?, ?, ?)",
+            params![a.0, a.1, a.2, a.3],
         )?;
     }
     for f in FLOWS {
@@ -419,5 +420,34 @@ pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
         "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES (?, ?, ?)",
         params!["RS_INTERCO", 1, "ELI_700"],
     )?;
+    Ok(())
+}
+
+/// Seede la **démonstration des attributs de dimension** : recrée, via les
+/// mécanismes pilotables, ce qui était auparavant codé en dur sur `dim_account`.
+///
+/// - **Caractéristique** `groupement` (N1 sur `account`) avec la valeur
+///   `capitaux_propres`, affectée au compte `100` (ex-`technical_grouping`) ;
+/// - **Référence directe** `compte_parent` (patron B) sur `account → account`
+///   (ex-colonne `compte_parent`), prête à recevoir une hiérarchie.
+///
+/// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
+/// `POST /api/reset`), comme [`seed_demo_rules`]. Renvoie [`AppError`] car elle
+/// s'appuie sur les fonctions de haut niveau (validation incluse).
+pub fn seed_demo_attributes(con: &Connection) -> Result<(), crate::state::AppError> {
+    use crate::{characteristics, custom_references};
+    use serde_json::{json, Map};
+
+    // Caractéristique « groupement » + valeur « capitaux_propres » sur le compte 100.
+    characteristics::create_characteristic(con, "groupement", "Groupement technique", "account")?;
+    let mut val = Map::new();
+    val.insert("code".into(), json!("capitaux_propres"));
+    val.insert("libelle".into(), json!("Capitaux propres"));
+    characteristics::create_value(con, "groupement", &val)?;
+    characteristics::assign(con, "groupement", "100", Some("capitaux_propres"))?;
+
+    // Référence directe « compte_parent » : account → account (hiérarchie).
+    custom_references::create(con, "account", "compte_parent", "account")?;
+
     Ok(())
 }

@@ -80,7 +80,10 @@ const TABLES: &[TableDef] = &[
     TableDef {
         api_name: "accounts",
         sql_name: "dim_account",
-        columns: &["code", "libelle", "classe", "sous_classe", "technical_grouping", "compte_parent"],
+        // `compte_parent` (réf. directe) et le regroupement par nature
+        // (caractéristique) ne sont plus des colonnes en dur : ils sont gérés via
+        // la page « Attributs de dimension » (characteristics / custom_references).
+        columns: &["code", "libelle", "classe", "sous_classe"],
         pk: &["code"],
     },
     TableDef {

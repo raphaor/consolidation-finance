@@ -117,20 +117,22 @@ CREATE TABLE dim_period (
     statut     TEXT           -- clôturé / ouvert
 );";
 
-/// 4. dim_account : plan de compte du groupe (classe + hiérarchie).
+/// 4. dim_account : plan de compte du groupe (classe + sous-classe).
 ///
 /// `sous_classe` référence `dim_sous_classe.code` (pas de FK dure en DuckDB pour
-/// le proto — contrainte uniquement sémantique). `technical_grouping` permet de
-/// regrouper des comptes par nature (ex. `capitaux_propres` pour la mise en
-/// équivalence), indépendamment de la classe comptable.
+/// le proto — contrainte uniquement sémantique).
+///
+/// Le regroupement par nature (ex. `capitaux_propres`) et la hiérarchie
+/// d'agrégation (compte parent) ne sont **plus codés en dur** ici : ils se
+/// recréent à l'exécution, respectivement comme **caractéristique** (N1, cf.
+/// [`crate::characteristics`]) et comme **référence directe** (patron B, cf.
+/// [`crate::custom_references`]).
 pub const DDL_DIM_ACCOUNT: &str = "\
 CREATE TABLE dim_account (
     code               TEXT PRIMARY KEY,
     libelle            TEXT,
     classe             TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
-    sous_classe        TEXT,           -- référence dim_sous_classe.code
-    technical_grouping TEXT,           -- regroupement par nature (ex. capitaux_propres)
-    compte_parent      TEXT            -- hiérarchie d'agrégation
+    sous_classe        TEXT            -- référence dim_sous_classe.code
 );";
 
 /// 4b. dim_sous_classe : sous-classes de comptes (actif / passif / charges / produits).
@@ -319,6 +321,23 @@ CREATE TABLE IF NOT EXISTS dim_characteristic_attribute (
     PRIMARY KEY (characteristic_code, name)
 );";
 
+/// 8h. dim_custom_reference : registre des **références directes** (patron B).
+///
+/// Une référence directe ajoute une colonne `<column_name>` sur la master data
+/// de la dimension `host_dimension`, déclarée comme référence vers
+/// `target_dimension` (y compris elle-même : hiérarchie). C'est la version
+/// pilotable du patron historiquement codé en dur (`dim_account.compte_parent`,
+/// `dim_entity.entite_parent`). Comme les registres ci-dessus, il **survit au
+/// reset** (CREATE IF NOT EXISTS, hors `ALL_DROP`) ; `create_schema` ré-applique
+/// ensuite les colonnes perdues (cf. `crate::custom_references::reapply`).
+pub const DDL_DIM_CUSTOM_REFERENCE: &str = "\
+CREATE TABLE IF NOT EXISTS dim_custom_reference (
+    host_dimension   TEXT NOT NULL,
+    column_name      TEXT NOT NULL,
+    target_dimension TEXT NOT NULL,
+    PRIMARY KEY (host_dimension, column_name)
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — mêmes dimensions que fact_entry sans `level`,
@@ -404,6 +423,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_CUSTOM_DIMENSION,
     DDL_DIM_CHARACTERISTIC,
     DDL_DIM_CHARACTERISTIC_ATTRIBUTE,
+    DDL_DIM_CUSTOM_REFERENCE,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];
@@ -468,6 +488,10 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
     //    (perdues au DROP des tables de dimension de base ; les tables de
     //    valeurs `car_<code>` survivent au reset, donc ne sont pas recréées).
     crate::characteristics::reapply(con)?;
+
+    // 6. Ré-appliquer les colonnes des références directes (patron B), perdues
+    //    elles aussi au DROP des dimensions hôtes (le registre survit au reset).
+    crate::custom_references::reapply(con)?;
 
     Ok(())
 }

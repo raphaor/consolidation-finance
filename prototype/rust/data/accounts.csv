@@ -1,13 +1,13 @@
-code,libelle,classe,sous_classe,technical_grouping,compte_parent
-100,Capital,bilan,passif,capitaux_propres,
-200,Immobilisations,bilan,actif,,
-300,Stocks,bilan,actif,,
-400,Résultat de l'exercice,bilan,passif,,
-600,Achats,resultat,charges,,
-610,Autres charges,resultat,charges,,
-640,Dotations aux amort.,resultat,charges,,
-700,Ventes,resultat,produits,,
-705,Prestations,resultat,produits,,
-467,Divers comptes débiteurs et produits à recevoir,bilan,actif,,
-468,Divers comptes créditeurs et charges à payer,bilan,passif,,
-471L,Liaison élimination intragroupe,bilan,passif,,
+code,libelle,classe,sous_classe
+100,Capital,bilan,passif
+200,Immobilisations,bilan,actif
+300,Stocks,bilan,actif
+400,Résultat de l'exercice,bilan,passif
+600,Achats,resultat,charges
+610,Autres charges,resultat,charges
+640,Dotations aux amort.,resultat,charges
+700,Ventes,resultat,produits
+705,Prestations,resultat,produits
+467,Divers comptes débiteurs et produits à recevoir,bilan,actif
+468,Divers comptes créditeurs et charges à payer,bilan,passif
+471L,Liaison élimination intragroupe,bilan,passif

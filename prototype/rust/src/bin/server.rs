@@ -45,8 +45,9 @@ use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
 use conso_engine::{
-    characteristics, create_schema, dimensions, export, import, load_all, masterdata, money::Money,
-    run_pipeline, run_pipeline_with_hook, seed_demo_rules, ConvertParams,
+    characteristics, create_schema, custom_references, dimensions, export, import, load_all,
+    masterdata, money::Money, run_pipeline, run_pipeline_with_hook, seed_demo_attributes,
+    seed_demo_rules, ConvertParams,
 };
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
@@ -580,6 +581,7 @@ async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetR
         create_schema(&con).map_err(db_err)?; // DROP + CREATE (idempotent)
         load_all(&con, std::path::Path::new(&state.csv_dir)).map_err(db_err)?;
         seed_demo_rules(&con).map_err(db_err)?; // règle + jeu interco (hors CSV)
+        seed_demo_attributes(&con)?; // caractéristique + référence directe (hors CSV)
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
             .map_err(db_err)?;
@@ -1215,6 +1217,7 @@ async fn main() {
         create_schema(&con).expect("✗ create_schema");
         load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
         seed_demo_rules(&con).expect("✗ seed_demo_rules"); // règle + jeu interco (hors CSV)
+        seed_demo_attributes(&con).expect("✗ seed_demo_attributes"); // caractéristique + réf. directe
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
@@ -1312,6 +1315,7 @@ async fn main() {
         )
         .merge(masterdata::router())
         .merge(characteristics::router())
+        .merge(custom_references::router())
         .merge(import::router())
         .merge(export::router())
         .fallback_service(serve_dir)

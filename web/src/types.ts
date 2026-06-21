@@ -285,14 +285,8 @@ export const MASTER_TABLES: TableDef[] = [
         nullable: true,
         optionsFrom: { table: 'sous_classes', value: 'code', label: 'libelle' },
       },
-      { name: 'technical_grouping', label: 'Groupement tech.', type: 'text', nullable: true },
-      {
-        name: 'compte_parent',
-        label: 'Compte parent',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'accounts', value: 'code', label: 'libelle' },
-      },
+      // Le regroupement par nature (caractéristique) et le compte parent
+      // (référence directe) se gèrent dans la page « Attributs de dimension ».
     ],
   },
   {
@@ -543,6 +537,17 @@ export interface Characteristic {
   base_dimension: string;
   value_table: string;
   attributes: CharacteristicAttribute[];
+}
+
+// ---------- Références directes (patron B, GET /api/meta/references-custom) -----
+// Une colonne ajoutée à l'exécution sur la master data d'une dimension hôte,
+// pointant directement vers une dimension cible (y compris elle-même :
+// hiérarchie). Pas de table intermédiaire (cf. custom_references.rs).
+
+export interface CustomReference {
+  host_dimension: string;
+  column: string;
+  target_dimension: string;
 }
 
 // ---------- Références (graphe de jointures, GET /api/meta/references) ----------

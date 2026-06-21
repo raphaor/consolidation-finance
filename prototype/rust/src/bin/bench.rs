@@ -176,9 +176,9 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             'actif'
         FROM range(0, {N_ENTITIES}) t(i);
 
-        -- Plan de compte : mix bilan / resultat / flux (sous_classe et
-        -- technical_grouping NULLABLE — laissés à NULL pour les comptes synthétiques).
-        INSERT INTO dim_account (code, libelle, classe, sous_classe, technical_grouping, compte_parent)
+        -- Plan de compte : mix bilan / resultat / flux (sous_classe NULLABLE,
+        -- laissée à NULL pour les comptes synthétiques).
+        INSERT INTO dim_account (code, libelle, classe, sous_classe)
         SELECT
             'ACC_' || LPAD(CAST(i AS VARCHAR), 04, '0'),
             'Compte ' || CAST(i AS VARCHAR),
@@ -187,7 +187,7 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
                 WHEN i % 5 IN (2,3) THEN 'resultat'
                 ELSE                     'flux'
             END,
-            NULL, NULL, NULL
+            NULL
         FROM range(0, {N_ACCOUNTS}) t(i);
 
         INSERT INTO dim_flow

@@ -40,6 +40,7 @@
 //! par `dim_flow.flux_de_report`.
 
 pub mod characteristics;
+pub mod custom_references;
 pub mod dimensions;
 pub mod export;
 pub mod import;
@@ -60,5 +61,5 @@ pub use loader::load_all;
 pub use pipeline::{run_pipeline, run_pipeline_with_hook, ConvertParams};
 pub use rules::run_ruleset;
 pub use schema::create_schema;
-pub use seed::{seed_all, seed_demo_rules};
+pub use seed::{seed_all, seed_demo_attributes, seed_demo_rules};
 pub use state::AppState;
