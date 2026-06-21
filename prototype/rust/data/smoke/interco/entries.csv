@@ -1,0 +1,6 @@
+scenario,entity,entry_period,period,account,flow,currency,nature,partner,share,analysis,analysis2,amount
+SMOKE_IC,A,2025,2025,467,F00,USD,0LIASS,,,,1000
+SMOKE_IC,A,2025,2025,467,F20,USD,0LIASS,,,,100
+SMOKE_IC,A,2025,2025,467,F20,USD,0LIASS,B,,,100
+SMOKE_IC,A,2025,2025,468,F00,USD,0LIASS,,,,1000
+SMOKE_IC,A,2025,2025,468,F20,USD,0LIASS,,,,100

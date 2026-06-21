@@ -1,0 +1,62 @@
+{
+  "scope": [
+    {"target": "entity",  "dim": "methode", "op": "IN", "val": ["globale", "proportionnelle"]},
+    {"target": "partner", "dim": "methode", "op": "IN", "val": ["globale", "proportionnelle"]}
+  ],
+  "operations": [
+    {
+      "seq": 1,
+      "level": "converted",
+      "selection": [
+        {"dim": "partner", "op": "IS NOT NULL"}
+      ],
+      "coefficient": {"type": "min_pct_integration"},
+      "multiplicateur": -1,
+      "destination": {
+        "nature":  {"mode": "override", "value": "2ELI"},
+        "partner": {"mode": "inherit"}
+      }
+    },
+    {
+      "seq": 2,
+      "level": "converted",
+      "selection": [
+        {"dim": "partner", "op": "IS NOT NULL"}
+      ],
+      "coefficient": {"type": "min_pct_integration"},
+      "multiplicateur": -1,
+      "destination": {
+        "nature":  {"mode": "override", "value": "2ELI"},
+        "partner": {"mode": "null"}
+      }
+    },
+    {
+      "seq": 3,
+      "level": "converted",
+      "selection": [
+        {"dim": "partner", "op": "IS NOT NULL"}
+      ],
+      "coefficient": {"type": "min_pct_integration"},
+      "multiplicateur": 1,
+      "destination": {
+        "account": {"mode": "override", "value": "471L"},
+        "nature":  {"mode": "override", "value": "2ELI"},
+        "partner": {"mode": "inherit"}
+      }
+    },
+    {
+      "seq": 4,
+      "level": "converted",
+      "selection": [
+        {"dim": "partner", "op": "IS NOT NULL"}
+      ],
+      "coefficient": {"type": "min_pct_integration"},
+      "multiplicateur": 1,
+      "destination": {
+        "account": {"mode": "override", "value": "471L"},
+        "nature":  {"mode": "override", "value": "2ELI"},
+        "partner": {"mode": "null"}
+      }
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+code,libelle,category,entry_period,presentation_currency,variant,ruleset_code,rate_set,perimeter_set,statut,a_nouveau_scenario
+SMOKE_CI,Smoke Conv&Integ,REEL,2024,EUR,BASE,,SMOKE_RATES_CI,SMOKE_PERIM_CI,ouvert,

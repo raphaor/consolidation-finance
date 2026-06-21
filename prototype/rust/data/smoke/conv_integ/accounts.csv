@@ -1,0 +1,4 @@
+code,libelle,classe,sous_classe,flow_scheme
+467,Divers comptes débiteurs,bilan,actif,BILAN
+468,Divers comptes créditeurs,bilan,passif,BILAN
+471L,Compte de liaison intragroupe,bilan,passif,BILAN

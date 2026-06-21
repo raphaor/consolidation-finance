@@ -1,0 +1,17 @@
+scheme,flow,taux_conversion,flux_ecart,flux_de_report,flux_a_nouveau
+BILAN,F00,close_n1,F80,F99,
+BILAN,F01,close_n1,F80,F99,
+BILAN,F20,avg,F81,F99,
+BILAN,F80,close_n,,F99,
+BILAN,F81,close_n,,F99,
+BILAN,F90,close_n,,F99,
+BILAN,F98,close_n,,F99,
+BILAN,F99,close_n,,F99,F00
+RESULTAT,F00,avg,,F99,
+RESULTAT,F01,avg,,F99,
+RESULTAT,F20,avg,,F99,
+RESULTAT,F80,close_n,,F99,
+RESULTAT,F81,close_n,,F99,
+RESULTAT,F90,avg,,F99,
+RESULTAT,F98,avg,,F99,
+RESULTAT,F99,avg,,F99,
