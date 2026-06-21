@@ -75,24 +75,84 @@ impl DimDef {
 pub fn builtin_dims() -> Vec<DimDef> {
     vec![
         // Fixed
-        DimDef { name: "scenario".into(),     category: DimCategory::Fixed,      custom: false, label: "Définition de consolidation".into() },
+        DimDef {
+            name: "scenario".into(),
+            category: DimCategory::Fixed,
+            custom: false,
+            label: "Définition de consolidation".into(),
+        },
         // Active
-        DimDef { name: "entity".into(),       category: DimCategory::Active,     custom: false, label: "Entité".into() },
+        DimDef {
+            name: "entity".into(),
+            category: DimCategory::Active,
+            custom: false,
+            label: "Entité".into(),
+        },
         // Fixed
-        DimDef { name: "entry_period".into(), category: DimCategory::Fixed,      custom: false, label: "Exercice".into() },
-        DimDef { name: "period".into(),       category: DimCategory::Fixed,      custom: false, label: "Période".into() },
+        DimDef {
+            name: "entry_period".into(),
+            category: DimCategory::Fixed,
+            custom: false,
+            label: "Exercice".into(),
+        },
+        DimDef {
+            name: "period".into(),
+            category: DimCategory::Fixed,
+            custom: false,
+            label: "Période".into(),
+        },
         // Active
-        DimDef { name: "account".into(),      category: DimCategory::Active,     custom: false, label: "Compte".into() },
-        DimDef { name: "flow".into(),         category: DimCategory::Active,     custom: false, label: "Flux".into() },
+        DimDef {
+            name: "account".into(),
+            category: DimCategory::Active,
+            custom: false,
+            label: "Compte".into(),
+        },
+        DimDef {
+            name: "flow".into(),
+            category: DimCategory::Active,
+            custom: false,
+            label: "Flux".into(),
+        },
         // Fixed
-        DimDef { name: "currency".into(),     category: DimCategory::Fixed,      custom: false, label: "Devise".into() },
+        DimDef {
+            name: "currency".into(),
+            category: DimCategory::Fixed,
+            custom: false,
+            label: "Devise".into(),
+        },
         // Active
-        DimDef { name: "nature".into(),       category: DimCategory::Active,     custom: false, label: "Nature".into() },
+        DimDef {
+            name: "nature".into(),
+            category: DimCategory::Active,
+            custom: false,
+            label: "Nature".into(),
+        },
         // Analytical
-        DimDef { name: "partner".into(),      category: DimCategory::Analytical, custom: false, label: "Partenaire".into() },
-        DimDef { name: "share".into(),        category: DimCategory::Analytical, custom: false, label: "Quote-part".into() },
-        DimDef { name: "analysis".into(),     category: DimCategory::Analytical, custom: false, label: "Analyse 1".into() },
-        DimDef { name: "analysis2".into(),    category: DimCategory::Analytical, custom: false, label: "Analyse 2".into() },
+        DimDef {
+            name: "partner".into(),
+            category: DimCategory::Analytical,
+            custom: false,
+            label: "Partenaire".into(),
+        },
+        DimDef {
+            name: "share".into(),
+            category: DimCategory::Analytical,
+            custom: false,
+            label: "Quote-part".into(),
+        },
+        DimDef {
+            name: "analysis".into(),
+            category: DimCategory::Analytical,
+            custom: false,
+            label: "Analyse 1".into(),
+        },
+        DimDef {
+            name: "analysis2".into(),
+            category: DimCategory::Analytical,
+            custom: false,
+            label: "Analyse 2".into(),
+        },
     ]
 }
 
@@ -153,13 +213,19 @@ pub fn propagated_cols(dims: &[DimDef]) -> Vec<&str> {
 
 /// Retourne la liste des noms pilotables (Active + Analytical).
 pub fn pilotable_cols(dims: &[DimDef]) -> Vec<&str> {
-    dims.iter().filter(|d| d.pilotable()).map(|d| d.name.as_str()).collect()
+    dims.iter()
+        .filter(|d| d.pilotable())
+        .map(|d| d.name.as_str())
+        .collect()
 }
 
 /// Retourne les noms appartenant au grain de reconstruction des clôtures
 /// (Fixed + Active).
 pub fn closure_grain_cols(dims: &[DimDef]) -> Vec<&str> {
-    dims.iter().filter(|d| d.in_closure_grain()).map(|d| d.name.as_str()).collect()
+    dims.iter()
+        .filter(|d| d.in_closure_grain())
+        .map(|d| d.name.as_str())
+        .collect()
 }
 
 /// Retourne les noms des dimensions analytiques (catégorie `Analytical`).
@@ -233,10 +299,7 @@ pub fn create_custom(con: &Connection, name: &str, label: &str) -> Result<(), du
         &format!("ALTER TABLE fact_entry ADD COLUMN {name} TEXT"),
         [],
     )?;
-    con.execute(
-        &format!("ALTER TABLE stg_entry ADD COLUMN {name} TEXT"),
-        [],
-    )?;
+    con.execute(&format!("ALTER TABLE stg_entry ADD COLUMN {name} TEXT"), [])?;
     con.execute(
         "INSERT INTO dim_custom_dimension (name, label) VALUES (?, ?)",
         &[&name, &label],

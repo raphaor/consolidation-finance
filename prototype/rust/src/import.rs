@@ -101,7 +101,9 @@ fn validate_csv_references(
             AppError::bad_request(format!("validation référence {} : {e}", r.column))
         };
         let mut stmt = con.prepare(&sql).map_err(err)?;
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0)).map_err(err)?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(err)?;
         let mut vals = Vec::new();
         for x in rows {
             vals.push(x.map_err(err)?);
@@ -127,9 +129,7 @@ fn validate_csv_references(
 fn split_first_line(bytes: &[u8]) -> Result<(String, usize), AppError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|e| AppError::bad_request(format!("fichier non UTF-8 : {e}")))?;
-    let end = text
-        .find('\n')
-        .unwrap_or(text.len());
+    let end = text.find('\n').unwrap_or(text.len());
     let header = text[..end].trim_end_matches('\r').to_string();
     Ok((header, end))
 }
@@ -213,7 +213,9 @@ async fn import_entries(
             Ok(n) => n,
             Err(e) => {
                 let _ = std::fs::remove_file(&tmp);
-                return Err(AppError::bad_request(format!("lecture CSV impossible : {e}")));
+                return Err(AppError::bad_request(format!(
+                    "lecture CSV impossible : {e}"
+                )));
             }
         }
     };
@@ -233,11 +235,18 @@ async fn import_rates(
     let header = parse_header_line(&header_line);
     require_columns(
         &header,
-        &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
+        &[
+            "rate_set",
+            "currency_source",
+            "period",
+            "taux_close",
+            "taux_moyen",
+        ],
     )?;
 
     let tmp = unique_tmp_path("csv");
-    std::fs::write(&tmp, &bytes).map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
+    std::fs::write(&tmp, &bytes)
+        .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
     let sql = format!(
         "INSERT INTO sat_exchange_rate \
@@ -259,7 +268,9 @@ async fn import_rates(
             Ok(n) => n,
             Err(e) => {
                 let _ = std::fs::remove_file(&tmp);
-                return Err(AppError::bad_request(format!("lecture CSV impossible : {e}")));
+                return Err(AppError::bad_request(format!(
+                    "lecture CSV impossible : {e}"
+                )));
             }
         }
     };
@@ -292,7 +303,8 @@ async fn import_perimeter(
     )?;
 
     let tmp = unique_tmp_path("csv");
-    std::fs::write(&tmp, &bytes).map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
+    std::fs::write(&tmp, &bytes)
+        .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
     let sql = format!(
         "INSERT INTO sat_perimeter \
@@ -318,7 +330,9 @@ async fn import_perimeter(
             Ok(n) => n,
             Err(e) => {
                 let _ = std::fs::remove_file(&tmp);
-                return Err(AppError::bad_request(format!("lecture CSV impossible : {e}")));
+                return Err(AppError::bad_request(format!(
+                    "lecture CSV impossible : {e}"
+                )));
             }
         }
     };

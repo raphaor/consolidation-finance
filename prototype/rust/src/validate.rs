@@ -29,8 +29,8 @@
 
 use crate::money::Money;
 use duckdb::Connection;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Seuil de tolérance pour l'écart : `Decimal("0.01")` (équivalent Python).
@@ -277,7 +277,11 @@ pub fn check_a_nouveau_coherence(
             } else {
                 "marquée continue (entree=false) mais absente de la conso N-1".to_string()
             };
-            out.push(CoherenceAnomaly { kind: "entree_divergente", entity, detail });
+            out.push(CoherenceAnomaly {
+                kind: "entree_divergente",
+                entity,
+                detail,
+            });
         }
     }
 
@@ -338,9 +342,17 @@ pub fn check_natures(con: &Connection) -> duckdb::Result<Vec<NatureCheck>> {
         let key: String = row.get(0)?;
         let count: i64 = row.get(1)?;
         if key == "__MISSING__" {
-            Ok(NatureCheck { kind: "missing", count, nature: None })
+            Ok(NatureCheck {
+                kind: "missing",
+                count,
+                nature: None,
+            })
         } else {
-            Ok(NatureCheck { kind: "unknown", count, nature: Some(key) })
+            Ok(NatureCheck {
+                kind: "unknown",
+                count,
+                nature: Some(key),
+            })
         }
     })?;
     let mut out = Vec::new();

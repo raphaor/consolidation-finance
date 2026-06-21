@@ -13,8 +13,8 @@
 //! (écriture via `Value::Decimal`).
 
 use duckdb::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Value, ValueRef};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 
 /// Type monnaie : wrapper autour de `rust_decimal::Decimal` compatible DuckDB.
 ///
@@ -60,9 +60,9 @@ impl FromSql for Money {
             ValueRef::Decimal(d) => Ok(Money(d)),
             ValueRef::BigInt(i) => Ok(Money(Decimal::from(i))),
             ValueRef::Int(i) => Ok(Money(Decimal::from(i))),
-            ValueRef::HugeInt(i) => {
-                Decimal::from_i128(i).map(Money).ok_or(FromSqlError::OutOfRange(i))
-            }
+            ValueRef::HugeInt(i) => Decimal::from_i128(i)
+                .map(Money)
+                .ok_or(FromSqlError::OutOfRange(i)),
             _ => Err(FromSqlError::InvalidType),
         }
     }

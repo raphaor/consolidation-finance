@@ -74,8 +74,12 @@ fn main() {
         eprintln!("\n✗ ERREUR génération satellites : {e}");
         std::process::exit(1);
     }
-    println!("\n▶ Dimensions générées ({} entités, {} comptes, 5 devises) en {:.0} ms",
-        N_ENTITIES, N_ACCOUNTS, ms(t.elapsed()));
+    println!(
+        "\n▶ Dimensions générées ({} entités, {} comptes, 5 devises) en {:.0} ms",
+        N_ENTITIES,
+        N_ACCOUNTS,
+        ms(t.elapsed())
+    );
 
     // --- 2. Génération des écritures brutes (gros volume, en SQL natif) ---
     let t = Instant::now();
@@ -88,8 +92,11 @@ fn main() {
     let n_stg: i64 = con
         .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
         .expect("COUNT stg_entry");
-    println!("▶ stg_entry généré : {n_stg} lignes en {:.0} ms ({:.0} k lignes/s généré)",
-        gen_ms, (n_stg as f64 / gen_ms.max(1.0)) * 1000.0 / 1000.0);
+    println!(
+        "▶ stg_entry généré : {n_stg} lignes en {:.0} ms ({:.0} k lignes/s généré)",
+        gen_ms,
+        (n_stg as f64 / gen_ms.max(1.0)) * 1000.0 / 1000.0
+    );
 
     // --- 3. Exécution du pipeline mesuré ---
     println!("\n▶ Exécution du pipeline A→B→C→D…");
@@ -344,8 +351,15 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
     let checks = validate_consolidated(con)?;
     let closures_ok = !checks.is_empty() && checks.iter().all(|c| c.ok);
     if !closures_ok {
-        let failed: Vec<&str> = checks.iter().filter(|c| !c.ok).map(|c| c.account.as_str()).collect();
-        eprintln!("\n✗ Identité de clôture en échec pour : {}", failed.join(", "));
+        let failed: Vec<&str> = checks
+            .iter()
+            .filter(|c| !c.ok)
+            .map(|c| c.account.as_str())
+            .collect();
+        eprintln!(
+            "\n✗ Identité de clôture en échec pour : {}",
+            failed.join(", ")
+        );
     }
 
     // (b) invariant structurel : F80/F81 absents du niveau fonctionnel.
@@ -384,7 +398,10 @@ fn print_report(report: &conso_engine::pipeline::PipelineReport, n_stg: i64, clo
     println!("{}", "═".repeat(70));
     println!("  RAPPORT DE PERFORMANCE");
     println!("{}", "═".repeat(70));
-    println!("  {:<16}{:>14}{:>14}{:>14}", "Étape (niveau)", "Lignes", "Durée (ms)", "Débit (k/s)");
+    println!(
+        "  {:<16}{:>14}{:>14}{:>14}",
+        "Étape (niveau)", "Lignes", "Durée (ms)", "Débit (k/s)"
+    );
     println!("  {}", "─".repeat(58));
     for s in &report.steps {
         let throughput = (s.rows as f64 / s.ms.max(1.0)) * 1000.0 / 1000.0;
@@ -397,7 +414,10 @@ fn print_report(report: &conso_engine::pipeline::PipelineReport, n_stg: i64, clo
     let total_throughput = (n_stg as f64 / report.total_ms.max(1.0)) * 1000.0;
     println!(
         "  {:<16}{:>14}{:>14.1}{:>14.0}",
-        "TOTAL", n_stg, report.total_ms, total_throughput / 1000.0
+        "TOTAL",
+        n_stg,
+        report.total_ms,
+        total_throughput / 1000.0
     );
     println!();
     println!("  Temps total pipeline : {:.3} s", report.total_sec());
@@ -407,7 +427,11 @@ fn print_report(report: &conso_engine::pipeline::PipelineReport, n_stg: i64, clo
         total_throughput
     );
     println!();
-    let verdict = if closures_ok { "✓ OK — identités de clôture + invariants tenus" } else { "✗ ÉCHEC" };
+    let verdict = if closures_ok {
+        "✓ OK — identités de clôture + invariants tenus"
+    } else {
+        "✗ ÉCHEC"
+    };
     println!("  Verdict clôtures : {verdict}");
     println!("{}", "═".repeat(70));
 }

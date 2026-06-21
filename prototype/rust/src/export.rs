@@ -82,7 +82,10 @@ async fn export_all(State(state): State<Arc<AppState>>) -> Result<Json<JsonValue
         }
 
         let mut meta = Map::new();
-        meta.insert("format".to_string(), JsonValue::String("conso-export-v1".to_string()));
+        meta.insert(
+            "format".to_string(),
+            JsonValue::String("conso-export-v1".to_string()),
+        );
         obj.insert("_meta".to_string(), JsonValue::Object(meta));
 
         JsonValue::Object(obj)
@@ -127,7 +130,9 @@ async fn import_all(
         JsonValue::Object(counts)
     };
 
-    Ok(Json(serde_json::json!({ "status": "ok", "imported": counts })))
+    Ok(Json(
+        serde_json::json!({ "status": "ok", "imported": counts }),
+    ))
 }
 
 /// Insère les lignes d'une table à partir de leur tableau JSON.
@@ -136,7 +141,11 @@ async fn import_all(
 /// colonne (clés de l'objet) : robuste aux colonnes custom et à l'ordre. Les
 /// types sont laissés à DuckDB (cast implicite à l'INSERT : texte→DATE,
 /// double→DECIMAL, etc.), comme pour l'import CSV.
-fn insert_table(con: &Connection, table: &str, data: Option<&JsonValue>) -> Result<usize, AppError> {
+fn insert_table(
+    con: &Connection,
+    table: &str,
+    data: Option<&JsonValue>,
+) -> Result<usize, AppError> {
     let rows = match data {
         Some(JsonValue::Array(a)) => a,
         _ => return Ok(0),

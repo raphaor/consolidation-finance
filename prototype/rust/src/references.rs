@@ -36,7 +36,13 @@ const fn r(
     target_table: &'static str,
     target_column: &'static str,
 ) -> Reference {
-    Reference { table, column, target_table, target_column, required: false }
+    Reference {
+        table,
+        column,
+        target_table,
+        target_column,
+        required: false,
+    }
 }
 
 /// Référence **obligatoire** (colonne non-nullable) : vide rejeté.
@@ -46,7 +52,13 @@ const fn rq(
     target_table: &'static str,
     target_column: &'static str,
 ) -> Reference {
-    Reference { table, column, target_table, target_column, required: true }
+    Reference {
+        table,
+        column,
+        target_table,
+        target_column,
+        required: true,
+    }
 }
 
 /// Le graphe complet des références du modèle.
@@ -61,7 +73,12 @@ pub const REFERENCES: &[Reference] = &[
     // dim_scenario (v2)
     r("dim_scenario", "category", "dim_scenario_category", "code"),
     r("dim_scenario", "entry_period", "dim_period", "code"),
-    r("dim_scenario", "presentation_currency", "dim_currency", "code_iso"),
+    r(
+        "dim_scenario",
+        "presentation_currency",
+        "dim_currency",
+        "code_iso",
+    ),
     r("dim_scenario", "variant", "dim_variant", "code"),
     r("dim_scenario", "ruleset_code", "dim_ruleset", "code"),
     r("dim_scenario", "rate_set", "dim_rate_set", "code"),
@@ -69,7 +86,12 @@ pub const REFERENCES: &[Reference] = &[
     // Conso d'à-nouveau : auto-référence vers un autre scénario (N-1 figé).
     r("dim_scenario", "a_nouveau_scenario", "dim_scenario", "code"),
     // dim_entity
-    rq("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso"),
+    rq(
+        "dim_entity",
+        "devise_fonctionnelle",
+        "dim_currency",
+        "code_iso",
+    ),
     r("dim_entity", "entite_parent", "dim_entity", "code"),
     // dim_account (compte_parent est désormais une référence directe dynamique)
     r("dim_account", "sous_classe", "dim_sous_classe", "code"),
@@ -78,13 +100,23 @@ pub const REFERENCES: &[Reference] = &[
     // dim_flow est désormais une dimension nue (code, libelle) : tout le
     // comportement (taux, écart, report, à-nouveau) vit dans sat_flow_scheme_item.
     // sat_perimeter (perimeter_set/entity/period = PK ; methode obligatoire)
-    rq("sat_perimeter", "perimeter_set", "dim_perimeter_set", "code"),
+    rq(
+        "sat_perimeter",
+        "perimeter_set",
+        "dim_perimeter_set",
+        "code",
+    ),
     rq("sat_perimeter", "entity", "dim_entity", "code"),
     rq("sat_perimeter", "period", "dim_period", "code"),
     rq("sat_perimeter", "methode", "dim_method", "code"),
     // sat_exchange_rate (rate_set/currency_source/period = PK)
     rq("sat_exchange_rate", "rate_set", "dim_rate_set", "code"),
-    rq("sat_exchange_rate", "currency_source", "dim_currency", "code_iso"),
+    rq(
+        "sat_exchange_rate",
+        "currency_source",
+        "dim_currency",
+        "code_iso",
+    ),
     rq("sat_exchange_rate", "period", "dim_period", "code"),
     // sat_flow_scheme_item (scheme/flow = PK ; flux_* nullables vers dim_flow)
     rq("sat_flow_scheme_item", "scheme", "dim_flow_scheme", "code"),
@@ -140,6 +172,24 @@ impl OwnedReference {
 /// `None` pour les dimensions sans master data (analysis, analysis2, custom).
 pub fn dimension_master(dim: &str) -> Option<(&'static str, &'static str)> {
     entry_dimension_target(dim).map(|r| (r.target_table, r.target_column))
+}
+
+/// Résout la cible référentielle d'un nom, qu'il désigne une **dimension**
+/// d'écriture (master data statique) ou une **liste de valeurs** (`lst_<code>`,
+/// cf. [`crate::value_lists`]). Renvoie `(table, colonne_clé)` possédés (les noms
+/// de listes ne sont pas `'static`). `None` si le nom n'est ni l'un ni l'autre.
+///
+/// C'est le point d'entrée commun pour valider/résoudre la cible d'un attribut N2
+/// de caractéristique : un champ peut viser une dimension existante **ou** une
+/// liste de valeurs réutilisable.
+pub fn target_master(con: &Connection, target: &str) -> Option<(String, String)> {
+    if let Some((t, c)) = dimension_master(target) {
+        return Some((t.to_string(), c.to_string()));
+    }
+    if crate::value_lists::list_exists(con, target) {
+        return Some((crate::value_lists::value_table(target), "code".to_string()));
+    }
+    None
 }
 
 /// `true` si les registres des caractéristiques existent (faux au tout premier
@@ -203,12 +253,13 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
             ))
         }) {
             for (char_code, name, target) in rows.flatten() {
-                if let Some((tt, tc)) = dimension_master(&target) {
+                // La cible d'un N2 peut être une dimension ou une liste de valeurs.
+                if let Some((tt, tc)) = target_master(con, &target) {
                     out.push(OwnedReference {
                         table: format!("car_{char_code}"),
                         column: name,
-                        target_table: tt.to_string(),
-                        target_column: tc.to_string(),
+                        target_table: tt,
+                        target_column: tc,
                         required: false,
                     });
                 }
@@ -266,8 +317,7 @@ fn custom_reference_registry_exists(con: &Connection) -> bool {
 /// Source unique pour la validation à l'écriture, la santé des données et les
 /// dropdowns dès lors que les caractéristiques entrent en jeu.
 pub fn all_references(con: &Connection) -> Vec<OwnedReference> {
-    let mut out: Vec<OwnedReference> =
-        REFERENCES.iter().map(OwnedReference::from_static).collect();
+    let mut out: Vec<OwnedReference> = REFERENCES.iter().map(OwnedReference::from_static).collect();
     out.extend(dynamic_references(con));
     out
 }

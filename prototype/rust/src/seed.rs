@@ -14,9 +14,9 @@
 //! Devise de présentation : EUR.
 
 use crate::money::Money;
-use duckdb::{Connection, params};
-use rust_decimal::Decimal;
+use duckdb::{params, Connection};
 use rust_decimal::prelude::*;
+use rust_decimal::Decimal;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Master data
@@ -45,28 +45,62 @@ const PERIMETER_SETS: &[(&str, &str)] = &[("PERIM_REEL", "Périmètre réel 2024
 /// `pivot = EUR` et `presentation_currency = EUR`, la conversion se comporte
 /// comme avant (cross-rate = taux direct). `ruleset_code = NULL` : pas de
 /// règles appliquées sur le scénario de base.
-const SCENARIOS: &[(&str, &str, &str, &str, &str, &str, Option<&str>, &str, &str, &str)] = &[(
-    "REEL", "Réel 2024", "REEL", "2024", "EUR", "BASE", None, "RATES", "PERIM_REEL", "ouvert",
+const SCENARIOS: &[(
+    &str,
+    &str,
+    &str,
+    &str,
+    &str,
+    &str,
+    Option<&str>,
+    &str,
+    &str,
+    &str,
+)] = &[(
+    "REEL",
+    "Réel 2024",
+    "REEL",
+    "2024",
+    "EUR",
+    "BASE",
+    None,
+    "RATES",
+    "PERIM_REEL",
+    "ouvert",
 )];
 
 /// Entités du groupe : (code, libelle, devise_fonctionnelle, entite_parent, statut).
 const ENTITIES: &[(&str, &str, &str, Option<&str>, &str)] = &[
-    ("M", "Mère",      "EUR", None,  "actif"),
+    ("M", "Mère", "EUR", None, "actif"),
     ("A", "Filiale A", "USD", Some("M"), "actif"),
     ("B", "Filiale B", "GBP", Some("M"), "actif"),
 ];
 
 /// Périodes : (code, libelle, type, date_debut, date_fin, statut).
 const PERIODS: &[(&str, &str, &str, &str, &str, &str)] = &[
-    ("2023", "Exercice 2023", "exercice", "2023-01-01", "2023-12-31", "clôturé"),
-    ("2024", "Exercice 2024", "exercice", "2024-01-01", "2024-12-31", "ouvert"),
+    (
+        "2023",
+        "Exercice 2023",
+        "exercice",
+        "2023-01-01",
+        "2023-12-31",
+        "clôturé",
+    ),
+    (
+        "2024",
+        "Exercice 2024",
+        "exercice",
+        "2024-01-01",
+        "2024-12-31",
+        "ouvert",
+    ),
 ];
 
 /// Sous-classes de comptes : (code, libelle, classe).
 const SOUS_CLASSES: &[(&str, &str, &str)] = &[
-    ("actif",    "Actif",    "bilan"),
-    ("passif",   "Passif",   "bilan"),
-    ("charges",  "Charges",  "resultat"),
+    ("actif", "Actif", "bilan"),
+    ("passif", "Passif", "bilan"),
+    ("charges", "Charges", "resultat"),
     ("produits", "Produits", "resultat"),
 ];
 
@@ -78,19 +112,29 @@ const SOUS_CLASSES: &[(&str, &str, &str)] = &[
 /// par nature (ex. `capitaux_propres` sur `100`) et la hiérarchie de compte
 /// parent ne sont plus des colonnes en dur : ils se posent via [`seed_demo_attributes`].
 const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
-    ("100", "Capital",                "bilan",    "passif"),
-    ("200", "Immobilisations",        "bilan",    "actif"),
-    ("300", "Stocks",                 "bilan",    "actif"),
-    ("400", "Résultat de l'exercice", "bilan",    "passif"),
-    ("600", "Achats",                 "resultat", "charges"),
-    ("610", "Autres charges",         "resultat", "charges"),
-    ("640", "Dotations aux amort.",   "resultat", "charges"),
-    ("700", "Ventes",                 "resultat", "produits"),
-    ("705", "Prestations",            "resultat", "produits"),
+    ("100", "Capital", "bilan", "passif"),
+    ("200", "Immobilisations", "bilan", "actif"),
+    ("300", "Stocks", "bilan", "actif"),
+    ("400", "Résultat de l'exercice", "bilan", "passif"),
+    ("600", "Achats", "resultat", "charges"),
+    ("610", "Autres charges", "resultat", "charges"),
+    ("640", "Dotations aux amort.", "resultat", "charges"),
+    ("700", "Ventes", "resultat", "produits"),
+    ("705", "Prestations", "resultat", "produits"),
     // Comptes de tiers (PCG) pour la modélisation interco bilan.
-    ("467",  "Divers comptes débiteurs et produits à recevoir",  "bilan", "actif"),
-    ("468",  "Divers comptes créditeurs et charges à payer",     "bilan", "passif"),
-    ("471L", "Liaison élimination intragroupe",                  "bilan", "passif"),
+    (
+        "467",
+        "Divers comptes débiteurs et produits à recevoir",
+        "bilan",
+        "actif",
+    ),
+    (
+        "468",
+        "Divers comptes créditeurs et charges à payer",
+        "bilan",
+        "passif",
+    ),
+    ("471L", "Liaison élimination intragroupe", "bilan", "passif"),
 ];
 
 /// Catalogue des flux — **dimension nue** (code, libelle). Tout le comportement
@@ -108,8 +152,14 @@ const FLOWS: &[(&str, &str)] = &[
 
 /// Schémas de flux : (code, libelle). Cf. docs/QUESTIONS_OUVERTES.md Q32.
 const FLOW_SCHEMES: &[(&str, &str)] = &[
-    ("BILAN",    "Schéma bilan (taux du flux, écarts F80/F81, report F99→F00)"),
-    ("RESULTAT", "Schéma résultat (taux moyen, sans écart, sans à-nouveau)"),
+    (
+        "BILAN",
+        "Schéma bilan (taux du flux, écarts F80/F81, report F99→F00)",
+    ),
+    (
+        "RESULTAT",
+        "Schéma résultat (taux moyen, sans écart, sans à-nouveau)",
+    ),
 ];
 
 /// Articulation **complète** des flux par schéma :
@@ -124,25 +174,25 @@ const FLOW_SCHEME_ITEMS: &[(&str, &str, &str, Option<&str>, Option<&str>, Option
     // BILAN — articulation par défaut (ex-dim_flow).
     ("BILAN", "F00", "close_n1", Some("F80"), Some("F99"), None),
     ("BILAN", "F01", "close_n1", Some("F80"), Some("F99"), None),
-    ("BILAN", "F20", "avg",      Some("F81"), Some("F99"), None),
-    ("BILAN", "F80", "close_n", None,        Some("F99"), None),
-    ("BILAN", "F81", "close_n", None,        Some("F99"), None),
-    ("BILAN", "F98", "close_n", None,        Some("F99"), None),
-    ("BILAN", "F99", "close_n",  None,        Some("F99"), None),
+    ("BILAN", "F20", "avg", Some("F81"), Some("F99"), None),
+    ("BILAN", "F80", "close_n", None, Some("F99"), None),
+    ("BILAN", "F81", "close_n", None, Some("F99"), None),
+    ("BILAN", "F98", "close_n", None, Some("F99"), None),
+    ("BILAN", "F99", "close_n", None, Some("F99"), None),
     // RESULTAT — taux moyen, sans écart, sans à-nouveau.
-    ("RESULTAT", "F00", "avg",      None, Some("F99"), None),
-    ("RESULTAT", "F01", "avg",      None, Some("F99"), None),
-    ("RESULTAT", "F20", "avg",      None, Some("F99"), None),
+    ("RESULTAT", "F00", "avg", None, Some("F99"), None),
+    ("RESULTAT", "F01", "avg", None, Some("F99"), None),
+    ("RESULTAT", "F20", "avg", None, Some("F99"), None),
     ("RESULTAT", "F80", "close_n", None, Some("F99"), None),
     ("RESULTAT", "F81", "close_n", None, Some("F99"), None),
-    ("RESULTAT", "F98", "avg",      None, Some("F99"), None),
-    ("RESULTAT", "F99", "avg",      None, Some("F99"), None),
+    ("RESULTAT", "F98", "avg", None, Some("F99"), None),
+    ("RESULTAT", "F99", "avg", None, Some("F99"), None),
 ];
 
 /// Devises référentielles : (code_iso, libelle, decimales).
 const CURRENCIES: &[(&str, &str, i32)] = &[
-    ("EUR", "Euro",           2),
-    ("USD", "Dollar US",      2),
+    ("EUR", "Euro", 2),
+    ("USD", "Dollar US", 2),
     ("GBP", "Livre sterling", 2),
 ];
 
@@ -151,10 +201,8 @@ const CURRENCIES: &[(&str, &str, i32)] = &[
 /// La nature est une dimension obligatoire des écritures : deux écritures de
 /// natures différentes ne sont jamais agrégées. `0LIASS` est la nature par
 /// défaut de la saisie de liasse sociale.
-const NATURES: &[(&str, &str, Option<&str>)] = &[
-    ("0LIASS", "Liasse",    None),
-    ("1AJUST", "Ajustement", None),
-];
+const NATURES: &[(&str, &str, Option<&str>)] =
+    &[("0LIASS", "Liasse", None), ("1AJUST", "Ajustement", None)];
 
 /// Méthodes de consolidation : (code, libelle, consolidated).
 ///
@@ -163,15 +211,15 @@ const NATURES: &[(&str, &str, Option<&str>)] = &[
 /// `consolidated`. La mise en équivalence (`consolidated = false`) est exclue
 /// du MVP — l'ajouter consisterait à basculer le flag, sans toucher au SQL.
 const METHODS: &[(&str, &str, bool)] = &[
-    ("globale",         "Globale",                true),
-    ("proportionnelle", "Proportionnelle",        true),
-    ("equivalence",     "Mise en équivalence",    false),
+    ("globale", "Globale", true),
+    ("proportionnelle", "Proportionnelle", true),
+    ("equivalence", "Mise en équivalence", false),
     // Variante de la globale réservée à la société mère/consolidante (même
     // mécanique : consolidated = true, pct_integration = 1.0). Elle n'existe que
     // pour permettre aux règles de **cibler la mère seule** via un scope
     // `methode = 'MERE'` (cf. docs/QUESTIONS_OUVERTES.md Q33). Non rattachée à une
     // entité dans le seed → aucun impact sur les runs golden.
-    ("MERE",            "Globale — société mère", true),
+    ("MERE", "Globale — société mère", true),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,9 +230,18 @@ const METHODS: &[(&str, &str, bool)] = &[
 /// (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie).
 /// (perimeter_set, entity, period, methode), (pct_interet, pct_integration, entree, sortie).
 const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] = &[
-    (("PERIM_REEL", "M", "2024", "globale"), (dec!(1.00), dec!(1.00), false, false)),
-    (("PERIM_REEL", "A", "2024", "globale"), (dec!(1.00), dec!(1.00), true,  false)), // ENTRE en N
-    (("PERIM_REEL", "B", "2024", "globale"), (dec!(1.00), dec!(1.00), false, true)),  // SORT en N
+    (
+        ("PERIM_REEL", "M", "2024", "globale"),
+        (dec!(1.00), dec!(1.00), false, false),
+    ),
+    (
+        ("PERIM_REEL", "A", "2024", "globale"),
+        (dec!(1.00), dec!(1.00), true, false),
+    ), // ENTRE en N
+    (
+        ("PERIM_REEL", "B", "2024", "globale"),
+        (dec!(1.00), dec!(1.00), false, true),
+    ), // SORT en N
 ];
 
 /// Taux de change vers le pivot (EUR).
@@ -196,9 +253,15 @@ const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] =
 /// `(rate_set, currency_source, period)`.
 const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>))] = &[
     (("RATES", "USD", "2023"), (Some(dec!(0.92)), None)),
-    (("RATES", "USD", "2024"), (Some(dec!(0.90)), Some(dec!(0.95)))), // close_n = 0.90, avg = 0.95
+    (
+        ("RATES", "USD", "2024"),
+        (Some(dec!(0.90)), Some(dec!(0.95))),
+    ), // close_n = 0.90, avg = 0.95
     (("RATES", "GBP", "2023"), (Some(dec!(1.15)), None)),
-    (("RATES", "GBP", "2024"), (Some(dec!(1.12)), Some(dec!(1.18)))), // close_n = 1.12, avg = 1.18
+    (
+        ("RATES", "GBP", "2024"),
+        (Some(dec!(1.12)), Some(dec!(1.18))),
+    ), // close_n = 1.12, avg = 1.18
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,52 +280,509 @@ const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>))] = &[
 /// Le 12e champ est la **référence source** (`S-M-001`…), métadonnée non-
 /// dimensionnelle insérée dans `stg_entry.source` (et NON dans `analysis2`, qui
 /// est une dimension analytique : l'y mettre ferait de chaque ligne un « dont »).
-type RawRow = (&'static str, &'static str, &'static str, &'static str,
-               &'static str, &'static str, &'static str, &'static str,
-               Option<&'static str>, Option<&'static str>, Option<&'static str>,
-               &'static str, Decimal);
+type RawRow = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+    Option<&'static str>,
+    &'static str,
+    Decimal,
+);
 
 const RAW: &[RawRow] = &[
     // ── Mère M (EUR) — périmètre continu ──
-    ("REEL", "M", "2024", "2024", "100", "F00", "EUR", "0LIASS", None, None, None, "S-M-001", dec!(10000)),
-    ("REEL", "M", "2024", "2024", "400", "F00", "EUR", "0LIASS", None, None, None, "S-M-002", dec!(5000)),
-    ("REEL", "M", "2024", "2024", "400", "F20", "EUR", "0LIASS", None, None, None, "S-M-003", dec!(500)),
-    ("REEL", "M", "2024", "2024", "400", "F20", "EUR", "0LIASS", None, None, None, "S-M-004", dec!(300)),
-    ("REEL", "M", "2024", "2024", "200", "F00", "EUR", "0LIASS", None, None, None, "S-M-005", dec!(12000)),
-    ("REEL", "M", "2024", "2024", "200", "F20", "EUR", "0LIASS", None, None, None, "S-M-006", dec!(500)),
-    ("REEL", "M", "2024", "2024", "300", "F00", "EUR", "0LIASS", None, None, None, "S-M-007", dec!(3000)),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "100",
+        "F00",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-001",
+        dec!(10000),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "400",
+        "F00",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-002",
+        dec!(5000),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "400",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-003",
+        dec!(500),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "400",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-004",
+        dec!(300),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "200",
+        "F00",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-005",
+        dec!(12000),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "200",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-006",
+        dec!(500),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "300",
+        "F00",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-007",
+        dec!(3000),
+    ),
     // Comptes de P&L (classe « resultat ») — F20 uniquement
-    ("REEL", "M", "2024", "2024", "700", "F20", "EUR", "0LIASS", None, None, None, "S-M-010", dec!(2000)),
-    ("REEL", "M", "2024", "2024", "705", "F20", "EUR", "0LIASS", None, None, None, "S-M-011", dec!(1000)),
-    ("REEL", "M", "2024", "2024", "600", "F20", "EUR", "0LIASS", None, None, None, "S-M-012", dec!(800)),
-    ("REEL", "M", "2024", "2024", "610", "F20", "EUR", "0LIASS", None, None, None, "S-M-013", dec!(500)),
-    ("REEL", "M", "2024", "2024", "640", "F20", "EUR", "0LIASS", None, None, None, "S-M-014", dec!(200)),
-
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "700",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-010",
+        dec!(2000),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "705",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-011",
+        dec!(1000),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "600",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-012",
+        dec!(800),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "610",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-013",
+        dec!(500),
+    ),
+    (
+        "REEL",
+        "M",
+        "2024",
+        "2024",
+        "640",
+        "F20",
+        "EUR",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-M-014",
+        dec!(200),
+    ),
     // ── Filiale A (USD) — ENTRE en N ──
-    ("REEL", "A", "2024", "2024", "100", "F00", "USD", "0LIASS", None, None, None, "S-A-001", dec!(5000)),
-    ("REEL", "A", "2024", "2024", "400", "F00", "USD", "0LIASS", None, None, None, "S-A-002", dec!(2000)),
-    ("REEL", "A", "2024", "2024", "400", "F20", "USD", "0LIASS", None, None, None, "S-A-003", dec!(300)),
-    ("REEL", "A", "2024", "2024", "200", "F00", "USD", "0LIASS", None, None, None, "S-A-004", dec!(8000)),
-    ("REEL", "A", "2024", "2024", "200", "F20", "USD", "0LIASS", None, None, None, "S-A-005", dec!(400)),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "100",
+        "F00",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-001",
+        dec!(5000),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "400",
+        "F00",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-002",
+        dec!(2000),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "400",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-003",
+        dec!(300),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "200",
+        "F00",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-004",
+        dec!(8000),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "200",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-005",
+        dec!(400),
+    ),
     // Comptes de P&L — F20 uniquement
-    ("REEL", "A", "2024", "2024", "700", "F20", "USD", "0LIASS", None, None, None, "S-A-010", dec!(1000)),
-    ("REEL", "A", "2024", "2024", "705", "F20", "USD", "0LIASS", None, None, None, "S-A-011", dec!(500)),
-    ("REEL", "A", "2024", "2024", "600", "F20", "USD", "0LIASS", None, None, None, "S-A-012", dec!(400)),
-    ("REEL", "A", "2024", "2024", "610", "F20", "USD", "0LIASS", None, None, None, "S-A-013", dec!(200)),
-    ("REEL", "A", "2024", "2024", "640", "F20", "USD", "0LIASS", None, None, None, "S-A-014", dec!(100)),
-
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "700",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-010",
+        dec!(1000),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "705",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-011",
+        dec!(500),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "600",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-012",
+        dec!(400),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "610",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-013",
+        dec!(200),
+    ),
+    (
+        "REEL",
+        "A",
+        "2024",
+        "2024",
+        "640",
+        "F20",
+        "USD",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-A-014",
+        dec!(100),
+    ),
     // ── Filiale B (GBP) — SORT en N ──
-    ("REEL", "B", "2024", "2024", "100", "F00", "GBP", "0LIASS", None, None, None, "S-B-001", dec!(4000)),
-    ("REEL", "B", "2024", "2024", "400", "F00", "GBP", "0LIASS", None, None, None, "S-B-002", dec!(1500)),
-    ("REEL", "B", "2024", "2024", "400", "F20", "GBP", "0LIASS", None, None, None, "S-B-003", dec!(200)),
-    ("REEL", "B", "2024", "2024", "200", "F00", "GBP", "0LIASS", None, None, None, "S-B-004", dec!(6000)),
-    ("REEL", "B", "2024", "2024", "200", "F20", "GBP", "0LIASS", None, None, None, "S-B-005", dec!(300)),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "100",
+        "F00",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-001",
+        dec!(4000),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "400",
+        "F00",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-002",
+        dec!(1500),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "400",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-003",
+        dec!(200),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "200",
+        "F00",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-004",
+        dec!(6000),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "200",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-005",
+        dec!(300),
+    ),
     // Comptes de P&L — F20 uniquement
-    ("REEL", "B", "2024", "2024", "700", "F20", "GBP", "0LIASS", None, None, None, "S-B-010", dec!(800)),
-    ("REEL", "B", "2024", "2024", "705", "F20", "GBP", "0LIASS", None, None, None, "S-B-011", dec!(400)),
-    ("REEL", "B", "2024", "2024", "600", "F20", "GBP", "0LIASS", None, None, None, "S-B-012", dec!(300)),
-    ("REEL", "B", "2024", "2024", "610", "F20", "GBP", "0LIASS", None, None, None, "S-B-013", dec!(200)),
-    ("REEL", "B", "2024", "2024", "640", "F20", "GBP", "0LIASS", None, None, None, "S-B-014", dec!(100)),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "700",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-010",
+        dec!(800),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "705",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-011",
+        dec!(400),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "600",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-012",
+        dec!(300),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "610",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-013",
+        dec!(200),
+    ),
+    (
+        "REEL",
+        "B",
+        "2024",
+        "2024",
+        "640",
+        "F20",
+        "GBP",
+        "0LIASS",
+        None,
+        None,
+        None,
+        "S-B-014",
+        dec!(100),
+    ),
 ];
 
 /// Insère toutes les données de test : master data, satellites et saisie brute.
@@ -271,10 +791,7 @@ const RAW: &[RawRow] = &[
 pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     // --- Config applicative ---
     for (k, v) in APP_CONFIG {
-        con.execute(
-            "INSERT INTO app_config VALUES (?, ?)",
-            params![k, v],
-        )?;
+        con.execute("INSERT INTO app_config VALUES (?, ?)", params![k, v])?;
     }
 
     // --- Nouvelles dimensions référentielles (avant dim_scenario) ---
@@ -285,16 +802,10 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         )?;
     }
     for v in VARIANTS {
-        con.execute(
-            "INSERT INTO dim_variant VALUES (?, ?)",
-            params![v.0, v.1],
-        )?;
+        con.execute("INSERT INTO dim_variant VALUES (?, ?)", params![v.0, v.1])?;
     }
     for r in RATE_SETS {
-        con.execute(
-            "INSERT INTO dim_rate_set VALUES (?, ?)",
-            params![r.0, r.1],
-        )?;
+        con.execute("INSERT INTO dim_rate_set VALUES (?, ?)", params![r.0, r.1])?;
     }
     for ps in PERIMETER_SETS {
         con.execute(
@@ -393,13 +904,7 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             "INSERT INTO sat_exchange_rate \
              (rate_set, currency_source, period, taux_close, taux_moyen) \
              VALUES (?, ?, ?, ?, ?)",
-            params![
-                k.0,
-                k.1,
-                k.2,
-                v.0.map(Money),
-                v.1.map(Money),
-            ],
+            params![k.0, k.1, k.2, v.0.map(Money), v.1.map(Money),],
         )?;
     }
 
@@ -413,8 +918,19 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
                  nature, partner, share, analysis, analysis2, source, amount) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             params![
-                row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7,
-                row.8, row.9, row.10, row.11, Money(row.12),
+                row.0,
+                row.1,
+                row.2,
+                row.3,
+                row.4,
+                row.5,
+                row.6,
+                row.7,
+                row.8,
+                row.9,
+                row.10,
+                row.11,
+                Money(row.12),
             ],
         )?;
     }

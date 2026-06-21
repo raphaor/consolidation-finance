@@ -205,10 +205,7 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
         let label = level_desc.iter().find(|(l, _)| *l == lvl).unwrap().1;
         print!("  {:<28}", label);
         for fl in &flow_order {
-            let val = grid
-                .get(fl)
-                .copied()
-                .unwrap_or(Decimal::ZERO);
+            let val = grid.get(fl).copied().unwrap_or(Decimal::ZERO);
             print!("{:>width$}", fmt_amount(val), width = col_w);
         }
         println!();

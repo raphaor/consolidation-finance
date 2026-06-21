@@ -44,13 +44,13 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
+use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
+use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, create_schema, custom_references, dimensions, export, import, load_all,
     masterdata, money::Money, run_pipeline, run_pipeline_with_hook, seed_demo_attributes,
-    seed_demo_rules, ConvertParams,
+    seed_demo_rules, value_lists, ConvertParams,
 };
-use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
-use conso_engine::state::{db_err, lock_con, AppError, AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  État partagé et erreurs
@@ -253,7 +253,13 @@ async fn get_bilan(
             .iter()
             .map(|c| format!(" AND e.{c} IS NULL"))
             .collect();
-        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
+        let (fsql, fparams) = build_filters(
+            &q.scenario,
+            &q.entity,
+            &q.entry_period,
+            &q.period,
+            &q.nature,
+        );
         let sql = format!(
             "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
              FROM fact_entry e
@@ -300,7 +306,13 @@ async fn get_compte_resultat(
             .iter()
             .map(|c| format!(" AND e.{c} IS NULL"))
             .collect();
-        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
+        let (fsql, fparams) = build_filters(
+            &q.scenario,
+            &q.entity,
+            &q.entry_period,
+            &q.period,
+            &q.nature,
+        );
         let sql = format!(
             "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
              FROM fact_entry e
@@ -351,7 +363,13 @@ async fn get_entries(
         // Colonnes propagées (built-in + custom) depuis le registre.
         let dims = dimensions::load_all(&con).map_err(db_err)?;
         let col_list = dimensions::propagated_cols(&dims).join(", ");
-        let (fsql, fparams) = build_filters(&q.scenario, &q.entity, &q.entry_period, &q.period, &q.nature);
+        let (fsql, fparams) = build_filters(
+            &q.scenario,
+            &q.entity,
+            &q.entry_period,
+            &q.period,
+            &q.nature,
+        );
         let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
             let where_stg = if fsql.is_empty() {
                 String::new()
@@ -495,8 +513,7 @@ async fn run_pipeline_handler(
         };
 
         // 2. Chargement des params depuis dim_scenario + app_config.
-        let params = ConvertParams::load_params(&con, &scenario_code)
-            .map_err(db_err)?;
+        let params = ConvertParams::load_params(&con, &scenario_code).map_err(db_err)?;
 
         // 3. Lecture du ruleset_code (NULL si le scénario n'en référence pas).
         let ruleset_code: Option<String> = con
@@ -510,8 +527,11 @@ async fn run_pipeline_handler(
         // 4. Vider les résultats du pipeline du SCÉNARIO COURANT avant de relancer
         //    (isolation par scénario : les autres scénarios — ex. snapshot
         //    d'à-nouveau figé — sont préservés). Cf. docs/A_NOUVEAU.md §2.3 / §3.
-        con.execute("DELETE FROM fact_entry WHERE scenario = ?", [&scenario_code])
-            .map_err(db_err)?;
+        con.execute(
+            "DELETE FROM fact_entry WHERE scenario = ?",
+            [&scenario_code],
+        )
+        .map_err(db_err)?;
 
         // 5. Pipeline. Si le scénario référence un ruleset, on **intercale** ses
         //    règles au niveau qu'elles ciblent (hook post-étape) : une règle
@@ -780,7 +800,9 @@ fn text_to_definition(s: &str) -> JsonValue {
 }
 
 /// GET /api/rules — liste toutes les règles (code, libelle).
-async fn list_rules(State(state): State<Arc<AppState>>) -> Result<Json<Vec<RuleSummary>>, AppError> {
+async fn list_rules(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<RuleSummary>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
         let mut stmt = con
@@ -828,7 +850,8 @@ async fn get_rule(
             .map_err(db_err)?
             .ok_or_else(|| AppError::not_found(format!("règle {code} introuvable")))?
     };
-    let definition = row.2
+    let definition = row
+        .2
         .as_deref()
         .map(text_to_definition)
         .unwrap_or(JsonValue::Null);
@@ -865,7 +888,10 @@ async fn create_rule(
             "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
             params_from_iter(vec![
                 DbValue::Text(body.code.clone()),
-                body.libelle.clone().map(DbValue::Text).unwrap_or(DbValue::Null),
+                body.libelle
+                    .clone()
+                    .map(DbValue::Text)
+                    .unwrap_or(DbValue::Null),
                 DbValue::Text(definition_text),
             ]),
         )
@@ -898,7 +924,10 @@ async fn update_rule(
             .execute(
                 "UPDATE dim_rule SET libelle = ?, definition = ? WHERE code = ?",
                 params_from_iter(vec![
-                    body.libelle.clone().map(DbValue::Text).unwrap_or(DbValue::Null),
+                    body.libelle
+                        .clone()
+                        .map(DbValue::Text)
+                        .unwrap_or(DbValue::Null),
                     DbValue::Text(definition_text),
                     DbValue::Text(code.clone()),
                 ]),
@@ -1018,7 +1047,10 @@ async fn create_ruleset(
             "INSERT INTO dim_ruleset (code, libelle) VALUES (?, ?)",
             params_from_iter(vec![
                 DbValue::Text(body.code.clone()),
-                body.libelle.clone().map(DbValue::Text).unwrap_or(DbValue::Null),
+                body.libelle
+                    .clone()
+                    .map(DbValue::Text)
+                    .unwrap_or(DbValue::Null),
             ]),
         )
         .map_err(db_err)?;
@@ -1046,7 +1078,10 @@ async fn update_ruleset(
             .execute(
                 "UPDATE dim_ruleset SET libelle = ? WHERE code = ?",
                 params_from_iter(vec![
-                    body.libelle.clone().map(DbValue::Text).unwrap_or(DbValue::Null),
+                    body.libelle
+                        .clone()
+                        .map(DbValue::Text)
+                        .unwrap_or(DbValue::Null),
                     DbValue::Text(code.clone()),
                 ]),
             )
@@ -1121,10 +1156,7 @@ fn build_ruleset_detail(con: &Connection, code: &str) -> Result<RulesetDetail, A
             .map_err(db_err)?;
         let mut iter = stmt
             .query_map([code], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })
             .map_err(db_err)?;
         iter.next()
@@ -1217,8 +1249,7 @@ async fn main() {
         create_schema(&con).expect("✗ create_schema");
         load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
         seed_demo_rules(&con).expect("✗ seed_demo_rules"); // règle + jeu interco (hors CSV)
-        seed_demo_attributes(&con, std::path::Path::new(&csv_dir))
-            .expect("✗ seed_demo_attributes"); // caractéristique + hiérarchie compte_parent
+        seed_demo_attributes(&con, std::path::Path::new(&csv_dir)).expect("✗ seed_demo_attributes"); // caractéristique + hiérarchie compte_parent
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
@@ -1244,7 +1275,9 @@ async fn main() {
                         );
                     }
                     Err(e) => {
-                        eprintln!("⚠ Pipeline initial échoué (le serveur démarre quand même) : {e}");
+                        eprintln!(
+                            "⚠ Pipeline initial échoué (le serveur démarre quand même) : {e}"
+                        );
                     }
                 },
                 Err(e) => {
@@ -1274,8 +1307,8 @@ async fn main() {
     // Servir le frontend buildé en statique (SPA : fallback sur index.html pour
     // toutes les routes non-API). Si le répertoire n'existe pas, seule l'API reste
     // exposée — utile en dev (Vite sert le frontend sur :5173 avec proxy /api).
-    let serve_dir = ServeDir::new(&web_dir)
-        .not_found_service(ServeFile::new(format!("{web_dir}/index.html")));
+    let serve_dir =
+        ServeDir::new(&web_dir).not_found_service(ServeFile::new(format!("{web_dir}/index.html")));
 
     let app = Router::new()
         .route("/api/health", get(health))
@@ -1291,25 +1324,16 @@ async fn main() {
             "/api/meta/dimensions",
             get(list_dimensions).post(create_dimension),
         )
-        .route(
-            "/api/meta/dimensions/{name}",
-            delete(delete_dimension),
-        )
+        .route("/api/meta/dimensions/{name}", delete(delete_dimension))
         // Règles de consolidation (CRUD). L'exécution des règles passe par le
         // pipeline (/api/run applique le ruleset du scénario), pas par une route
         // standalone.
-        .route(
-            "/api/rules",
-            get(list_rules).post(create_rule),
-        )
+        .route("/api/rules", get(list_rules).post(create_rule))
         .route(
             "/api/rules/{code}",
             get(get_rule).put(update_rule).delete(delete_rule),
         )
-        .route(
-            "/api/rulesets",
-            get(list_rulesets).post(create_ruleset),
-        )
+        .route("/api/rulesets", get(list_rulesets).post(create_ruleset))
         .route(
             "/api/rulesets/{code}",
             get(get_ruleset).put(update_ruleset).delete(delete_ruleset),
@@ -1317,6 +1341,7 @@ async fn main() {
         .merge(masterdata::router())
         .merge(characteristics::router())
         .merge(custom_references::router())
+        .merge(value_lists::router())
         .merge(import::router())
         .merge(export::router())
         .fallback_service(serve_dir)

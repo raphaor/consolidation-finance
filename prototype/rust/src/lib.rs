@@ -55,6 +55,7 @@ pub mod schema;
 pub mod seed;
 pub mod state;
 pub mod validate;
+pub mod value_lists;
 
 // Ré-exports pour faciliter l'usage depuis le binaire.
 pub use loader::load_all;

@@ -81,10 +81,7 @@ impl ConvertParams {
     ///    nécessite N et N-1).
     ///
     /// Cf. `docs/SPEC_SCENARIO_V2.md` §5 (dérivation) et §6.
-    pub fn load_params(
-        con: &duckdb::Connection,
-        scenario_code: &str,
-    ) -> duckdb::Result<Self> {
+    pub fn load_params(con: &duckdb::Connection, scenario_code: &str) -> duckdb::Result<Self> {
         // 1. Lecture (presentation, pivot, entry_period, rate_set, a_nouveau).
         let (presentation_currency, pivot_currency, current_period, rate_set, a_nouveau_scenario): (
             String, String, String, String, Option<String>,
@@ -153,7 +150,9 @@ pub trait Step: Send + Sync {
     /// Niveau produit en sortie ("corporate", "converted"…).
     fn output_level(&self) -> &'static str;
     /// Préfixe de staging injecté après cette étape ("2", "3", "4", ou "" si aucun).
-    fn staging_prefix(&self) -> &'static str { "" }
+    fn staging_prefix(&self) -> &'static str {
+        ""
+    }
     /// Exécute la transformation principale (sans staging ni clôtures).
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()>;
 }
@@ -161,8 +160,12 @@ pub trait Step: Send + Sync {
 /// Étape A — agrégation `stg_entry` → `fact_entry [corporate]`.
 pub struct AggregateStep;
 impl Step for AggregateStep {
-    fn name(&self) -> &'static str { "agrégation" }
-    fn output_level(&self) -> &'static str { "corporate" }
+    fn name(&self) -> &'static str {
+        "agrégation"
+    }
+    fn output_level(&self) -> &'static str {
+        "corporate"
+    }
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
         aggregate::step_a(con, &params.scenario_code).map(|_| ())
     }
@@ -171,8 +174,12 @@ impl Step for AggregateStep {
 /// Étape C — conversion multi-devises `corporate` → `fact_entry [converted]`.
 pub struct ConvertStep;
 impl Step for ConvertStep {
-    fn name(&self) -> &'static str { "conversion" }
-    fn output_level(&self) -> &'static str { "converted" }
+    fn name(&self) -> &'static str {
+        "conversion"
+    }
+    fn output_level(&self) -> &'static str {
+        "converted"
+    }
     // Pas de staging post-étape : le préfixe 2 est consommé DANS step_c (UNION,
     // en devise fonctionnelle, pour subir conversion + écarts). Cf. step_c.
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
@@ -183,11 +190,17 @@ impl Step for ConvertStep {
 /// Étape D — consolidation `converted` → `fact_entry [consolidated]`.
 pub struct ConsolidateStep;
 impl Step for ConsolidateStep {
-    fn name(&self) -> &'static str { "consolidation" }
-    fn output_level(&self) -> &'static str { "consolidated" }
+    fn name(&self) -> &'static str {
+        "consolidation"
+    }
+    fn output_level(&self) -> &'static str {
+        "consolidated"
+    }
     // Préfixe 4 = injection post-étape au consolidé (APRÈS le × pct, tel quel).
     // Le préfixe 3 (AVANT le × pct) est consommé DANS step_d (UNION). Cf. step_d.
-    fn staging_prefix(&self) -> &'static str { "4" }
+    fn staging_prefix(&self) -> &'static str {
+        "4"
+    }
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
         consolidate::step_d(con, &params.scenario_code).map(|_| ())
     }
@@ -220,11 +233,7 @@ pub struct PipelineReport {
 impl PipelineReport {
     /// Nombre de lignes par niveau `[corporate, converted, consolidated]`.
     pub fn counts(&self) -> LevelCounts {
-        [
-            self.steps[0].rows,
-            self.steps[1].rows,
-            self.steps[2].rows,
-        ]
+        [self.steps[0].rows, self.steps[1].rows, self.steps[2].rows]
     }
 
     /// Durée totale en secondes.
@@ -283,13 +292,20 @@ fn run_steps(
         after_level(con, step.output_level())?;
         let rows = count_level(con, step.output_level())?;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
-        timings.push(StepTiming { level: step.output_level(), rows, ms });
+        timings.push(StepTiming {
+            level: step.output_level(),
+            rows,
+            ms,
+        });
     }
     let total_ms = wall.elapsed().as_secs_f64() * 1000.0;
     let steps_arr: [StepTiming; 3] = timings
         .try_into()
         .expect("run_steps attend exactement 3 étapes");
-    Ok(PipelineReport { steps: steps_arr, total_ms })
+    Ok(PipelineReport {
+        steps: steps_arr,
+        total_ms,
+    })
 }
 
 /// Enchaîne les 3 étapes et renvoie le rapport d'exécution (avec timings).
@@ -309,10 +325,7 @@ fn run_steps(
 /// ensuite la clôture stockée à cette somme (data-driven).
 ///
 /// Pour récupérer uniquement les comptes par niveau : [`PipelineReport::counts`].
-pub fn run_pipeline(
-    con: &Connection,
-    params: &ConvertParams,
-) -> duckdb::Result<PipelineReport> {
+pub fn run_pipeline(con: &Connection, params: &ConvertParams) -> duckdb::Result<PipelineReport> {
     run_pipeline_with_hook(con, params, &mut |_con, _level| Ok(()))
 }
 

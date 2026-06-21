@@ -14,8 +14,7 @@
 //! Valide que la stack Rust + DuckDB compile et s'exécute sur ARM64 (Raspberry Pi).
 
 use conso_engine::{
-    create_schema,
-    load_all,
+    create_schema, load_all,
     pipeline::run_pipeline,
     report::{bilan_par_flux, compare_levels, print_level_counts, print_validation},
     ConvertParams,

@@ -31,7 +31,8 @@ fn engine() -> Connection {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    con.execute("DELETE FROM fact_entry", []).expect("clear fact_entry");
+    con.execute("DELETE FROM fact_entry", [])
+        .expect("clear fact_entry");
     con
 }
 
@@ -153,7 +154,11 @@ fn une_sortie_par_flux_matche() {
              "coefficient":{"type":"constant","value":1},"multiplicateur":-1,
              "destination":{"nature":{"mode":"override","value":"TST"}}}]}"#,
     );
-    assert_eq!(run_one(&con, "R"), 2, "2 lignes sources (F20, F99) → 2 sorties");
+    assert_eq!(
+        run_one(&con, "R"),
+        2,
+        "2 lignes sources (F20, F99) → 2 sorties"
+    );
 
     assert!((ssum(&con, "nature='TST' AND flow='F20'") - (-100.0)).abs() < TOL);
     assert!((ssum(&con, "nature='TST' AND flow='F99'") - (-100.0)).abs() < TOL);
@@ -196,7 +201,16 @@ fn destination_override_compte_et_nature() {
 #[test]
 fn destination_partner_inherit_et_null() {
     let con = engine();
-    put(&con, "M", "200", "F20", Some("A"), "0LIASS", 100.0, "converted");
+    put(
+        &con,
+        "M",
+        "200",
+        "F20",
+        Some("A"),
+        "0LIASS",
+        100.0,
+        "converted",
+    );
 
     create_rule(
         &con,
@@ -251,8 +265,14 @@ fn coefficient_constant_et_multiplicateur() {
     );
     assert_eq!(run_one(&con, "R"), 2);
 
-    assert!((ssum(&con, "nature='2A'") - 100.0).abs() < TOL, "100 × 0,5 × 2 = 100");
-    assert!((ssum(&con, "nature='2B'") - (-25.0)).abs() < TOL, "100 × 0,25 × −1 = −25");
+    assert!(
+        (ssum(&con, "nature='2A'") - 100.0).abs() < TOL,
+        "100 × 0,5 × 2 = 100"
+    );
+    assert!(
+        (ssum(&con, "nature='2B'") - (-25.0)).abs() < TOL,
+        "100 × 0,25 × −1 = −25"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,8 +343,26 @@ fn snapshot_isole_les_operations() {
 #[test]
 fn selection_in_et_is_not_null() {
     let con = engine();
-    put(&con, "M", "200", "F20", Some("A"), "0LIASS", 100.0, "converted"); // match
-    put(&con, "M", "300", "F20", Some("A"), "0LIASS", 100.0, "converted"); // hors IN
+    put(
+        &con,
+        "M",
+        "200",
+        "F20",
+        Some("A"),
+        "0LIASS",
+        100.0,
+        "converted",
+    ); // match
+    put(
+        &con,
+        "M",
+        "300",
+        "F20",
+        Some("A"),
+        "0LIASS",
+        100.0,
+        "converted",
+    ); // hors IN
     put(&con, "M", "705", "F20", None, "0LIASS", 100.0, "converted"); // partner NULL
 
     create_rule(
@@ -389,9 +427,22 @@ fn destination_map_traverse_caracteristique() {
 
     // N1 « comportement » sur les comptes + 2 attributs N2 (vers comptes / natures).
     create_characteristic(&con, "comportement", "Comportement", "account").unwrap();
-    add_attribute(&con, "comportement", "compte_destination", "Compte de liaison", "account")
-        .unwrap();
-    add_attribute(&con, "comportement", "nat", "Nature d'élimination", "nature").unwrap();
+    add_attribute(
+        &con,
+        "comportement",
+        "compte_destination",
+        "Compte de liaison",
+        "account",
+    )
+    .unwrap();
+    add_attribute(
+        &con,
+        "comportement",
+        "nat",
+        "Nature d'élimination",
+        "nature",
+    )
+    .unwrap();
 
     // Valeur + affectation en SQL direct (le CRUD est testé côté `characteristics`).
     con.execute(

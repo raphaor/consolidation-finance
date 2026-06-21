@@ -124,7 +124,9 @@ pub fn create(
 ) -> Result<(), AppError> {
     ensure_valid_column(column)?;
     let (host_table, _) = references::dimension_master(host).ok_or_else(|| {
-        AppError::bad_request(format!("dimension hôte inconnue ou sans master data : {host}"))
+        AppError::bad_request(format!(
+            "dimension hôte inconnue ou sans master data : {host}"
+        ))
     })?;
     if references::dimension_master(target).is_none() {
         return Err(AppError::bad_request(format!(
@@ -267,7 +269,12 @@ async fn create_handler(
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<JsonValue>), AppError> {
     let con = lock_con(&state)?;
-    create(&con, &body.host_dimension, &body.column, &body.target_dimension)?;
+    create(
+        &con,
+        &body.host_dimension,
+        &body.column,
+        &body.target_dimension,
+    )?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "host_dimension": body.host_dimension, "column": body.column })),
@@ -428,7 +435,9 @@ mod tests {
         crate::schema::create_schema(&con).expect("re-create_schema");
 
         let n: i64 = con
-            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(n, 1, "registre survit au reset");
         assert!(
@@ -442,9 +451,14 @@ mod tests {
         let con = setup();
         create(&con, "account", "compte_parent", "account").unwrap();
         remove(&con, "account", "compte_parent").unwrap();
-        assert!(!col_exists(&con, "dim_account", "compte_parent"), "colonne retirée");
+        assert!(
+            !col_exists(&con, "dim_account", "compte_parent"),
+            "colonne retirée"
+        );
         let n: i64 = con
-            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(n, 0);
     }

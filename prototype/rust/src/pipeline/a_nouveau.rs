@@ -50,9 +50,7 @@ fn pairs(con: &Connection) -> duckdb::Result<Vec<(String, String)>> {
         "SELECT DISTINCT flow, flux_a_nouveau FROM sat_flow_scheme_item \
          WHERE flux_a_nouveau IS NOT NULL ORDER BY flow",
     )?;
-    let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-    })?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
     let mut v = Vec::new();
     for r in rows {
         v.push(r?);

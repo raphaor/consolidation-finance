@@ -5,6 +5,8 @@
 //! porte des **attributs N2**, chacun étant une référence vers une dimension
 //! (`compte_destination → dim_account`, `nature → dim_nature`…). Une règle
 //! pourra (incrément ultérieur) router une écriture en traversant ces attributs.
+//! La cible d'un attribut N2 peut aussi être une **liste de valeurs**
+//! réutilisable (`lst_<code>`, cf. [`crate::value_lists`]) plutôt qu'une dimension.
 //!
 //! # Modèle physique
 //!
@@ -81,8 +83,9 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CharacteristicDe
         return Ok(Vec::new());
     }
     let chars: Vec<(String, String, String)> = {
-        let mut stmt =
-            con.prepare("SELECT code, libelle, base_dimension FROM dim_characteristic ORDER BY code")?;
+        let mut stmt = con.prepare(
+            "SELECT code, libelle, base_dimension FROM dim_characteristic ORDER BY code",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -108,10 +111,7 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CharacteristicDe
 
 /// Dimension de base d'une caractéristique N1, si elle existe. Utilisé par le
 /// moteur de règles pour bâtir la traversée (mode `map`).
-pub fn base_dimension_of(
-    con: &duckdb::Connection,
-    code: &str,
-) -> duckdb::Result<Option<String>> {
+pub fn base_dimension_of(con: &duckdb::Connection, code: &str) -> duckdb::Result<Option<String>> {
     match con.query_row(
         "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
         [code],
@@ -143,10 +143,7 @@ pub fn attribute_target(
     }
 }
 
-fn load_attributes(
-    con: &duckdb::Connection,
-    char_code: &str,
-) -> duckdb::Result<Vec<AttributeDef>> {
+fn load_attributes(con: &duckdb::Connection, char_code: &str) -> duckdb::Result<Vec<AttributeDef>> {
     let mut stmt = con.prepare(
         "SELECT name, libelle, target_dimension FROM dim_characteristic_attribute \
          WHERE characteristic_code = ? ORDER BY name",
@@ -254,10 +251,7 @@ pub fn delete_characteristic(con: &duckdb::Connection, code: &str) -> Result<(),
         .map_err(db_err)?;
     if let Some((base_table, _)) = references::dimension_master(&base_dimension) {
         // Silencieux si la colonne a déjà disparu (ex. après un reset partiel).
-        let _ = con.execute(
-            &format!("ALTER TABLE {base_table} DROP COLUMN {code}"),
-            [],
-        );
+        let _ = con.execute(&format!("ALTER TABLE {base_table} DROP COLUMN {code}"), []);
     }
     con.execute(
         "DELETE FROM dim_characteristic_attribute WHERE characteristic_code = ?",
@@ -269,8 +263,10 @@ pub fn delete_characteristic(con: &duckdb::Connection, code: &str) -> Result<(),
     Ok(())
 }
 
-/// Ajoute un attribut N2 : colonne sur `car_<char>` + registre. La dimension
-/// cible doit avoir une master data (déclarée dans [`crate::references`]).
+/// Ajoute un attribut N2 : colonne sur `car_<char>` + registre. La cible
+/// (`target_dimension`) peut être une **dimension** à master data **ou** une
+/// **liste de valeurs** (`lst_<code>`, cf. [`crate::value_lists`]) — résolue via
+/// [`references::target_master`].
 pub fn add_attribute(
     con: &duckdb::Connection,
     char_code: &str,
@@ -291,9 +287,9 @@ pub fn add_attribute(
             "caractéristique inexistante : {char_code}"
         )));
     }
-    if references::dimension_master(target_dimension).is_none() {
+    if references::target_master(con, target_dimension).is_none() {
         return Err(AppError::bad_request(format!(
-            "dimension cible inconnue ou sans master data : {target_dimension}"
+            "cible inconnue : {target_dimension} (ni dimension à master data, ni liste de valeurs)"
         )));
     }
     let attr_exists: bool = con
@@ -305,7 +301,9 @@ pub fn add_attribute(
         )
         .map_err(db_err)?;
     if attr_exists {
-        return Err(AppError::conflict(format!("attribut déjà existant : {name}")));
+        return Err(AppError::conflict(format!(
+            "attribut déjà existant : {name}"
+        )));
     }
     let vtable = value_table(char_code);
     con.execute(&format!("ALTER TABLE {vtable} ADD COLUMN {name} TEXT"), [])
@@ -405,10 +403,10 @@ fn validate_attribute_values(
             Some(JsonValue::String(s)) if !s.is_empty() => s.as_str(),
             _ => continue, // absent / null / vide = non renseigné (attributs nullables)
         };
-        let (tt, tc) = references::dimension_master(&a.target_dimension).ok_or_else(|| {
-            AppError::bad_request(format!("dimension cible inconnue : {}", a.target_dimension))
+        let (tt, tc) = references::target_master(con, &a.target_dimension).ok_or_else(|| {
+            AppError::bad_request(format!("cible inconnue : {}", a.target_dimension))
         })?;
-        if !references::value_exists(con, tt, tc, v).map_err(db_err)? {
+        if !references::value_exists(con, &tt, &tc, v).map_err(db_err)? {
             return Err(AppError::bad_request(format!(
                 "{} = '{}' (absent de {}.{})",
                 a.name, v, tt, tc
@@ -419,10 +417,7 @@ fn validate_attribute_values(
 }
 
 /// Liste les valeurs (lignes) d'une caractéristique N1.
-pub fn list_values(
-    con: &duckdb::Connection,
-    char_code: &str,
-) -> Result<Vec<JsonValue>, AppError> {
+pub fn list_values(con: &duckdb::Connection, char_code: &str) -> Result<Vec<JsonValue>, AppError> {
     let attrs = require_characteristic(con, char_code)?;
     let cols = value_columns(&attrs)
         .iter()
@@ -430,7 +425,11 @@ pub fn list_values(
         .collect::<Vec<_>>()
         .join(", ");
     let vtable = value_table(char_code);
-    masterdata::run_query(con, &format!("SELECT {cols} FROM {vtable} ORDER BY code"), Vec::new())
+    masterdata::run_query(
+        con,
+        &format!("SELECT {cols} FROM {vtable} ORDER BY code"),
+        Vec::new(),
+    )
 }
 
 /// Crée une valeur N1 (ligne de `car_<code>`). `code` requis ; attributs N2
@@ -555,11 +554,12 @@ pub fn assign(
             |r| r.get(0),
         )
         .map_err(|_| AppError::not_found(format!("caractéristique inexistante : {char_code}")))?;
-    let (base_table, base_key) = references::dimension_master(&base_dimension).ok_or_else(|| {
-        AppError::bad_request(format!(
-            "dimension de base sans master data : {base_dimension}"
-        ))
-    })?;
+    let (base_table, base_key) =
+        references::dimension_master(&base_dimension).ok_or_else(|| {
+            AppError::bad_request(format!(
+                "dimension de base sans master data : {base_dimension}"
+            ))
+        })?;
     if !references::value_exists(con, base_table, base_key, member).map_err(db_err)? {
         return Err(AppError::not_found(format!(
             "membre inexistant : {base_table}.{base_key} = {member}"
@@ -577,9 +577,7 @@ pub fn assign(
         }
         _ => DbValue::Null, // désaffectation
     };
-    let sql = format!(
-        "UPDATE {base_table} SET \"{char_code}\" = ? WHERE \"{base_key}\" = ?"
-    );
+    let sql = format!("UPDATE {base_table} SET \"{char_code}\" = ? WHERE \"{base_key}\" = ?");
     con.execute(
         &sql,
         params_from_iter(vec![dbval, DbValue::Text(member.to_string())]),
@@ -641,7 +639,13 @@ async fn add_attr(
     Json(body): Json<AddAttributeBody>,
 ) -> Result<(StatusCode, Json<JsonValue>), AppError> {
     let con = lock_con(&state)?;
-    add_attribute(&con, &code, &body.name, &body.libelle, &body.target_dimension)?;
+    add_attribute(
+        &con,
+        &code,
+        &body.name,
+        &body.libelle,
+        &body.target_dimension,
+    )?;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "characteristic": code, "name": body.name })),
@@ -743,7 +747,10 @@ pub fn router() -> Router<Arc<AppState>> {
             "/api/meta/characteristics/{code}/values/{value}",
             put(values_update).delete(values_delete),
         )
-        .route("/api/meta/characteristics/{code}/assign", put(assign_handler))
+        .route(
+            "/api/meta/characteristics/{code}/assign",
+            put(assign_handler),
+        )
 }
 
 // ───────────────────────────────── Tests ────────────────────────────────────────
@@ -782,7 +789,10 @@ mod tests {
     fn cree_n1_et_n2_avec_artefacts_physiques() {
         let con = setup();
         create_characteristic(&con, "comportement", "Comportement", "account").unwrap();
-        assert!(table_exists(&con, "car_comportement"), "table de valeurs créée");
+        assert!(
+            table_exists(&con, "car_comportement"),
+            "table de valeurs créée"
+        );
         assert!(
             col_exists(&con, "dim_account", "comportement"),
             "colonne de rattachement sur dim_account"
@@ -918,9 +928,11 @@ mod tests {
         // Affectation d'un compte à la valeur.
         assign(&con, "comportement", "700", Some("VENTES_IC")).unwrap();
         let assigned: Option<String> = con
-            .query_row("SELECT comportement FROM dim_account WHERE code = '700'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT comportement FROM dim_account WHERE code = '700'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(assigned.as_deref(), Some("VENTES_IC"));
 
@@ -932,9 +944,11 @@ mod tests {
         // Désaffectation (value = None).
         assign(&con, "comportement", "700", None).unwrap();
         let after: Option<String> = con
-            .query_row("SELECT comportement FROM dim_account WHERE code = '700'", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT comportement FROM dim_account WHERE code = '700'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(after, None, "compte déclassé");
     }
@@ -952,9 +966,11 @@ mod tests {
             "colonne de rattachement retirée"
         );
         let n: i64 = con
-            .query_row("SELECT COUNT(*) FROM dim_characteristic_attribute", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM dim_characteristic_attribute",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 0, "attributs N2 supprimés avec la N1");
     }

@@ -394,6 +394,21 @@ CREATE TABLE IF NOT EXISTS dim_custom_reference (
     PRIMARY KEY (host_dimension, column_name)
 );";
 
+/// 8k. dim_value_list : registre des **listes de valeurs** (référentiels).
+///
+/// Une liste de valeurs est une nomenclature `code/libellé` autonome
+/// (`lst_<code>`), réutilisable comme cible d'un attribut N2 de caractéristique,
+/// mais qui n'est **pas une dimension** (aucune colonne sur `fact_entry` /
+/// `stg_entry`). Comme les autres registres pilotables, elle **survit au reset**
+/// (CREATE IF NOT EXISTS, hors `ALL_DROP`) ; les tables `lst_<code>` survivent
+/// elles aussi (jamais droppées) et n'ont aucune colonne à ré-appliquer
+/// (cf. `crate::value_lists`).
+pub const DDL_DIM_VALUE_LIST: &str = "\
+CREATE TABLE IF NOT EXISTS dim_value_list (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — mêmes dimensions que fact_entry sans `level`,
@@ -484,6 +499,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_CHARACTERISTIC,
     DDL_DIM_CHARACTERISTIC_ATTRIBUTE,
     DDL_DIM_CUSTOM_REFERENCE,
+    DDL_DIM_VALUE_LIST,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];

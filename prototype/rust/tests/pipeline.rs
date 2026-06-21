@@ -153,7 +153,10 @@ fn pipeline_produit_les_bons_comptes_par_niveau() {
     assert!(corp > 0, "niveau corporate peuplé");
     assert_eq!(recl, 0, "niveau reclassified supprimé (aucune ligne)");
     assert!(conv > 0, "niveau converted peuplé");
-    assert_eq!(cons, conv, "consolidé = converti × pct (globale 100 %, 1:1)");
+    assert_eq!(
+        cons, conv,
+        "consolidé = converti × pct (globale 100 %, 1:1)"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,8 +187,7 @@ fn f99_present_au_niveau_converted_et_identite_tient() {
         assert!(
             c.ok,
             "identité F99 en échec au niveau converted pour {} : écart = {}",
-            c.account,
-            c.ecart
+            c.account, c.ecart
         );
     }
 }
@@ -228,12 +230,7 @@ fn montants_f99_consolidated_attendus() {
 #[test]
 fn comptes_attendus_presents_au_niveau_consolidated() {
     let con = setup();
-    for acc in &[
-        "100",
-        "200",
-        "300",
-        "400",
-    ] {
+    for acc in &["100", "200", "300", "400"] {
         let n: i64 = con
             .query_row(
                 "SELECT COUNT(*) FROM fact_entry WHERE level='consolidated' AND account=?",
@@ -258,8 +255,7 @@ fn validate_f99_consolidated_tient() {
         assert!(
             c.ok,
             "identité F99 en échec au niveau consolidated pour {} : écart = {}",
-            c.account,
-            c.ecart
+            c.account, c.ecart
         );
     }
 }
@@ -273,8 +269,7 @@ fn validate_f99_functional_tient() {
         assert!(
             c.ok,
             "identité F99 en échec au niveau corporate pour {} : écart = {}",
-            c.account,
-            c.ecart
+            c.account, c.ecart
         );
     }
 }
@@ -329,7 +324,10 @@ fn ecarts_f80_f81_localises_sur_entites_non_eur() {
     // B (GBP, sortante) : ses flux F00/F20 sont convertis et génèrent des
     // écarts F80/F81 (ensuite absorbés par F98 dans F99 = 0).
     let n_b = flow_rows(&con, "consolidated", &["F80", "F81"], Some(&["B"]));
-    assert!(n_b > 0, "B (sortante) doit générer des F80/F81 sur ses constituants");
+    assert!(
+        n_b > 0,
+        "B (sortante) doit générer des F80/F81 sur ses constituants"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -522,7 +520,10 @@ fn pipeline_reproductible_apres_reset() {
         level_count(&con, "consolidated"),
     ];
 
-    assert_eq!(counts_before, counts_after, "comptes par niveau non reproductibles");
+    assert_eq!(
+        counts_before, counts_after,
+        "comptes par niveau non reproductibles"
+    );
     for (i, acc) in accounts.iter().enumerate() {
         assert!(
             (before[i] - after[i]).abs() < TOL,
@@ -614,8 +615,14 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
             |r| r.get(0),
         )
         .unwrap();
-    assert!((f99 - 50.0).abs() < TOL, "F99 devrait valoir 50 (F20), eu {f99}");
-    assert!((f88 - 30.0).abs() < TOL, "F88 devrait valoir 30 (F10), eu {f88}");
+    assert!(
+        (f99 - 50.0).abs() < TOL,
+        "F99 devrait valoir 50 (F20), eu {f99}"
+    );
+    assert!(
+        (f88 - 30.0).abs() < TOL,
+        "F88 devrait valoir 30 (F10), eu {f88}"
+    );
 
     // (b)+(c) On injecte des valeurs résiduelles, puis on re-materialise.
     //   - F99 @ compte 100 (même grain) = 999      → doit être ÉCRASÉ en 50.
@@ -751,12 +758,20 @@ fn check_natures_detecte_nature_manquante_et_inconnue() {
     .expect("update nature inconnue");
 
     let anomalies = check_natures(&con).expect("check_natures");
-    let has_missing = anomalies.iter().any(|a| a.kind == "missing" && a.count >= 1);
+    let has_missing = anomalies
+        .iter()
+        .any(|a| a.kind == "missing" && a.count >= 1);
     let has_unknown = anomalies
         .iter()
         .any(|a| a.kind == "unknown" && a.nature.as_deref() == Some("XNOPE"));
-    assert!(has_missing, "doit détecter une nature manquante : {anomalies:?}");
-    assert!(has_unknown, "doit détecter une nature inconnue : {anomalies:?}");
+    assert!(
+        has_missing,
+        "doit détecter une nature manquante : {anomalies:?}"
+    );
+    assert!(
+        has_unknown,
+        "doit détecter une nature inconnue : {anomalies:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -790,22 +805,28 @@ fn sortie_perimetre_donne_f99_zero_et_f98_negatif() {
     // par compte, F98 = -(F00+F20) et F99 = 0.
     // (compte, F00, F20, F98_attendu) — montants dérivés du seed.
     let cases: &[(&str, f64, f64, f64)] = &[
-        ("100", 4000.0,    0.0, -4000.0),
-        ("400", 1500.0,  200.0, -1700.0),
-        ("200", 6000.0,  300.0, -6300.0),
-        ("700",    0.0,  800.0,  -800.0),
-        ("705",    0.0,  400.0,  -400.0),
-        ("600",    0.0,  300.0,  -300.0),
-        ("610",    0.0,  200.0,  -200.0),
-        ("640",    0.0,  100.0,  -100.0),
+        ("100", 4000.0, 0.0, -4000.0),
+        ("400", 1500.0, 200.0, -1700.0),
+        ("200", 6000.0, 300.0, -6300.0),
+        ("700", 0.0, 800.0, -800.0),
+        ("705", 0.0, 400.0, -400.0),
+        ("600", 0.0, 300.0, -300.0),
+        ("610", 0.0, 200.0, -200.0),
+        ("640", 0.0, 100.0, -100.0),
     ];
     for &(acc, f00, f20, f98_attendu) in cases {
         let got_f00 = amount_for(&con, "reclassified", "B", acc, "F00");
         let got_f20 = amount_for(&con, "reclassified", "B", acc, "F20");
         let got_f98 = amount_for(&con, "reclassified", "B", acc, "F98");
         let got_f99 = amount_for(&con, "reclassified", "B", acc, "F99");
-        assert!((got_f00 - f00).abs() < TOL, "B/{acc} F00 = {got_f00} (attendu {f00})");
-        assert!((got_f20 - f20).abs() < TOL, "B/{acc} F20 = {got_f20} (attendu {f20})");
+        assert!(
+            (got_f00 - f00).abs() < TOL,
+            "B/{acc} F00 = {got_f00} (attendu {f00})"
+        );
+        assert!(
+            (got_f20 - f20).abs() < TOL,
+            "B/{acc} F20 = {got_f20} (attendu {f20})"
+        );
         assert!(
             (got_f98 - f98_attendu).abs() < TOL,
             "B/{acc} F98 = {got_f98} (attendu {f98_attendu} = −(F00+F20))"
@@ -890,14 +911,35 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
     };
 
     // Préfixe 2 (fonctionnel) : converti via la conversion, absent du corporate.
-    assert_eq!(count("corporate", "2TEST"), 0, "préfixe 2 absent du corporate");
-    assert!(count("converted", "2TEST") > 0, "préfixe 2 présent au converti");
+    assert_eq!(
+        count("corporate", "2TEST"),
+        0,
+        "préfixe 2 absent du corporate"
+    );
+    assert!(
+        count("converted", "2TEST") > 0,
+        "préfixe 2 présent au converti"
+    );
 
     // Préfixe 3 : consolidé (subit le × pct), absent du converti.
-    assert_eq!(count("converted", "3TEST"), 0, "préfixe 3 absent du converti");
-    assert!(count("consolidated", "3TEST") > 0, "préfixe 3 présent au consolidé");
+    assert_eq!(
+        count("converted", "3TEST"),
+        0,
+        "préfixe 3 absent du converti"
+    );
+    assert!(
+        count("consolidated", "3TEST") > 0,
+        "préfixe 3 présent au consolidé"
+    );
 
     // Préfixe 4 : consolidé (tel quel, après le × pct), absent du converti.
-    assert_eq!(count("converted", "4TEST"), 0, "préfixe 4 absent du converti");
-    assert!(count("consolidated", "4TEST") > 0, "préfixe 4 présent au consolidé");
+    assert_eq!(
+        count("converted", "4TEST"),
+        0,
+        "préfixe 4 absent du converti"
+    );
+    assert!(
+        count("consolidated", "4TEST") > 0,
+        "préfixe 4 présent au consolidé"
+    );
 }

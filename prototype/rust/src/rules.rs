@@ -102,7 +102,17 @@ fn allowed_scope_dims(con: &Connection) -> Vec<String> {
 const ALLOWED_TARGETS: &[&str] = &["entity", "partner", "share"];
 
 /// Opérateurs acceptés sur les conditions (scope et sélection).
-const ALLOWED_OPS: &[&str] = &["=", "!=", ">", "<", ">=", "<=", "IN", "IS NULL", "IS NOT NULL"];
+const ALLOWED_OPS: &[&str] = &[
+    "=",
+    "!=",
+    ">",
+    "<",
+    ">=",
+    "<=",
+    "IN",
+    "IS NULL",
+    "IS NOT NULL",
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Contexte de parsing dynamique (registre des dimensions)
@@ -132,8 +142,7 @@ impl RuleContext {
     /// colonne de `fact_entry`, pas une dimension au sens du registre).
     pub fn from_registry(con: &Connection) -> Result<Self, duckdb::Error> {
         let dims = dimensions::load_all(con)?;
-        let mut selection_dims: Vec<String> =
-            dims.iter().map(|d| d.name.clone()).collect();
+        let mut selection_dims: Vec<String> = dims.iter().map(|d| d.name.clone()).collect();
         selection_dims.push("level".to_string());
         let pilotable_dims: Vec<String> = dimensions::pilotable_cols(&dims)
             .into_iter()
@@ -177,9 +186,7 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
         }
         for (dim, dest) in &op.destination {
             if dest.mode == "override" {
-                if let (Some(v), Some(r)) =
-                    (&dest.value, references::entry_dimension_target(dim))
-                {
+                if let (Some(v), Some(r)) = (&dest.value, references::entry_dimension_target(dim)) {
                     if !v.is_empty()
                         && !references::value_exists(con, r.target_table, r.target_column, v)
                             .map_err(|e| e.to_string())?
@@ -203,7 +210,9 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
                         "destination.{dim} map : caractéristique inconnue : {via}"
                     ));
                 }
-                match characteristics::attribute_target(con, via, attr).map_err(|e| e.to_string())? {
+                match characteristics::attribute_target(con, via, attr)
+                    .map_err(|e| e.to_string())?
+                {
                     None => {
                         return Err(format!(
                             "destination.{dim} map : attribut inconnu : {via}.{attr}"
@@ -246,9 +255,10 @@ fn check_ref_value(
         return Ok(());
     }
     let vals: Vec<String> = match val {
-        Some(JsonValue::Array(a)) => {
-            a.iter().filter_map(|x| x.as_str().map(String::from)).collect()
-        }
+        Some(JsonValue::Array(a)) => a
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect(),
         Some(JsonValue::String(s)) => vec![s.clone()],
         _ => return Ok(()),
     };
@@ -372,8 +382,8 @@ struct Destination {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn parse_definition(json: &str, ctx: &RuleContext) -> RuleResult_<Definition> {
-    let v: JsonValue = serde_json::from_str(json)
-        .map_err(|e| format!("définition JSON invalide : {e}"))?;
+    let v: JsonValue =
+        serde_json::from_str(json).map_err(|e| format!("définition JSON invalide : {e}"))?;
     let obj = v
         .as_object()
         .ok_or("la définition doit être un objet JSON")?;
@@ -402,9 +412,7 @@ fn parse_definition(json: &str, ctx: &RuleContext) -> RuleResult_<Definition> {
 }
 
 fn parse_scope_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<ScopeCond> {
-    let obj = v
-        .as_object()
-        .ok_or("each scope item doit être un objet")?;
+    let obj = v.as_object().ok_or("each scope item doit être un objet")?;
     let target = expect_str(obj, "target")?;
     if !ALLOWED_TARGETS.contains(&target.as_str()) {
         return Err(format!(
@@ -435,13 +443,16 @@ fn parse_scope_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<ScopeCond> 
             "scope.val null pour op='{op}' — utilisez IS NULL pour tester la nullité"
         ));
     }
-    Ok(ScopeCond { target, dim, op, val })
+    Ok(ScopeCond {
+        target,
+        dim,
+        op,
+        val,
+    })
 }
 
 fn parse_operation(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Operation> {
-    let obj = v
-        .as_object()
-        .ok_or("each operation doit être un objet")?;
+    let obj = v.as_object().ok_or("each operation doit être un objet")?;
     let seq = obj
         .get("seq")
         .and_then(|x| x.as_i64())
@@ -475,9 +486,7 @@ fn parse_operation(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Operation> {
                     .into(),
             )
         }
-        Some(JsonValue::Number(n)) => n
-            .as_f64()
-            .ok_or("multiplicateur doit être un nombre")?,
+        Some(JsonValue::Number(n)) => n.as_f64().ok_or("multiplicateur doit être un nombre")?,
         Some(_) => return Err("multiplicateur doit être un nombre".into()),
     };
     let destination = match obj.get("destination") {
@@ -538,9 +547,7 @@ fn parse_selection_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Selecti
 }
 
 fn parse_coefficient(v: &JsonValue) -> RuleResult_<Coefficient> {
-    let obj = v
-        .as_object()
-        .ok_or("coefficient doit être un objet")?;
+    let obj = v.as_object().ok_or("coefficient doit être un objet")?;
     let t = expect_str(obj, "type")?;
     match t.as_str() {
         "pct_integration" => Ok(Coefficient::PctIntegration),
@@ -574,7 +581,12 @@ fn parse_destination(v: &JsonValue) -> RuleResult_<Destination> {
         }
         other => return Err(format!("destination.mode inconnu : {other}")),
     };
-    Ok(Destination { mode, value, via, attr })
+    Ok(Destination {
+        mode,
+        value,
+        via,
+        attr,
+    })
 }
 
 fn expect_str(obj: &serde_json::Map<String, JsonValue>, key: &str) -> RuleResult_<String> {
@@ -687,14 +699,8 @@ fn dest_expr(
 /// il faut s'assurer que le JOIN `p_ent` est présent.
 fn coefficient_expr(c: &Coefficient) -> (String, bool) {
     match c {
-        Coefficient::PctIntegration => (
-            "COALESCE(p_ent.pct_integration, 1.0)".to_string(),
-            true,
-        ),
-        Coefficient::PctInteret => (
-            "COALESCE(p_ent.pct_interet, 1.0)".to_string(),
-            true,
-        ),
+        Coefficient::PctIntegration => ("COALESCE(p_ent.pct_integration, 1.0)".to_string(), true),
+        Coefficient::PctInteret => ("COALESCE(p_ent.pct_interet, 1.0)".to_string(), true),
         Coefficient::Constant(v) => {
             // Littéral inline : un f64 sert de coefficient multiplicatif.
             // On formate sans locale pour garantir un point décimal.
@@ -1077,7 +1083,9 @@ pub fn run_ruleset_at_level(
         }
         // Snapshot du niveau (isolation des opérations de la règle).
         con.execute(
-            &format!("CREATE TEMP TABLE _rule_snap_{level} AS SELECT * FROM fact_entry WHERE level = ?"),
+            &format!(
+                "CREATE TEMP TABLE _rule_snap_{level} AS SELECT * FROM fact_entry WHERE level = ?"
+            ),
             [level],
         )?;
         let mut n = 0usize;
@@ -1121,20 +1129,36 @@ mod tests {
     fn ctx_fixture() -> RuleContext {
         RuleContext {
             selection_dims: vec![
-                "scenario".into(), "entity".into(), "entry_period".into(),
-                "period".into(), "account".into(), "flow".into(),
-                "currency".into(), "nature".into(), "partner".into(),
-                "share".into(), "analysis".into(), "analysis2".into(),
+                "scenario".into(),
+                "entity".into(),
+                "entry_period".into(),
+                "period".into(),
+                "account".into(),
+                "flow".into(),
+                "currency".into(),
+                "nature".into(),
+                "partner".into(),
+                "share".into(),
+                "analysis".into(),
+                "analysis2".into(),
                 "level".into(),
             ],
             pilotable_dims: vec![
-                "entity".into(), "account".into(), "flow".into(),
-                "nature".into(), "partner".into(), "share".into(),
-                "analysis".into(), "analysis2".into(),
+                "entity".into(),
+                "account".into(),
+                "flow".into(),
+                "nature".into(),
+                "partner".into(),
+                "share".into(),
+                "analysis".into(),
+                "analysis2".into(),
             ],
             scope_dims: vec![
-                "methode".into(), "pct_interet".into(), "pct_integration".into(),
-                "entree".into(), "sortie".into(),
+                "methode".into(),
+                "pct_interet".into(),
+                "pct_integration".into(),
+                "entree".into(),
+                "sortie".into(),
             ],
         }
     }
@@ -1210,9 +1234,14 @@ mod tests {
         let def = parse_definition(json, &ctx).expect("définition minimale valide");
         assert!(def.scope.is_empty(), "scope par défaut = vide");
         let op = &def.operations[0];
-        assert!(matches!(op.coefficient, Coefficient::Constant(v) if (v - 1.0).abs() < 1e-9),
-            "coefficient implicite = Constant(1.0)");
-        assert!((op.multiplicateur - 1.0).abs() < 1e-9, "multiplicateur implicite = 1.0");
+        assert!(
+            matches!(op.coefficient, Coefficient::Constant(v) if (v - 1.0).abs() < 1e-9),
+            "coefficient implicite = Constant(1.0)"
+        );
+        assert!(
+            (op.multiplicateur - 1.0).abs() < 1e-9,
+            "multiplicateur implicite = 1.0"
+        );
         assert!(op.destination.is_empty(), "destination vide par défaut");
         assert!(op.selection.is_empty(), "sélection vide par défaut");
     }
@@ -1225,8 +1254,10 @@ mod tests {
         let json = r#"{ "scope": [{"target":"company","dim":"methode","op":"=","val":"globale"}],
                         "operations":[{"seq":1,"level":"consolidated"}] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("ALLOWED_TARGETS") || err.contains("target"),
-            "message devrait mentionner target invalide : {err}");
+        assert!(
+            err.contains("ALLOWED_TARGETS") || err.contains("target"),
+            "message devrait mentionner target invalide : {err}"
+        );
     }
 
     #[test]
@@ -1236,8 +1267,10 @@ mod tests {
         let json = r#"{ "scope": [{"target":"entity","dim":"pct_inconnu","op":"=","val":1}],
                         "operations":[{"seq":1,"level":"consolidated"}] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("scope.dim") || err.contains("invalide"),
-            "message devrait mentionner scope.dim invalide : {err}");
+        assert!(
+            err.contains("scope.dim") || err.contains("invalide"),
+            "message devrait mentionner scope.dim invalide : {err}"
+        );
     }
 
     #[test]
@@ -1246,7 +1279,10 @@ mod tests {
         let json = r#"{ "scope": [{"target":"entity","dim":"methode","op":"=","val":null}],
                         "operations":[{"seq":1,"level":"consolidated"}] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("null"), "message devrait mentionner null : {err}");
+        assert!(
+            err.contains("null"),
+            "message devrait mentionner null : {err}"
+        );
     }
 
     #[test]
@@ -1259,7 +1295,10 @@ mod tests {
             "selection":[{"dim":"account","op":"=","val":null}]
         }] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("null"), "message devrait mentionner null : {err}");
+        assert!(
+            err.contains("null"),
+            "message devrait mentionner null : {err}"
+        );
     }
 
     #[test]
@@ -1275,7 +1314,10 @@ mod tests {
             let def = parse_definition(&json, &ctx)
                 .unwrap_or_else(|e| panic!("op={op} devrait tolérer l'absence de val : {e}"));
             assert_eq!(def.scope.len(), 1);
-            assert!(def.scope[0].val.is_none(), "op={op} : val devrait être None");
+            assert!(
+                def.scope[0].val.is_none(),
+                "op={op} : val devrait être None"
+            );
         }
     }
 
@@ -1298,7 +1340,10 @@ mod tests {
         let ctx = ctx_fixture();
         let json = r#"{ "operations":[{"seq":1,"level":"consolid"}] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("level"), "message devrait mentionner level : {err}");
+        assert!(
+            err.contains("level"),
+            "message devrait mentionner level : {err}"
+        );
     }
 
     #[test]
@@ -1311,8 +1356,10 @@ mod tests {
             "selection":[{"dim":"foobar","op":"=","val":"x"}]
         }] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("selection.dim") || err.contains("invalide"),
-            "message devrait mentionner selection.dim : {err}");
+        assert!(
+            err.contains("selection.dim") || err.contains("invalide"),
+            "message devrait mentionner selection.dim : {err}"
+        );
     }
 
     #[test]
@@ -1325,8 +1372,10 @@ mod tests {
             "destination":{"currency":{"mode":"override","value":"USD"}}
         }] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("pilotable") || err.contains("destination"),
-            "message devrait mentionner pilotable/destination : {err}");
+        assert!(
+            err.contains("pilotable") || err.contains("destination"),
+            "message devrait mentionner pilotable/destination : {err}"
+        );
     }
 
     #[test]
@@ -1337,7 +1386,10 @@ mod tests {
             "destination":{"nature":{"mode":"swap","value":"X"}}
         }] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("mode"), "message devrait mentionner mode : {err}");
+        assert!(
+            err.contains("mode"),
+            "message devrait mentionner mode : {err}"
+        );
     }
 
     #[test]
@@ -1348,8 +1400,10 @@ mod tests {
             "coefficient":{"type":"pct_share"}
         }] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("coefficient.type") || err.contains("inconnu"),
-            "message devrait mentionner coefficient.type : {err}");
+        assert!(
+            err.contains("coefficient.type") || err.contains("inconnu"),
+            "message devrait mentionner coefficient.type : {err}"
+        );
     }
 
     #[test]
@@ -1360,7 +1414,10 @@ mod tests {
             "coefficient":{"type":"constant"}
         }] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("value"), "message devrait mentionner value : {err}");
+        assert!(
+            err.contains("value"),
+            "message devrait mentionner value : {err}"
+        );
     }
 
     #[test]
@@ -1368,7 +1425,10 @@ mod tests {
         let ctx = ctx_fixture();
         let json = r#"{ "scope": [] }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("operations"), "message devrait mentionner operations : {err}");
+        assert!(
+            err.contains("operations"),
+            "message devrait mentionner operations : {err}"
+        );
     }
 
     #[test]
@@ -1376,7 +1436,10 @@ mod tests {
         let ctx = ctx_fixture();
         let json = r#"{ "operations": "oops" }"#;
         let err = parse_definition(json, &ctx).unwrap_err();
-        assert!(err.contains("tableau"), "message devrait mentionner tableau : {err}");
+        assert!(
+            err.contains("tableau"),
+            "message devrait mentionner tableau : {err}"
+        );
     }
 
     #[test]
@@ -1413,15 +1476,24 @@ mod tests {
     #[test]
     fn coefficient_expr_pct_integration_necessite_join_perimeter() {
         let (expr, needs_join) = coefficient_expr(&Coefficient::PctIntegration);
-        assert!(needs_join, "PctIntegration doit déclencher le JOIN sat_perimeter");
-        assert!(expr.contains("pct_integration"), "expression doit lire pct_integration : {expr}");
+        assert!(
+            needs_join,
+            "PctIntegration doit déclencher le JOIN sat_perimeter"
+        );
+        assert!(
+            expr.contains("pct_integration"),
+            "expression doit lire pct_integration : {expr}"
+        );
     }
 
     #[test]
     fn coefficient_expr_constant_ne_necessite_pas_join() {
         let (expr, needs_join) = coefficient_expr(&Coefficient::Constant(0.5));
         assert!(!needs_join, "Constant n'a pas besoin du JOIN sat_perimeter");
-        assert!(!expr.contains("pct_"), "expression ne doit pas lire le périmètre : {expr}");
+        assert!(
+            !expr.contains("pct_"),
+            "expression ne doit pas lire le périmètre : {expr}"
+        );
     }
 
     #[test]
@@ -1440,8 +1512,13 @@ mod tests {
         // Une sélection IN () est invalide en SQL ; le helper doit produire 1=0
         // plutôt que d'injecter une liste vide.
         let mut params: Vec<DbValue> = Vec::new();
-        let cond = push_condition("e.account", "IN", &Some(JsonValue::Array(vec![])), &mut params)
-            .expect("IN liste vide → 1=0");
+        let cond = push_condition(
+            "e.account",
+            "IN",
+            &Some(JsonValue::Array(vec![])),
+            &mut params,
+        )
+        .expect("IN liste vide → 1=0");
         assert_eq!(cond, "1=0", "IN liste vide doit donner 1=0, eu {cond}");
         assert!(params.is_empty(), "aucun paramètre bindé pour 1=0");
     }
@@ -1493,7 +1570,12 @@ mod tests {
     fn dest_expr_null_pousse_null_littéral() {
         let dests = vec![(
             "partner".to_string(),
-            Destination { mode: "null".into(), value: None, via: None, attr: None },
+            Destination {
+                mode: "null".into(),
+                value: None,
+                via: None,
+                attr: None,
+            },
         )];
         let mut params: Vec<DbValue> = Vec::new();
         let expr = dest_expr("partner", &dests, &mut params);
@@ -1505,7 +1587,12 @@ mod tests {
     fn dest_expr_override_binde_la_valeur() {
         let dests = vec![(
             "nature".to_string(),
-            Destination { mode: "override".into(), value: Some("2ELI".into()), via: None, attr: None },
+            Destination {
+                mode: "override".into(),
+                value: Some("2ELI".into()),
+                via: None,
+                attr: None,
+            },
         )];
         let mut params: Vec<DbValue> = Vec::new();
         let expr = dest_expr("nature", &dests, &mut params);
@@ -1520,8 +1607,14 @@ mod tests {
     #[test]
     fn json_to_dbvalue_convertit_types_primitifs() {
         assert!(matches!(json_to_dbvalue(&JsonValue::Null), DbValue::Null));
-        assert!(matches!(json_to_dbvalue(&JsonValue::Bool(true)), DbValue::Boolean(true)));
-        assert!(matches!(json_to_dbvalue(&JsonValue::String("x".into())), DbValue::Text(_)));
+        assert!(matches!(
+            json_to_dbvalue(&JsonValue::Bool(true)),
+            DbValue::Boolean(true)
+        ));
+        assert!(matches!(
+            json_to_dbvalue(&JsonValue::String("x".into())),
+            DbValue::Text(_)
+        ));
         // Entier → BigInt ; flottant → Double.
         assert!(matches!(
             json_to_dbvalue(&JsonValue::Number(serde_json::Number::from(42))),

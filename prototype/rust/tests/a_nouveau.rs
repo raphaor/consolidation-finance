@@ -17,7 +17,14 @@ use duckdb::Connection;
 const TOL: f64 = 0.01;
 
 /// Montant agrégé pour (scenario, level, entity, account, flow).
-fn amt(con: &Connection, scenario: &str, level: &str, entity: &str, account: &str, flow: &str) -> f64 {
+fn amt(
+    con: &Connection,
+    scenario: &str,
+    level: &str,
+    entity: &str,
+    account: &str,
+    flow: &str,
+) -> f64 {
     con.query_row(
         "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
          WHERE scenario=? AND level=? AND entity=? AND account=? AND flow=?",
@@ -46,7 +53,10 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
 
     let reel_corp_f99 = amt(&con, "REEL", "corporate", "M", "100", "F99");
     let reel_cons_f99 = amt(&con, "REEL", "consolidated", "M", "100", "F99");
-    assert!(reel_corp_f99.abs() > TOL, "le snapshot REEL doit avoir un F99 M/100 non nul");
+    assert!(
+        reel_corp_f99.abs() > TOL,
+        "le snapshot REEL doit avoir un F99 M/100 non nul"
+    );
 
     // 2) Scénario courant CUR (2025) référençant REEL en à-nouveau.
     con.execute_batch(
@@ -75,7 +85,11 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
 
     // 3) Run CUR : le carry colle F99[REEL] → F00[CUR] (corporate + consolidé).
     let p_cur = ConvertParams::load_params(&con, "CUR").expect("load_params CUR");
-    assert_eq!(p_cur.a_nouveau_scenario.as_deref(), Some("REEL"), "CUR doit référencer REEL");
+    assert_eq!(
+        p_cur.a_nouveau_scenario.as_deref(),
+        Some("REEL"),
+        "CUR doit référencer REEL"
+    );
     run_pipeline(&con, &p_cur).expect("run CUR");
 
     let cur_corp_f00 = amt(&con, "CUR", "corporate", "M", "100", "F00");
@@ -117,12 +131,18 @@ fn sans_a_nouveau_le_f00_de_liasse_est_conserve() {
     .expect("activer flux_a_nouveau");
 
     let p_reel = ConvertParams::load_params(&con, "REEL").expect("load_params REEL");
-    assert!(p_reel.a_nouveau_scenario.is_none(), "REEL ne référence aucun à-nouveau");
+    assert!(
+        p_reel.a_nouveau_scenario.is_none(),
+        "REEL ne référence aucun à-nouveau"
+    );
     run_pipeline(&con, &p_reel).expect("run REEL");
 
     // M continue (EUR) : son F00 corporate vient de la liasse, non nul, non écrasé.
     let f00 = amt(&con, "REEL", "corporate", "M", "100", "F00");
-    assert!(f00.abs() > TOL, "sans à-nouveau, le F00 de liasse de M/100 doit subsister");
+    assert!(
+        f00.abs() > TOL,
+        "sans à-nouveau, le F00 de liasse de M/100 doit subsister"
+    );
 }
 
 /// Prépare un snapshot REEL (2024) consolidé (M, A, B) + un scénario CUR (2025)
@@ -165,16 +185,26 @@ fn coherence_signale_divergences_et_orphelins() {
     )
     .expect("seed périmètre CUR");
 
-    let anomalies =
-        conso_engine::validate::check_a_nouveau_coherence(&con, "CUR", "REEL", "2025")
-            .expect("check_a_nouveau_coherence");
+    let anomalies = conso_engine::validate::check_a_nouveau_coherence(&con, "CUR", "REEL", "2025")
+        .expect("check_a_nouveau_coherence");
 
     let has = |kind: &str, entity: &str| {
-        anomalies.iter().any(|a| a.kind == kind && a.entity == entity)
+        anomalies
+            .iter()
+            .any(|a| a.kind == kind && a.entity == entity)
     };
-    assert!(has("entree_divergente", "NEW"), "NEW doit diverger : {anomalies:?}");
-    assert!(has("snapshot_orphelin", "A"), "A doit être orpheline : {anomalies:?}");
-    assert!(has("snapshot_orphelin", "B"), "B doit être orpheline : {anomalies:?}");
+    assert!(
+        has("entree_divergente", "NEW"),
+        "NEW doit diverger : {anomalies:?}"
+    );
+    assert!(
+        has("snapshot_orphelin", "A"),
+        "A doit être orpheline : {anomalies:?}"
+    );
+    assert!(
+        has("snapshot_orphelin", "B"),
+        "B doit être orpheline : {anomalies:?}"
+    );
     assert!(
         !anomalies.iter().any(|a| a.entity == "M"),
         "M est cohérente (continue + consolidée N-1) : {anomalies:?}"
@@ -195,9 +225,8 @@ fn coherence_ok_quand_perimetre_aligne() {
     )
     .expect("seed périmètre CUR");
 
-    let anomalies =
-        conso_engine::validate::check_a_nouveau_coherence(&con, "CUR", "REEL", "2025")
-            .expect("check_a_nouveau_coherence");
+    let anomalies = conso_engine::validate::check_a_nouveau_coherence(&con, "CUR", "REEL", "2025")
+        .expect("check_a_nouveau_coherence");
     assert!(
         anomalies.is_empty(),
         "périmètre aligné → aucune anomalie attendue : {anomalies:?}"

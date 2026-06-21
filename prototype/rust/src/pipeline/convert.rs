@@ -83,7 +83,13 @@ pub fn step_c(con: &Connection, p: &ConvertParams) -> duckdb::Result<usize> {
     // (forcée à `?` = devise de présentation).
     let final_cols_convert = cols
         .iter()
-        .map(|c| if *c == "currency" { "?".to_string() } else { (*c).to_string() })
+        .map(|c| {
+            if *c == "currency" {
+                "?".to_string()
+            } else {
+                (*c).to_string()
+            }
+        })
         .collect::<Vec<_>>()
         .join(", ");
     // SELECT final branche 2 (écarts) : comme branche 1 + `flow` remplacé par

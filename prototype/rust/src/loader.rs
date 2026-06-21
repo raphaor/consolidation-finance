@@ -132,7 +132,13 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
     CsvMapping {
         file: "entities.csv",
         table: "dim_entity",
-        columns: &["code", "libelle", "devise_fonctionnelle", "entite_parent", "statut"],
+        columns: &[
+            "code",
+            "libelle",
+            "devise_fonctionnelle",
+            "entite_parent",
+            "statut",
+        ],
         casts: &[],
         use_explicit_schema: false,
     },
@@ -140,7 +146,14 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
     CsvMapping {
         file: "periods.csv",
         table: "dim_period",
-        columns: &["code", "libelle", "type", "date_debut", "date_fin", "statut"],
+        columns: &[
+            "code",
+            "libelle",
+            "type",
+            "date_debut",
+            "date_fin",
+            "statut",
+        ],
         casts: &[],
         use_explicit_schema: false,
     },
@@ -227,7 +240,13 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
     CsvMapping {
         file: "rates.csv",
         table: "sat_exchange_rate",
-        columns: &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
+        columns: &[
+            "rate_set",
+            "currency_source",
+            "period",
+            "taux_close",
+            "taux_moyen",
+        ],
         casts: &[],
         use_explicit_schema: false,
     },
@@ -235,7 +254,14 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
     CsvMapping {
         file: "flow_scheme_items.csv",
         table: "sat_flow_scheme_item",
-        columns: &["scheme", "flow", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
+        columns: &[
+            "scheme",
+            "flow",
+            "taux_conversion",
+            "flux_ecart",
+            "flux_de_report",
+            "flux_a_nouveau",
+        ],
         casts: &[],
         use_explicit_schema: false,
     },
