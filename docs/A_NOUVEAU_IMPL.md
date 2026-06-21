@@ -44,11 +44,11 @@
   - [x] préfixe `4` → injection post-step au consolidé (tel quel) via `inject_by_prefix` (seul préfixe routé par `staging.rs`)
   - [x] `ConvertStep` ne déclare plus de staging post-étape ; doc `staging.rs` MAJ ; test `staging_route_les_prefixes_vers_le_bon_niveau` réécrit (2/3/4) — vert
   - ⚠️ priorité ouverture (F00 staffé en préfixe ignoré) : non spécifiquement codée ; le carry à-nouveau écrase le F00 de toute façon. À couvrir en Phase 5 si besoin.
-- [x] **Phase 5 — Validation** ✅ commit (runtime à confirmer, cf. note)
+- [x] **Phase 5 — Validation** ✅ commit (runtime confirmé)
   - [x] `validate::check_a_nouveau_coherence(con, scenario, a_nouveau, period)` : détecte (1) divergence `entree` saisi vs présence au snapshot, (2) entités consolidées en N-1 hors périmètre courant (orphelines). Non bloquant.
   - [x] `server.rs` : appel après le run → **avertissement** (eprintln), conforme A5 (statut `ouvert` toléré)
   - [x] 2 tests d'intégration (`tests/a_nouveau.rs`) : divergences+orphelins, et cas aligné→vide
-  - ⚠️ **vérif runtime en attente** : `conso-server.exe` verrouillé (serveur lancé) → `cargo test` (qui reconstruit tous les bins) bloqué. `cargo check` complet ✓ + lib 36 verts. À relancer la suite complète serveur arrêté.
+  - [x] **suite complète verte** (serveur arrêté) : lib 36 + a_nouveau 4 + pipeline 14/2 ignorés + rules 10.
 - [ ] **Phase 6 — API / UI** : champs `a_nouveau_scenario`, `flux_a_nouveau` ; stats 3 niveaux
 - [ ] **Phase 7 — Tests & règles** : règles corporate (UTILISATEUR), tests Rust, golden, recette Python (écarts préfixe 2)
 
@@ -70,8 +70,8 @@
 - **NEXT → Phase 4** (staging cible : préfixe 2→converti fonctionnel, 3/4→consolidé avant/après %) ou **Phase 6** (UI/API : champs `a_nouveau_scenario`/`flux_a_nouveau`, retrait `reclassified` du frontend). Le cœur moteur de l'à-nouveau (Phases 0–3) est fonctionnel et testé. Restent surtout : staging fin (Phase 4), validation cohérence (Phase 5), UI (Phase 6), règles utilisateur + recette (Phase 7).
 - **Note** : `materialize_closures` reconstruit encore les clôtures de TOUS les scénarios à chaque run (idempotent, valeurs identiques pour le snapshot figé → sans danger ; optimisation possible : scoper par scénario).
 - **Phase 4 faite (2026-06-21)** : staging cible sur 3 niveaux. Préfixes 2 et 3 consommés DANS step_c/step_d (UNION fact_entry + stg) → ils subissent conversion / × pct ; préfixe 4 injecté tel quel après step_d. Test staging réécrit, vert (9 binaires OK, 0 FAILED).
-- **Phase 5 faite (2026-06-21)** : `check_a_nouveau_coherence` (divergence entree/snapshot + orphelins), avertissement non bloquant côté serveur, 2 tests d'intégration. Compilation vérifiée (`cargo check` complet) + lib 36 verts ; **exécution des tests d'intégration en attente** (serveur verrouillé → relancer `cargo test` serveur arrêté).
-- **NEXT** : confirmer la suite complète (serveur arrêté), puis **Phase 6** (UI/API, domaine équipier) et **Phase 7** (règles + recette).
+- **Phase 5 faite (2026-06-21)** : `check_a_nouveau_coherence` (divergence entree/snapshot + orphelins), avertissement non bloquant côté serveur, 2 tests d'intégration. **Suite complète verte** (serveur arrêté) : lib 36 + a_nouveau 4 + pipeline 14/2 ignorés + rules 10.
+- **Moteur de l'à-nouveau terminé (Phases 0→5).** **NEXT** : **Phase 6** (UI/API — exposer `a_nouveau_scenario`/`flux_a_nouveau`, retirer `reclassified` du frontend ; domaine équipier) et **Phase 7** (règles corporate F00→F01/F98/variation % + recette golden serveur).
 
 ---
 
