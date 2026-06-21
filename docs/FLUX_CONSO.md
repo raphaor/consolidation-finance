@@ -140,16 +140,16 @@ Le staging et l'**éditeur de règles** ([Q24](./QUESTIONS_OUVERTES.md)) sont co
 
 ---
 
-## 1. Modèle des flux (master data `Flow`)
+## 1. Modèle des flux (dimension `Flow`)
 
-Table créable/éditable via CRUD. Attributs de chaque flux :
+`Flow` (`dim_flow`) est une **dimension nue** (`code`, `libellé`), créable/éditable via CRUD. **Tout le comportement d'un flux** est déporté dans le **schéma de flux** (§2 bis), résolu par compte. Attributs portés par le schéma (`sat_flow_scheme_item`) :
 
-| Attribut | Rôle |
+| Attribut (porté par le schéma) | Rôle |
 |---|---|
-| `code`, `libellé` | Identification (F00, F20, F99…) |
-| `taux_conversion` | Type de taux à appliquer pour la conversion (clôture N, clôture N-1, moyen…). Référence aux taux de change. |
-| `flux_de_report` | Flux dans lequel celui-ci s'agrège lors de la reconstruction de la clôture (défaut : **F99**). **Tous les flux reportent à F99**, y compris les écarts. |
-| `flux_ecart_conversion` | Flux d'écart qui recevra la différence de conversion de ce flux. **Null pour les écarts eux-mêmes** (terminaux : leur `taux_conversion` = clôture → écart propre = 0). |
+| `taux_conversion` | Type de taux à appliquer pour la conversion (clôture N, clôture N-1, moyen…). |
+| `flux_ecart` | Flux d'écart qui recevra la différence de conversion de ce flux. **Null pour les écarts eux-mêmes** (terminaux : leur `taux_conversion` = clôture → écart propre = 0). |
+| `flux_de_report` | Flux de clôture où ce flux s'agrège (auto-référence **F99 → F99** = clôture reconstruite). |
+| `flux_a_nouveau` | Flux d'ouverture qui reçoit ce solde à l'exercice suivant (F99 → F00). Null = pas d'à-nouveau (ex. résultat). |
 
 ## 2. Mécanique de conversion
 
@@ -167,12 +167,26 @@ Tous les flux sont saisis en **devise fonctionnelle** et convertis via leur `tau
 | F20 (variation) | **moyen** | `A × (r_clôture − r_moyen)` → posté sur **F81** |
 | F99 (clôture) | clôture **N** | `0` |
 
+## 2 bis. Schémas de flux (comportement des flux par compte)
+
+Le comportement d'un flux dépend du compte : un compte de **bilan** applique le taux du flux **avec** écart F80/F81 et reporte sa clôture en ouverture N+1 ; un compte de **résultat** est au **taux moyen sans écart** et **ne reporte pas** (le résultat ne s'ouvre pas en N+1). Le comportement est donc fonction de **`(schéma, flux)`**, et `dim_flow` n'est qu'une dimension nue (cf. [Q32](./QUESTIONS_OUVERTES.md), décision 2026-06-21).
+
+- `dim_flow_scheme (code, libellé)` : catalogue des schémas (`BILAN`, `RESULTAT`…).
+- `sat_flow_scheme_item (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau)` : articulation **complète** des flux d'un schéma (chaque flux porté par les comptes du schéma y a une ligne — **pas** une table éparse). Source de vérité du comportement.
+- Le compte porte `dim_account.flow_scheme` (NULL = défaut **dérivé de la classe** : `resultat` → `RESULTAT`, sinon `BILAN`).
+
+La résolution `compte → schéma → comportement` passe par la **vue `v_flow_behavior(account, flow, …)`**, consommée par `pipeline::convert` (taux + écart), `pipeline::materialize_closures` (report de clôture) et `pipeline::a_nouveau` (report d'ouverture). `RESULTAT` met F00/F20/F99 au taux moyen, `flux_ecart = NULL`, `flux_a_nouveau = NULL`.
+
+> **Écart de conversion du résultat** : sous `RESULTAT`, le P&L est intégralement au taux moyen, donc **sans F80/F81** ; l'écart de change du résultat naît sur le compte de **capitaux propres « résultat » au bilan** (config/recette), pas sur le P&L (moteur).
+
+> **Invariant de complétude** : un schéma doit définir **tous** les flux que portent ses comptes ; sinon `v_flow_behavior` les filtre et leurs clôtures/conversions disparaissent silencieusement.
+
 ## 3. Identité de reconstruction (par les flux)
 
 **Symétrique** : tient à l'identique en devise fonctionnelle et en devise de présentation.
 
 - Pour chaque clôture C — flux **auto-référentiel** : `flux_de_report(C) = C` :
-  `C = Σ(flux X | flux_de_report(X) = C et X ≠ C)`. Aujourd'hui seule F99 est auto-référentielle (`flux_de_report(F99) = F99`) ; la logique est générique et pilotée par `dim_flow.flux_de_report` (un autre flux peut être déclaré clôture en s'auto-référençant).
+  `C = Σ(flux X | flux_de_report(X) = C et X ≠ C)`. Aujourd'hui seule F99 est auto-référentielle (`flux_de_report(F99) = F99`) ; la logique est générique et pilotée par le `flux_de_report` du **schéma de flux du compte** (résolu via `v_flow_behavior`) — un autre flux peut être déclaré clôture en s'auto-référençant.
 - En devise fonctionnelle : les écarts (F80/F81) y sont à 0 → `F99 = F00 + Σ variations`.
 - En devise de présentation : les écarts y valent l'écart calculé → `F99_conv = F00_conv + Σ variations_conv + Σ écarts`.
 

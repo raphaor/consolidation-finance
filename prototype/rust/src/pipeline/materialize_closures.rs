@@ -101,11 +101,16 @@ pub fn materialize_closures(con: &Connection, level: &str) -> duckdb::Result<usi
             "\
 DELETE FROM fact_entry fe\n\
 WHERE fe.level = ?\n\
-  AND fe.flow IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)\n\
+  -- fe.flow est une clôture (auto-référentielle) DANS LE SCHÉMA DE SON COMPTE\n\
+  AND EXISTS (\n\
+      SELECT 1 FROM v_flow_behavior cb\n\
+      WHERE cb.account = fe.account AND cb.flow = fe.flow\n\
+        AND cb.flux_de_report = fe.flow\n\
+  )\n\
   AND EXISTS (\n\
       SELECT 1\n\
       FROM fact_entry e\n\
-      JOIN dim_flow fl ON fl.code = e.flow\n\
+      JOIN v_flow_behavior fl ON fl.account = e.account AND fl.flow = e.flow\n\
       WHERE e.level = ?\n\
         AND fl.flux_de_report = fe.flow\n\
         AND e.flow <> fl.flux_de_report\n\
@@ -127,12 +132,17 @@ SELECT\n\
     ?                AS level,\n\
     SUM(e.amount)    AS amount\n\
 FROM fact_entry e\n\
-JOIN dim_flow fl ON fl.code = e.flow\n\
+JOIN v_flow_behavior fl ON fl.account = e.account AND fl.flow = e.flow\n\
 WHERE e.level = ?\n\
   AND fl.flux_de_report IS NOT NULL\n\
   AND e.flow <> fl.flux_de_report\n\
-  -- On ne reconstruit que les flux de clôture (auto-référentiels) :\n\
-  AND fl.flux_de_report IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)\n\
+  -- On ne reconstruit que vers un flux de clôture (auto-référentiel) DANS LE\n\
+  -- SCHÉMA DU COMPTE de la composante :\n\
+  AND EXISTS (\n\
+      SELECT 1 FROM v_flow_behavior c\n\
+      WHERE c.account = e.account AND c.flow = fl.flux_de_report\n\
+        AND c.flux_de_report = c.flow\n\
+  )\n\
 GROUP BY\n\
     {e_grain_list}, fl.flux_de_report;"
         ),
@@ -142,7 +152,11 @@ GROUP BY\n\
     let n: i64 = con.query_row(
         "SELECT COUNT(*) FROM fact_entry fe \
          WHERE fe.level = ? \
-           AND fe.flow IN (SELECT code FROM dim_flow d WHERE d.code = d.flux_de_report)",
+           AND EXISTS ( \
+               SELECT 1 FROM v_flow_behavior cb \
+               WHERE cb.account = fe.account AND cb.flow = fe.flow \
+                 AND cb.flux_de_report = fe.flow \
+           )",
         [level],
         |row| row.get(0),
     )?;

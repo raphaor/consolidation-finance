@@ -64,10 +64,11 @@ pub fn step_a(con: &Connection, scenario: &str) -> duckdb::Result<usize> {
              'corporate' AS level,\n\
              SUM(s.amount) AS amount\n\
          FROM stg_entry s\n\
+         JOIN dim_scenario sc ON sc.code = s.scenario\n\
          JOIN sat_perimeter p\n\
-           ON p.entity   = s.entity\n\
-          AND p.scenario = s.scenario\n\
-          AND p.period   = s.entry_period\n\
+           ON p.perimeter_set = sc.perimeter_set\n\
+          AND p.entity        = s.entity\n\
+          AND p.period        = s.entry_period\n\
          WHERE substr(s.nature, 1, 1) IN ('0', '1')\n\
            AND s.scenario = ?\n\
          GROUP BY {s_cols};"

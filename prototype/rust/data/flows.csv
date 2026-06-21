@@ -1,8 +1,8 @@
-code,libelle,taux_conversion,flux_ecart,flux_de_report,flux_a_nouveau
-F00,Ouverture,close_n1,F80,F99,
-F01,Entrée périmètre,close_n1,F80,F99,
-F20,Variation,avg,F81,F99,
-F80,Écart conv. ouverture,terminal,,F99,
-F81,Écart conv. variation,terminal,,F99,
-F98,Sortie périmètre,terminal,,F99,
-F99,Clôture,close_n,,F99,F00
+code,libelle
+F00,Ouverture
+F01,Entrée périmètre
+F20,Variation
+F80,Écart conv. ouverture
+F81,Écart conv. variation
+F98,Sortie périmètre
+F99,Clôture

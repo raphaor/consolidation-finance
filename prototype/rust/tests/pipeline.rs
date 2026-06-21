@@ -333,6 +333,60 @@ fn ecarts_f80_f81_localises_sur_entites_non_eur() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  4 ter. Schémas de flux (Q32) : un compte de résultat est converti au taux
+//         moyen, SANS écart de conversion ; un compte de bilan garde son F81.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn schema_resultat_convertit_au_taux_moyen_sans_ecart() {
+    let con = setup();
+
+    let sum_flow = |account: &str, entity: &str, flow: &str| -> f64 {
+        con.query_row(
+            "SELECT COALESCE(SUM(amount), 0) FROM fact_entry \
+             WHERE level='converted' AND account=? AND entity=? AND flow=?",
+            [account, entity, flow],
+            |r| r.get::<_, f64>(0),
+        )
+        .unwrap()
+    };
+    let count_flow = |account: &str, entity: &str, flow: &str| -> i64 {
+        con.query_row(
+            "SELECT COUNT(*) FROM fact_entry \
+             WHERE level='converted' AND account=? AND entity=? AND flow=?",
+            [account, entity, flow],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+
+    // Compte 700 (résultat), filiale A (USD) : F20 = 1000 USD. Le schéma RESULTAT
+    // applique le taux moyen (0.95) et NE génère AUCUN écart F81.
+    assert!(
+        (sum_flow("700", "A", "F20") - 950.00).abs() < TOL,
+        "700/A F20 converti = {} (attendu 1000×0.95 = 950, taux moyen)",
+        sum_flow("700", "A", "F20")
+    );
+    assert_eq!(
+        count_flow("700", "A", "F81"),
+        0,
+        "un compte de résultat ne doit générer aucun écart F81"
+    );
+    // F99(700,A) converti = F20 seul au taux moyen (950), pas au taux de clôture (900).
+    assert!(
+        (sum_flow("700", "A", "F99") - 950.00).abs() < TOL,
+        "700/A F99 converti = {} (attendu 950, taux moyen ; régression = 900 au taux clôture)",
+        sum_flow("700", "A", "F99")
+    );
+
+    // Contraste — compte 200 (bilan), filiale A : le F20 conserve son écart F81.
+    assert!(
+        count_flow("200", "A", "F81") >= 1,
+        "un compte de bilan doit conserver son écart F81 (200/A)"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  5. Cohérence de la conversion : le montant converti d'A + son écart
 //     reconstitue le montant × taux_close_n. Vérification indépendante du
 //     validateur (qui, lui, reconstruit F99 par somme — triviale par construction).
@@ -437,16 +491,27 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
 
-    // dim_flow : F99 (clôture auto-réf) ← F20 ; F88 (clôture auto-réf) ← F10.
+    // dim_flow = dimension nue ; le comportement (report de clôture) vit dans un
+    // schéma de flux TEST : F99 (clôture auto-réf) ← F20 ; F88 (clôture auto-réf) ← F10.
     con.execute_batch(
-        "INSERT INTO dim_flow
-            (code, libelle, taux_conversion, flux_ecart, flux_de_report) VALUES
-            ('F20','Variation','avg',NULL,'F99'),
-            ('F99','Clôture','close_n',NULL,'F99'),
-            ('F10','Intermédiaire','avg',NULL,'F88'),
-            ('F88','Clôture intermédiaire','close_n',NULL,'F88');",
+        "INSERT INTO dim_flow (code, libelle) VALUES
+            ('F20','Variation'),('F99','Clôture'),
+            ('F10','Intermédiaire'),('F88','Clôture intermédiaire');
+
+         INSERT INTO dim_flow_scheme VALUES ('TEST','Schéma de test');
+         INSERT INTO sat_flow_scheme_item
+            (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) VALUES
+            ('TEST','F20','avg',NULL,'F99',NULL),
+            ('TEST','F99','close_n',NULL,'F99',NULL),
+            ('TEST','F10','avg',NULL,'F88',NULL),
+            ('TEST','F88','close_n',NULL,'F88',NULL);
+
+         -- Comptes 100 et 200 rattachés au schéma TEST (résolution par v_flow_behavior).
+         INSERT INTO dim_account (code, libelle, classe, sous_classe, flow_scheme) VALUES
+            ('100','Compte 100','bilan',NULL,'TEST'),
+            ('200','Compte 200','bilan',NULL,'TEST');",
     )
-    .expect("seed dim_flow");
+    .expect("seed dim_flow + schéma TEST");
 
     // dim_nature minimale pour le test (2 codes : liasse + ajustement).
     con.execute_batch(

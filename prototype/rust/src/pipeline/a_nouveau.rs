@@ -42,9 +42,13 @@ use duckdb::{params, Connection};
 /// (clôture, ex. F99) reporte son solde sur le flux `target` (ouverture, ex.
 /// F00) à l'exercice suivant. Générique — aucun littéral F00/F99.
 fn pairs(con: &Connection) -> duckdb::Result<Vec<(String, String)>> {
+    // Couples (source, target) déclarés par les schémas de flux. DISTINCT car un
+    // même couple (ex. F99 → F00) peut être défini dans plusieurs schémas ; le
+    // **garde par compte** ci-dessous (carry) restreint l'application aux comptes
+    // dont le schéma définit effectivement le report (ex. bilan oui, résultat non).
     let mut stmt = con.prepare(
-        "SELECT code, flux_a_nouveau FROM dim_flow \
-         WHERE flux_a_nouveau IS NOT NULL ORDER BY code",
+        "SELECT DISTINCT flow, flux_a_nouveau FROM sat_flow_scheme_item \
+         WHERE flux_a_nouveau IS NOT NULL ORDER BY flow",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
@@ -87,7 +91,9 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
              WHERE scenario = ? AND level = 'consolidated' AND flow = ? \
          ) \
          AND entity IN ( \
-             SELECT entity FROM sat_perimeter WHERE scenario = ? AND period = ? \
+             SELECT entity FROM sat_perimeter \
+             WHERE perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = ?) \
+               AND period = ? \
          )"
     );
 
@@ -96,7 +102,11 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
         con.execute(
             &format!(
                 "DELETE FROM fact_entry \
-                 WHERE scenario = ? AND level = '{level}' AND flow = ? AND {eligible}"
+                 WHERE scenario = ? AND level = '{level}' AND flow = ? AND {eligible} \
+                   AND EXISTS ( \
+                       SELECT 1 FROM v_flow_behavior b \
+                       WHERE b.account = fact_entry.account AND b.flow = ? AND b.flux_a_nouveau = ? \
+                   )"
             ),
             params![
                 params.scenario_code,
@@ -105,6 +115,9 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
                 source,
                 params.scenario_code,
                 params.current_period,
+                // garde par compte : le schéma du compte définit source -> target
+                source,
+                target,
             ],
         )?;
 
@@ -130,7 +143,11 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
                  SELECT {sel}, '{level}', snap.amount \
                  FROM fact_entry snap \
                  WHERE snap.scenario = ? AND snap.level = '{level}' AND snap.flow = ? \
-                   AND snap.{eligible}"
+                   AND snap.{eligible} \
+                   AND EXISTS ( \
+                       SELECT 1 FROM v_flow_behavior b \
+                       WHERE b.account = snap.account AND b.flow = ? AND b.flux_a_nouveau = ? \
+                   )"
             ),
             params![
                 // overrides du SELECT (ordre des colonnes propagées)
@@ -146,6 +163,9 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
                 source,
                 params.scenario_code,
                 params.current_period,
+                // garde par compte : le schéma du compte définit source -> target
+                source,
+                target,
             ],
         )?;
     }

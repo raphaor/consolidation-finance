@@ -823,7 +823,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_ent\n  \
                 ON p_ent.entity = e.entity\n \
-                AND p_ent.scenario = e.scenario\n \
+                AND p_ent.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = e.scenario)\n \
                 AND p_ent.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "entity") {
@@ -837,7 +837,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_part\n  \
                 ON p_part.entity = e.partner\n \
-                AND p_part.scenario = e.scenario\n \
+                AND p_part.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = e.scenario)\n \
                 AND p_part.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "partner") {
@@ -851,7 +851,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_share\n  \
                 ON p_share.entity = e.share\n \
-                AND p_share.scenario = e.scenario\n \
+                AND p_share.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = e.scenario)\n \
                 AND p_share.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "share") {

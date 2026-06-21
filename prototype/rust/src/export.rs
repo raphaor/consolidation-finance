@@ -39,6 +39,7 @@ const TABLES: &[&str] = &[
     "dim_scenario_category",
     "dim_variant",
     "dim_rate_set",
+    "dim_perimeter_set",
     "dim_rule",
     "dim_ruleset",
     "dim_ruleset_item",
@@ -48,11 +49,13 @@ const TABLES: &[&str] = &[
     "dim_sous_classe",
     "dim_account",
     "dim_flow",
+    "dim_flow_scheme",
     "dim_currency",
     "dim_nature",
     "dim_method",
     "sat_perimeter",
     "sat_exchange_rate",
+    "sat_flow_scheme_item",
     "stg_entry",
 ];
 

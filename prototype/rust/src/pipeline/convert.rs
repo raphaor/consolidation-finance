@@ -110,8 +110,8 @@ WITH params AS (\n\
 conv AS (\n\
     SELECT\n\
         {f_cols}, f.amount,\n\
-        fl.taux_conversion,\n\
-        fl.flux_ecart,\n\
+        vfb.taux_conversion,\n\
+        vfb.flux_ecart,\n\
         -- Taux applicable au flux (cross-rate fonctionnelle -> présentation).\n\
         -- Court-circuit à 1.0 si la devise est déjà la présentation ; sinon\n\
         -- taux(fonctionnelle -> pivot) / taux(présentation -> pivot).\n\
@@ -120,17 +120,17 @@ conv AS (\n\
             ELSE\n\
                 (CASE\n\
                     WHEN f.currency = p.pivot THEN 1.0\n\
-                    WHEN fl.taux_conversion = 'close_n1' THEN r_n1.taux_close\n\
-                    WHEN fl.taux_conversion = 'avg'      THEN r_n.taux_moyen\n\
-                    WHEN fl.taux_conversion IN ('close_n', 'terminal')\n\
+                    WHEN vfb.taux_conversion = 'close_n1' THEN r_n1.taux_close\n\
+                    WHEN vfb.taux_conversion = 'avg'      THEN r_n.taux_moyen\n\
+                    WHEN vfb.taux_conversion IN ('close_n', 'terminal')\n\
                         THEN r_n.taux_close\n\
                 END)\n\
                 /\n\
                 (CASE\n\
                     WHEN p.presentation = p.pivot THEN 1.0\n\
-                    WHEN fl.taux_conversion = 'close_n1' THEN r_pres_n1.taux_close\n\
-                    WHEN fl.taux_conversion = 'avg'      THEN r_pres_n.taux_moyen\n\
-                    WHEN fl.taux_conversion IN ('close_n', 'terminal')\n\
+                    WHEN vfb.taux_conversion = 'close_n1' THEN r_pres_n1.taux_close\n\
+                    WHEN vfb.taux_conversion = 'avg'      THEN r_pres_n.taux_moyen\n\
+                    WHEN vfb.taux_conversion IN ('close_n', 'terminal')\n\
                         THEN r_pres_n.taux_close\n\
                 END)\n\
         END AS taux_flux,\n\
@@ -152,7 +152,9 @@ conv AS (\n\
         SELECT {insert_col_list}, amount FROM stg_entry\n\
         WHERE substr(nature, 1, 1) = '2' AND scenario = ?\n\
     ) f\n\
-    JOIN dim_flow fl ON fl.code = f.flow\n\
+    -- Comportement du flux résolu PAR COMPTE (taux de conversion + flux d'écart)\n\
+    -- via le schéma de flux du compte. Cf. v_flow_behavior (Q32).\n\
+    JOIN v_flow_behavior vfb ON vfb.account = f.account AND vfb.flow = f.flow\n\
     CROSS JOIN params p\n\
     -- Taux de la devise fonctionnelle vers le pivot (N et N-1)\n\
     LEFT JOIN sat_exchange_rate r_n\n\

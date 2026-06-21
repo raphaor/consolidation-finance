@@ -280,8 +280,8 @@ async fn import_perimeter(
     require_columns(
         &header,
         &[
+            "perimeter_set",
             "entity",
-            "scenario",
             "period",
             "methode",
             "pct_interet",
@@ -296,11 +296,11 @@ async fn import_perimeter(
     let path = escape_csv_path(&tmp.display().to_string());
     let sql = format!(
         "INSERT INTO sat_perimeter \
-         (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie) \
-         SELECT entity, scenario, period, methode, pct_interet, pct_integration, \
+         (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
+         SELECT perimeter_set, entity, period, methode, pct_interet, pct_integration, \
                 CAST(entree AS BOOLEAN), CAST(sortie AS BOOLEAN) \
          FROM read_csv_auto('{path}', header=true) \
-         ON CONFLICT(entity, scenario, period) DO UPDATE SET \
+         ON CONFLICT(perimeter_set, entity, period) DO UPDATE SET \
             methode = excluded.methode, \
             pct_interet = excluded.pct_interet, \
             pct_integration = excluded.pct_integration, \

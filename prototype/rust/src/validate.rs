@@ -53,15 +53,19 @@ pub struct CheckResult {
     pub ok: bool,
 }
 
-/// Carte ordonnée `{ clôture → [constituants] }` lue depuis `dim_flow`.
+/// Carte ordonnée `{ clôture → [constituants] }` lue depuis les schémas de flux.
 ///
-/// - Clôtures : flux auto-référentiels (`code = flux_de_report`).
+/// - Clôtures : flux auto-référentiels (`flow = flux_de_report`).
 /// - Constituants d'une clôture C : flux X tels que `flux_de_report(X) = C` et
 ///   `X ≠ C`. L'ordre est stable (trié par code) pour des rendus reproductibles.
+///
+/// Carte **globale** (union de tous les schémas, `DISTINCT`) : un compte dont le
+/// schéma ne porte pas un constituant donné le verra simplement à 0 dans la
+/// grille — l'identité de reconstruction tient quand même par compte.
 fn load_closure_components(con: &Connection) -> duckdb::Result<Vec<(String, Vec<String>)>> {
     let closures: Vec<String> = {
         let mut stmt = con.prepare(
-            "SELECT code FROM dim_flow WHERE code = flux_de_report ORDER BY code",
+            "SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flow = flux_de_report ORDER BY flow",
         )?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let mut v = Vec::new();
@@ -75,8 +79,8 @@ fn load_closure_components(con: &Connection) -> duckdb::Result<Vec<(String, Vec<
     for c in &closures {
         let comps: Vec<String> = {
             let mut stmt = con.prepare(
-                "SELECT code FROM dim_flow \
-                 WHERE flux_de_report = ? AND code <> ? ORDER BY code",
+                "SELECT DISTINCT flow FROM sat_flow_scheme_item \
+                 WHERE flux_de_report = ? AND flow <> ? ORDER BY flow",
             )?;
             let rows = stmt.query_map([c.clone(), c.clone()], |row| row.get::<_, String>(0))?;
             let mut v = Vec::new();
@@ -250,11 +254,12 @@ pub fn check_a_nouveau_coherence(
                 EXISTS (
                     SELECT 1 FROM fact_entry s
                     WHERE s.scenario = ? AND s.level = 'consolidated'
-                      AND s.flow IN (SELECT code FROM dim_flow WHERE flux_a_nouveau IS NOT NULL)
+                      AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
                       AND s.entity = p.entity
                 ) AS was_consolidated
          FROM sat_perimeter p
-         WHERE p.scenario = ? AND p.period = ?
+         WHERE p.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = ?)
+           AND p.period = ?
          ORDER BY p.entity",
     )?;
     let rows = stmt.query_map([a_nouveau, scenario, period], |r| {
@@ -280,9 +285,11 @@ pub fn check_a_nouveau_coherence(
     let mut stmt2 = con.prepare(
         "SELECT DISTINCT s.entity FROM fact_entry s
          WHERE s.scenario = ? AND s.level = 'consolidated'
-           AND s.flow IN (SELECT code FROM dim_flow WHERE flux_a_nouveau IS NOT NULL)
+           AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
            AND s.entity NOT IN (
-               SELECT entity FROM sat_perimeter WHERE scenario = ? AND period = ?
+               SELECT entity FROM sat_perimeter
+               WHERE perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = ?)
+                 AND period = ?
            )
          ORDER BY s.entity",
     )?;

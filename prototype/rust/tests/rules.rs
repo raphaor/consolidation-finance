@@ -264,7 +264,7 @@ fn coefficient_constant_et_multiplicateur() {
 fn coefficient_pct_integration_lit_le_perimetre() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND scenario = 'REEL'",
+        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND perimeter_set = 'PERIM_REEL'",
         [],
     )
     .expect("set pct_integration B");
@@ -352,7 +352,7 @@ fn selection_in_et_is_not_null() {
 fn scope_filtre_sur_methode_entite() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND scenario = 'REEL'",
+        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND perimeter_set = 'PERIM_REEL'",
         [],
     )
     .expect("set methode B");

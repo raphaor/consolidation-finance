@@ -62,6 +62,18 @@ CREATE TABLE dim_rate_set (
     libelle TEXT
 );";
 
+/// 1d. dim_perimeter_set : jeux de périmètre (versions du périmètre de conso).
+///
+/// Symétrique de `dim_rate_set` : un scénario référence un jeu de périmètre via
+/// `dim_scenario.perimeter_set`, et `sat_perimeter` est clé par
+/// `(perimeter_set, entity, period)`. Permet de **réutiliser** un même périmètre
+/// entre scénarios/variantes (cf. docs/QUESTIONS_OUVERTES.md Q35).
+pub const DDL_DIM_PERIMETER_SET: &str = "\
+CREATE TABLE dim_perimeter_set (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
 /// 1c. dim_variant : variante d'un même cadre (BASE, OPT1, PESSIMIST…).
 ///
 /// Déclinaison du scénario avec des hypothèses différentes, sans changer le
@@ -92,6 +104,7 @@ CREATE TABLE dim_scenario (
     variant               TEXT,   -- FK dim_variant ('BASE')
     ruleset_code          TEXT,   -- FK dim_ruleset (NULL = pas de règles)
     rate_set              TEXT,   -- FK dim_rate_set
+    perimeter_set         TEXT,   -- FK dim_perimeter_set : jeu de périmètre du run (cf. Q35)
     statut                TEXT,   -- 'ouvert' / 'verrouillé'
     a_nouveau_scenario    TEXT    -- FK dim_scenario : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2
 );";
@@ -132,8 +145,64 @@ CREATE TABLE dim_account (
     code               TEXT PRIMARY KEY,
     libelle            TEXT,
     classe             TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
-    sous_classe        TEXT            -- référence dim_sous_classe.code
+    sous_classe        TEXT,           -- référence dim_sous_classe.code
+    flow_scheme        TEXT            -- référence dim_flow_scheme.code ; NULL = défaut dérivé de la classe (cf. pipeline::convert / docs/QUESTIONS_OUVERTES.md Q32)
 );";
+
+/// 4c. dim_flow_scheme : schémas d'articulation des flux (catalogue).
+///
+/// Un schéma de flux décrit **l'articulation complète des flux** pour les comptes
+/// qui le portent : taux de conversion, flux d'écart, flux de report de clôture,
+/// flux d'à-nouveau — par flux (cf. `sat_flow_scheme_item`). Permet d'avoir des
+/// comptes de **résultat** convertis au **taux moyen sans écart** (et sans report
+/// d'à-nouveau) et des comptes de **bilan** au taux du flux **avec écart F80/F81**
+/// (et report F99 → F00), à partir des mêmes codes de flux.
+/// Cf. docs/QUESTIONS_OUVERTES.md Q32.
+pub const DDL_DIM_FLOW_SCHEME: &str = "\
+CREATE TABLE dim_flow_scheme (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
+/// 8i. sat_flow_scheme_item : articulation **complète** des flux d'un schéma.
+///
+/// Pour chaque `(schéma, flux)` : taux de conversion, flux d'écart, flux de
+/// report de clôture, flux d'à-nouveau. **Complet** (pas de table éparse) : un
+/// schéma doit définir **tous** les flux que portent les comptes qui l'utilisent
+/// (sinon leurs clôtures/conversions disparaîtraient). C'est la source de vérité
+/// du comportement des flux ; `dim_flow` n'est plus qu'une dimension nue. La
+/// résolution par compte se fait via la vue [`v_flow_behavior`].
+pub const DDL_SAT_FLOW_SCHEME_ITEM: &str = "\
+CREATE TABLE sat_flow_scheme_item (
+    scheme          TEXT,
+    flow            TEXT,
+    taux_conversion TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n', 'terminal')),
+    flux_ecart      TEXT,           -- flux d'écart associé (NULL = aucun écart / terminal)
+    flux_de_report  TEXT,           -- flux de clôture où ce flux se reporte ; auto-référence (flow = flux_de_report) = clôture reconstruite
+    flux_a_nouveau  TEXT,           -- flux d'ouverture qui reçoit ce solde à l'exercice suivant (F99 → F00) ; NULL sinon
+    PRIMARY KEY (scheme, flow)
+);";
+
+/// 8j. v_flow_behavior : **vue** résolvant le comportement d'un flux **par compte**.
+///
+/// Joint chaque compte à son schéma de flux (`dim_account.flow_scheme`, ou à
+/// défaut dérivé de la classe : `resultat` → `RESULTAT`, sinon `BILAN`) et expose
+/// `(account, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau)`.
+/// Source unique consommée par `pipeline::convert`, `materialize_closures` et
+/// `pipeline::a_nouveau` (à la place de l'ex-`dim_flow.*`). Cf. Q32.
+pub const DDL_V_FLOW_BEHAVIOR: &str = "\
+CREATE VIEW v_flow_behavior AS
+SELECT
+    a.code           AS account,
+    si.flow          AS flow,
+    si.taux_conversion,
+    si.flux_ecart,
+    si.flux_de_report,
+    si.flux_a_nouveau
+FROM dim_account a
+JOIN sat_flow_scheme_item si
+  ON si.scheme = COALESCE(a.flow_scheme,
+                          CASE WHEN a.classe = 'resultat' THEN 'RESULTAT' ELSE 'BILAN' END);";
 
 /// 4b. dim_sous_classe : sous-classes de comptes (actif / passif / charges / produits).
 ///
@@ -146,29 +215,16 @@ CREATE TABLE dim_sous_classe (
     classe  TEXT CHECK (classe IN ('bilan', 'resultat', 'flux'))
 );";
 
-/// 5. dim_flow : catalogue des flux de consolidation (cf. docs/FLUX_CONSO.md §6).
+/// 5. dim_flow : catalogue des flux (cf. docs/FLUX_CONSO.md §6).
 ///
-/// Modèle de flux :
-///   F00 = Ouverture              (taux close_n1, écart → F80, reporte à F99)
-///   F01 = Entrée périmètre       (taux close_n1, écart → F80, reporte à F99)
-///   F20 = Variation              (taux avg,      écart → F81, reporte à F99)
-///   F80 = Écart conv. ouverture  (terminal,      reporte à F99)
-///   F81 = Écart conv. variation  (terminal,      reporte à F99)
-///   F98 = Sortie périmètre       (terminal,      reporte à F99)
-///   F99 = Clôture                (close_n, auto-référentiel → clôture reconstruite)
-///
-/// Reconstruction (cf. `pipeline::materialize_closures`) : pour chaque clôture C
-/// (flux auto-référentiel : `flux_de_report(C) = C`), `C = Σ(X | flux_de_report(X)
-/// = C et X ≠ C)`. Aujourd'hui seule F99 est une clôture ; la logique est
-/// générique et pilotée par `dim_flow.flux_de_report`.
+/// **Dimension nue** (`code`, `libellé`) : tout le comportement d'un flux
+/// (taux de conversion, flux d'écart, flux de report de clôture, flux
+/// d'à-nouveau) est **déporté dans le schéma de flux** (`sat_flow_scheme_item`),
+/// résolu par compte via [`v_flow_behavior`] (cf. Q32, décision 2026-06-21).
 pub const DDL_DIM_FLOW: &str = "\
 CREATE TABLE dim_flow (
-    code             TEXT PRIMARY KEY,
-    libelle          TEXT,
-    taux_conversion  TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n', 'terminal')),
-    flux_ecart       TEXT,           -- flux d'écart de conversion associé (NULL pour les terminaux)
-    flux_de_report   TEXT DEFAULT 'F99',  -- flux dans lequel ce flux se reporte ; auto-référence = clôture reconstruite
-    flux_a_nouveau   TEXT             -- flux d'ouverture qui reçoit ce solde à l'exercice suivant (F99 → F00) ; NULL sinon. Cf. docs/A_NOUVEAU.md §2.1
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
 );";
 
 /// 6. dim_currency : devise référentielle (code ISO, décimales).
@@ -216,15 +272,15 @@ CREATE TABLE dim_method (
 /// (entrée / sortie) pour l'exercice courant.
 pub const DDL_SAT_PERIMETER: &str = "\
 CREATE TABLE sat_perimeter (
+    perimeter_set   TEXT,          -- FK dim_perimeter_set : version du périmètre (cf. Q35)
     entity          TEXT,
-    scenario        TEXT,
     period          TEXT,          -- correspond au Entry_period (exercice clôturé)
-    methode         TEXT CHECK (methode IN ('globale', 'proportionnelle', 'équivalence')),
+    methode         TEXT,          -- FK dim_method.code (intégrité via references.rs, pas de CHECK : les méthodes sont pilotables)
     pct_interet     DECIMAL(10,4),
     pct_integration DECIMAL(10,4), -- % de contrôle (1.0 pour la globale)
     entree          BOOLEAN DEFAULT FALSE,
     sortie          BOOLEAN DEFAULT FALSE,
-    PRIMARY KEY (entity, scenario, period)
+    PRIMARY KEY (perimeter_set, entity, period)
 );";
 
 /// 8. sat_exchange_rate : taux de change vers la devise **pivot**.
@@ -405,6 +461,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_APP_CONFIG,
     DDL_DIM_SCENARIO_CATEGORY,
     DDL_DIM_RATE_SET,
+    DDL_DIM_PERIMETER_SET,
     DDL_DIM_VARIANT,
     DDL_DIM_SCENARIO,
     DDL_DIM_ENTITY,
@@ -412,11 +469,14 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_ACCOUNT,
     DDL_DIM_SOUS_CLASSE,
     DDL_DIM_FLOW,
+    DDL_DIM_FLOW_SCHEME,
     DDL_DIM_CURRENCY,
     DDL_DIM_NATURE,
     DDL_DIM_METHOD,
     DDL_SAT_PERIMETER,
     DDL_SAT_EXCHANGE_RATE,
+    DDL_SAT_FLOW_SCHEME_ITEM,
+    DDL_V_FLOW_BEHAVIOR,
     DDL_DIM_RULE,
     DDL_DIM_RULESET,
     DDL_DIM_RULESET_ITEM,
@@ -434,16 +494,19 @@ pub const ALL_DDL: &[&str] = &[
 /// custom survive à un reset (et `create_schema` ré-applique ensuite les
 /// `ALTER TABLE ADD COLUMN` correspondants sur `fact_entry` / `stg_entry`).
 pub const ALL_DROP: &[&str] = &[
+    "DROP VIEW IF EXISTS v_flow_behavior;",
     "DROP TABLE IF EXISTS fact_entry;",
     "DROP TABLE IF EXISTS stg_entry;",
     "DROP TABLE IF EXISTS dim_ruleset_item;",
     "DROP TABLE IF EXISTS dim_ruleset;",
     "DROP TABLE IF EXISTS dim_rule;",
+    "DROP TABLE IF EXISTS sat_flow_scheme_item;",
     "DROP TABLE IF EXISTS sat_exchange_rate;",
     "DROP TABLE IF EXISTS sat_perimeter;",
     "DROP TABLE IF EXISTS dim_method;",
     "DROP TABLE IF EXISTS dim_nature;",
     "DROP TABLE IF EXISTS dim_currency;",
+    "DROP TABLE IF EXISTS dim_flow_scheme;",
     "DROP TABLE IF EXISTS dim_flow;",
     "DROP TABLE IF EXISTS dim_sous_classe;",
     "DROP TABLE IF EXISTS dim_account;",
@@ -451,6 +514,7 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS dim_entity;",
     "DROP TABLE IF EXISTS dim_scenario;",
     "DROP TABLE IF EXISTS dim_variant;",
+    "DROP TABLE IF EXISTS dim_perimeter_set;",
     "DROP TABLE IF EXISTS dim_rate_set;",
     "DROP TABLE IF EXISTS dim_scenario_category;",
     "DROP TABLE IF EXISTS app_config;",

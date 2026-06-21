@@ -148,13 +148,15 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
 
         INSERT INTO dim_rate_set VALUES ('RATES', 'Taux réels');
 
-        -- dim_scenario v2 : catégorie + période + devise + variante + ruleset + rate_set.
+        INSERT INTO dim_perimeter_set VALUES ('PERIM_REEL', 'Périmètre réel 2024');
+
+        -- dim_scenario v2 : catégorie + période + devise + variante + ruleset + rate_set + perimeter_set.
         INSERT INTO dim_scenario
             (code, libelle, category, entry_period, presentation_currency,
-             variant, ruleset_code, rate_set, statut) VALUES
-            ('REEL','Réel','REEL','2024','EUR','BASE',NULL,'RATES','ouvert'),
-            ('BUDGET','Budget','BUDGET','2024','EUR','BASE',NULL,'RATES','ouvert'),
-            ('PREV','Prévision','PREV','2024','EUR','BASE',NULL,'RATES','ouvert');
+             variant, ruleset_code, rate_set, perimeter_set, statut) VALUES
+            ('REEL','Réel','REEL','2024','EUR','BASE',NULL,'RATES','PERIM_REEL','ouvert'),
+            ('BUDGET','Budget','BUDGET','2024','EUR','BASE',NULL,'RATES','PERIM_REEL','ouvert'),
+            ('PREV','Prévision','PREV','2024','EUR','BASE',NULL,'RATES','PERIM_REEL','ouvert');
 
         INSERT INTO dim_period VALUES
             ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
@@ -190,15 +192,36 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             NULL
         FROM range(0, {N_ACCOUNTS}) t(i);
 
-        INSERT INTO dim_flow
-            (code, libelle, taux_conversion, flux_ecart, flux_de_report) VALUES
-            ('F00','Ouverture','close_n1','F80','F99'),
-            ('F01','Entrée périmètre','close_n1','F80','F99'),
-            ('F20','Variation','avg','F81','F99'),
-            ('F80','Écart conv. ouverture','terminal',NULL,'F99'),
-            ('F81','Écart conv. variation','terminal',NULL,'F99'),
-            ('F98','Sortie périmètre','terminal',NULL,'F99'),
-            ('F99','Clôture','close_n',NULL,'F99');
+        INSERT INTO dim_flow (code, libelle) VALUES
+            ('F00','Ouverture'),
+            ('F01','Entrée périmètre'),
+            ('F20','Variation'),
+            ('F80','Écart conv. ouverture'),
+            ('F81','Écart conv. variation'),
+            ('F98','Sortie périmètre'),
+            ('F99','Clôture');
+
+        INSERT INTO dim_flow_scheme VALUES
+            ('BILAN','Schéma bilan'),
+            ('RESULTAT','Schéma résultat');
+
+        -- Articulation complète par schéma (cf. Q32 / v_flow_behavior).
+        INSERT INTO sat_flow_scheme_item
+            (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) VALUES
+            ('BILAN','F00','close_n1','F80','F99',NULL),
+            ('BILAN','F01','close_n1','F80','F99',NULL),
+            ('BILAN','F20','avg','F81','F99',NULL),
+            ('BILAN','F80','terminal',NULL,'F99',NULL),
+            ('BILAN','F81','terminal',NULL,'F99',NULL),
+            ('BILAN','F98','terminal',NULL,'F99',NULL),
+            ('BILAN','F99','close_n',NULL,'F99',NULL),
+            ('RESULTAT','F00','avg',NULL,'F99',NULL),
+            ('RESULTAT','F01','avg',NULL,'F99',NULL),
+            ('RESULTAT','F20','avg',NULL,'F99',NULL),
+            ('RESULTAT','F80','terminal',NULL,'F99',NULL),
+            ('RESULTAT','F81','terminal',NULL,'F99',NULL),
+            ('RESULTAT','F98','avg',NULL,'F99',NULL),
+            ('RESULTAT','F99','avg',NULL,'F99',NULL);
 
         INSERT INTO dim_currency VALUES
             ('EUR','Euro',2),
@@ -222,10 +245,9 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
         -- Périmètre (REEL / 2024) : globales par défaut, quelques proportionnelles,
         -- ~10 % entrantes et ~10 % sortantes (pour exercer F01 / F98).
         INSERT INTO sat_perimeter
-            (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie)
+            (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
         SELECT
-            e.code,
-            'REEL', '2024',
+            'PERIM_REEL', e.code, '2024',
             CASE WHEN e.rn % 7 = 0 THEN 'proportionnelle' ELSE 'globale' END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,

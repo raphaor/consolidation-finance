@@ -35,15 +35,18 @@ const VARIANTS: &[(&str, &str)] = &[("BASE", "Base")];
 /// Jeux de taux : (code, libelle).
 const RATE_SETS: &[(&str, &str)] = &[("RATES", "Taux réels")];
 
+/// Jeux de périmètre : (code, libelle). Symétrique de `RATE_SETS` (Q35).
+const PERIMETER_SETS: &[(&str, &str)] = &[("PERIM_REEL", "Périmètre réel 2024")];
+
 /// Scénarios de test : (code, libelle, category, entry_period,
-/// presentation_currency, variant, ruleset_code, rate_set, statut).
+/// presentation_currency, variant, ruleset_code, rate_set, perimeter_set, statut).
 ///
 /// Le scénario `REEL` agrège toutes les références nécessaires à un run. Avec
 /// `pivot = EUR` et `presentation_currency = EUR`, la conversion se comporte
 /// comme avant (cross-rate = taux direct). `ruleset_code = NULL` : pas de
 /// règles appliquées sur le scénario de base.
-const SCENARIOS: &[(&str, &str, &str, &str, &str, &str, Option<&str>, &str, &str)] = &[(
-    "REEL", "Réel 2024", "REEL", "2024", "EUR", "BASE", None, "RATES", "ouvert",
+const SCENARIOS: &[(&str, &str, &str, &str, &str, &str, Option<&str>, &str, &str, &str)] = &[(
+    "REEL", "Réel 2024", "REEL", "2024", "EUR", "BASE", None, "RATES", "PERIM_REEL", "ouvert",
 )];
 
 /// Entités du groupe : (code, libelle, devise_fonctionnelle, entite_parent, statut).
@@ -90,21 +93,50 @@ const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
     ("471L", "Liaison élimination intragroupe",                  "bilan", "passif"),
 ];
 
-/// Catalogue des flux — cf. docs/FLUX_CONSO.md §6.
-/// (code, libelle, taux_conversion, flux_ecart, flux_de_report).
+/// Catalogue des flux — **dimension nue** (code, libelle). Tout le comportement
+/// (taux, écart, report de clôture, à-nouveau) vit dans les schémas de flux
+/// ci-dessous. Cf. docs/FLUX_CONSO.md §6.
+const FLOWS: &[(&str, &str)] = &[
+    ("F00", "Ouverture"),
+    ("F01", "Entrée périmètre"),
+    ("F20", "Variation"),
+    ("F80", "Écart conv. ouverture"),
+    ("F81", "Écart conv. variation"),
+    ("F98", "Sortie périmètre"),
+    ("F99", "Clôture"),
+];
+
+/// Schémas de flux : (code, libelle). Cf. docs/QUESTIONS_OUVERTES.md Q32.
+const FLOW_SCHEMES: &[(&str, &str)] = &[
+    ("BILAN",    "Schéma bilan (taux du flux, écarts F80/F81, report F99→F00)"),
+    ("RESULTAT", "Schéma résultat (taux moyen, sans écart, sans à-nouveau)"),
+];
+
+/// Articulation **complète** des flux par schéma :
+/// (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau).
 ///
-/// `flux_de_report` indique dans quel flux de clôture chaque flux se reporte.
-/// Un flux auto-référentiel (`flux_de_report = code`, ici F99) est une clôture
-/// reconstruite par le pipeline (cf. `pipeline::materialize_closures` et
-/// `docs/FLUX_CONSO.md §3`). Tous les autres flux reportent à F99.
-const FLOWS: &[(&str, &str, &str, Option<&str>, &str)] = &[
-    ("F00", "Ouverture",               "close_n1", Some("F80"), "F99"),
-    ("F01", "Entrée périmètre",        "close_n1", Some("F80"), "F99"),
-    ("F20", "Variation",               "avg",      Some("F81"), "F99"),
-    ("F80", "Écart conv. ouverture",   "terminal", None,        "F99"),
-    ("F81", "Écart conv. variation",   "terminal", None,        "F99"),
-    ("F98", "Sortie périmètre",        "terminal", None,        "F99"),
-    ("F99", "Clôture",                 "close_n",  None,        "F99"),
+/// `flux_de_report` : flux de clôture où ce flux se reporte (auto-référence
+/// F99 → F99 = clôture reconstruite). `flux_a_nouveau` est NULL par défaut
+/// (à-nouveau désactivé ; activé sur le F99 du schéma voulu). `BILAN` reproduit
+/// l'ex-`dim_flow` ; `RESULTAT` met tout au taux moyen sans écart, et **n'a pas
+/// d'à-nouveau** (le résultat ne reporte pas son solde en ouverture N+1).
+const FLOW_SCHEME_ITEMS: &[(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>)] = &[
+    // BILAN — articulation par défaut (ex-dim_flow).
+    ("BILAN", "F00", "close_n1", Some("F80"), Some("F99"), None),
+    ("BILAN", "F01", "close_n1", Some("F80"), Some("F99"), None),
+    ("BILAN", "F20", "avg",      Some("F81"), Some("F99"), None),
+    ("BILAN", "F80", "terminal", None,        Some("F99"), None),
+    ("BILAN", "F81", "terminal", None,        Some("F99"), None),
+    ("BILAN", "F98", "terminal", None,        Some("F99"), None),
+    ("BILAN", "F99", "close_n",  None,        Some("F99"), None),
+    // RESULTAT — taux moyen, sans écart, sans à-nouveau.
+    ("RESULTAT", "F00", "avg",      None, Some("F99"), None),
+    ("RESULTAT", "F01", "avg",      None, Some("F99"), None),
+    ("RESULTAT", "F20", "avg",      None, Some("F99"), None),
+    ("RESULTAT", "F80", "terminal", None, Some("F99"), None),
+    ("RESULTAT", "F81", "terminal", None, Some("F99"), None),
+    ("RESULTAT", "F98", "avg",      None, Some("F99"), None),
+    ("RESULTAT", "F99", "avg",      None, Some("F99"), None),
 ];
 
 /// Devises référentielles : (code_iso, libelle, decimales).
@@ -134,6 +166,12 @@ const METHODS: &[(&str, &str, bool)] = &[
     ("globale",         "Globale",                true),
     ("proportionnelle", "Proportionnelle",        true),
     ("equivalence",     "Mise en équivalence",    false),
+    // Variante de la globale réservée à la société mère/consolidante (même
+    // mécanique : consolidated = true, pct_integration = 1.0). Elle n'existe que
+    // pour permettre aux règles de **cibler la mère seule** via un scope
+    // `methode = 'MERE'` (cf. docs/QUESTIONS_OUVERTES.md Q33). Non rattachée à une
+    // entité dans le seed → aucun impact sur les runs golden.
+    ("MERE",            "Globale — société mère", true),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,10 +180,11 @@ const METHODS: &[(&str, &str, bool)] = &[
 
 /// Périmètre de consolidation.
 /// (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie).
+/// (perimeter_set, entity, period, methode), (pct_interet, pct_integration, entree, sortie).
 const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] = &[
-    (("M", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), false, false)),
-    (("A", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), true,  false)), // ENTRE en N
-    (("B", "REEL", "2024", "globale"), (dec!(1.00), dec!(1.00), false, true)),  // SORT en N
+    (("PERIM_REEL", "M", "2024", "globale"), (dec!(1.00), dec!(1.00), false, false)),
+    (("PERIM_REEL", "A", "2024", "globale"), (dec!(1.00), dec!(1.00), true,  false)), // ENTRE en N
+    (("PERIM_REEL", "B", "2024", "globale"), (dec!(1.00), dec!(1.00), false, true)),  // SORT en N
 ];
 
 /// Taux de change vers le pivot (EUR).
@@ -257,15 +296,21 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             params![r.0, r.1],
         )?;
     }
+    for ps in PERIMETER_SETS {
+        con.execute(
+            "INSERT INTO dim_perimeter_set VALUES (?, ?)",
+            params![ps.0, ps.1],
+        )?;
+    }
 
     // --- Dimensions ---
     for s in SCENARIOS {
         con.execute(
             "INSERT INTO dim_scenario
                 (code, libelle, category, entry_period, presentation_currency,
-                 variant, ruleset_code, rate_set, statut)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![s.0, s.1, s.2, s.3, s.4, s.5, s.6, s.7, s.8],
+                 variant, ruleset_code, rate_set, perimeter_set, statut)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![s.0, s.1, s.2, s.3, s.4, s.5, s.6, s.7, s.8, s.9],
         )?;
     }
     for e in ENTITIES {
@@ -287,17 +332,32 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         )?;
     }
     for a in ACCOUNTS {
+        // Liste de colonnes explicite : `flow_scheme` (ajoutée) reste NULL — le
+        // schéma par défaut est dérivé de la classe à la conversion (cf.
+        // pipeline::convert), surchargeable ensuite via le CRUD.
         con.execute(
-            "INSERT INTO dim_account VALUES (?, ?, ?, ?)",
+            "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES (?, ?, ?, ?)",
             params![a.0, a.1, a.2, a.3],
         )?;
     }
     for f in FLOWS {
         con.execute(
-            "INSERT INTO dim_flow
-                (code, libelle, taux_conversion, flux_ecart, flux_de_report)
-             VALUES (?, ?, ?, ?, ?)",
-            params![f.0, f.1, f.2, f.3, f.4],
+            "INSERT INTO dim_flow (code, libelle) VALUES (?, ?)",
+            params![f.0, f.1],
+        )?;
+    }
+    for s in FLOW_SCHEMES {
+        con.execute(
+            "INSERT INTO dim_flow_scheme VALUES (?, ?)",
+            params![s.0, s.1],
+        )?;
+    }
+    for i in FLOW_SCHEME_ITEMS {
+        con.execute(
+            "INSERT INTO sat_flow_scheme_item \
+             (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![i.0, i.1, i.2, i.3, i.4, i.5],
         )?;
     }
     for c in CURRENCIES {
@@ -322,7 +382,9 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     // --- Tables satellites ---
     for (k, v) in PERIMETER {
         con.execute(
-            "INSERT INTO sat_perimeter VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sat_perimeter \
+             (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![k.0, k.1, k.2, k.3, Money(v.0), Money(v.1), v.2, v.3],
         )?;
     }
@@ -423,31 +485,134 @@ pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
-/// Seede la **démonstration des attributs de dimension** : recrée, via les
+/// Seede les **attributs de dimension du plan de comptes** : recrée, via les
 /// mécanismes pilotables, ce qui était auparavant codé en dur sur `dim_account`.
 ///
 /// - **Caractéristique** `groupement` (N1 sur `account`) avec la valeur
-///   `capitaux_propres`, affectée au compte `100` (ex-`technical_grouping`) ;
+///   `capitaux_propres`, affectée au compte `10` (Capital et réserves) ;
 /// - **Référence directe** `compte_parent` (patron B) sur `account → account`
-///   (ex-colonne `compte_parent`), prête à recevoir une hiérarchie.
+///   puis **chargement de la hiérarchie** depuis `account_parents.csv` (`code,
+///   compte_parent`) si le fichier est présent dans `data_dir`.
 ///
 /// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
 /// `POST /api/reset`), comme [`seed_demo_rules`]. Renvoie [`AppError`] car elle
 /// s'appuie sur les fonctions de haut niveau (validation incluse).
-pub fn seed_demo_attributes(con: &Connection) -> Result<(), crate::state::AppError> {
+///
+/// **Idempotente** : les registres de caractéristiques / références directes
+/// survivent au reset (hors `ALL_DROP`) ; on ne recrée donc la caractéristique
+/// et la référence que si elles sont absentes, et la hiérarchie est rejouée à
+/// chaque appel (UPDATE depuis le CSV).
+pub fn seed_demo_attributes(
+    con: &Connection,
+    data_dir: &std::path::Path,
+) -> Result<(), crate::state::AppError> {
     use crate::{characteristics, custom_references};
     use serde_json::{json, Map};
 
-    // Caractéristique « groupement » + valeur « capitaux_propres » sur le compte 100.
-    characteristics::create_characteristic(con, "groupement", "Groupement technique", "account")?;
-    let mut val = Map::new();
-    val.insert("code".into(), json!("capitaux_propres"));
-    val.insert("libelle".into(), json!("Capitaux propres"));
-    characteristics::create_value(con, "groupement", &val)?;
-    characteristics::assign(con, "groupement", "100", Some("capitaux_propres"))?;
+    // La caractéristique « groupement » et la référence « compte_parent » vivent
+    // dans des registres qui survivent au reset : ne (re)créer que si absentes.
+    let groupement_present: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_characteristic WHERE code = 'groupement'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(crate::state::db_err)?;
+    if !groupement_present {
+        // Caractéristique « groupement » + valeur « capitaux_propres » sur le compte 10.
+        characteristics::create_characteristic(
+            con,
+            "groupement",
+            "Groupement technique",
+            "account",
+        )?;
+        let mut val = Map::new();
+        val.insert("code".into(), json!("capitaux_propres"));
+        val.insert("libelle".into(), json!("Capitaux propres"));
+        characteristics::create_value(con, "groupement", &val)?;
+        characteristics::assign(con, "groupement", "10", Some("capitaux_propres"))?;
+    }
 
-    // Référence directe « compte_parent » : account → account (hiérarchie).
-    custom_references::create(con, "account", "compte_parent", "account")?;
+    let compte_parent_present: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_custom_reference \
+             WHERE host_dimension = 'account' AND column_name = 'compte_parent'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(crate::state::db_err)?;
+    if !compte_parent_present {
+        // Référence directe « compte_parent » : account → account (hiérarchie).
+        custom_references::create(con, "account", "compte_parent", "account")?;
+    }
+
+    // Chargement de la hiérarchie depuis `account_parents.csv` (si présent).
+    // UPDATE en masse plutôt que 800+ appels `assign` : les valeurs viennent du
+    // plan de comptes (CSV de confiance) et la colonne existe (réf. ci-dessus).
+    let parents_csv = data_dir.join("account_parents.csv");
+    if parents_csv.exists() {
+        let path = parents_csv.display().to_string();
+        con.execute(
+            &format!(
+                "UPDATE dim_account AS a SET compte_parent = src.compte_parent \
+                 FROM read_csv('{path}', auto_detect=false, \
+                     columns={{'code':'VARCHAR','compte_parent':'VARCHAR'}}, \
+                     header=true, delim=',') AS src \
+                 WHERE a.code = src.code"
+            ),
+            [],
+        )
+        .map_err(crate::state::db_err)?;
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn parent_of(con: &Connection, code: &str) -> Option<String> {
+        con.query_row(
+            "SELECT compte_parent FROM dim_account WHERE code = ?",
+            [code],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// `seed_demo_attributes` charge la hiérarchie `compte_parent` depuis
+    /// `account_parents.csv` (via `UPDATE ... FROM read_csv`) et reste idempotente
+    /// (registres caractéristique / référence directe survivant au reset).
+    #[test]
+    fn charge_la_hierarchie_compte_parent_et_reste_idempotente() {
+        let con = Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        con.execute_batch(
+            "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES \
+                ('10','Capital et réserves','bilan','passif'), \
+                ('101','Capital','bilan','passif'), \
+                ('1011','Capital souscrit','bilan','passif');",
+        )
+        .expect("seed accounts");
+
+        // CSV de hiérarchie dans un répertoire temporaire unique.
+        let dir = std::env::temp_dir().join(format!("conso_seed_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut f = std::fs::File::create(dir.join("account_parents.csv")).unwrap();
+        writeln!(f, "code,compte_parent\n101,10\n1011,101").unwrap();
+        drop(f);
+
+        seed_demo_attributes(&con, &dir).expect("seed_demo_attributes");
+        assert_eq!(parent_of(&con, "10"), None, "racine sans parent");
+        assert_eq!(parent_of(&con, "101").as_deref(), Some("10"));
+        assert_eq!(parent_of(&con, "1011").as_deref(), Some("101"));
+
+        // Deuxième appel (simule POST /api/reset) : pas de conflit de registre.
+        seed_demo_attributes(&con, &dir).expect("second seed_demo_attributes idempotent");
+        assert_eq!(parent_of(&con, "1011").as_deref(), Some("101"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

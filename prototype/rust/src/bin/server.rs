@@ -581,7 +581,7 @@ async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetR
         create_schema(&con).map_err(db_err)?; // DROP + CREATE (idempotent)
         load_all(&con, std::path::Path::new(&state.csv_dir)).map_err(db_err)?;
         seed_demo_rules(&con).map_err(db_err)?; // règle + jeu interco (hors CSV)
-        seed_demo_attributes(&con)?; // caractéristique + référence directe (hors CSV)
+        seed_demo_attributes(&con, std::path::Path::new(&state.csv_dir))?; // caractéristique + hiérarchie compte_parent
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
             .map_err(db_err)?;
@@ -1217,7 +1217,8 @@ async fn main() {
         create_schema(&con).expect("✗ create_schema");
         load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
         seed_demo_rules(&con).expect("✗ seed_demo_rules"); // règle + jeu interco (hors CSV)
-        seed_demo_attributes(&con).expect("✗ seed_demo_attributes"); // caractéristique + réf. directe
+        seed_demo_attributes(&con, std::path::Path::new(&csv_dir))
+            .expect("✗ seed_demo_attributes"); // caractéristique + hiérarchie compte_parent
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.

@@ -137,7 +137,10 @@ export type MasterTable =
   | 'sous_classes'
   | 'scenario_categories'
   | 'variants'
-  | 'rate_sets';
+  | 'rate_sets'
+  | 'perimeter_sets'
+  | 'flow_schemes'
+  | 'flow_scheme_items';
 
 export interface ColumnDef {
   name: string;
@@ -175,6 +178,14 @@ export const MASTER_TABLES: TableDef[] = [
   {
     table: 'rate_sets',
     label: 'Jeux de taux',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+    ],
+  },
+  {
+    table: 'perimeter_sets',
+    label: 'Jeux de périmètre',
     columns: [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
@@ -221,6 +232,13 @@ export const MASTER_TABLES: TableDef[] = [
         type: 'select',
         nullable: true,
         optionsFrom: { table: 'rate_sets', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'perimeter_set',
+        label: 'Jeu de périmètre',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'perimeter_sets', value: 'code', label: 'libelle' },
       },
       { name: 'statut', label: 'Statut', type: 'text' },
       {
@@ -285,6 +303,13 @@ export const MASTER_TABLES: TableDef[] = [
         nullable: true,
         optionsFrom: { table: 'sous_classes', value: 'code', label: 'libelle' },
       },
+      {
+        name: 'flow_scheme',
+        label: 'Schéma de flux',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'flow_schemes', value: 'code', label: 'libelle' },
+      },
       // Le regroupement par nature (caractéristique) et le compte parent
       // (référence directe) se gèrent dans la page « Attributs de dimension ».
     ],
@@ -293,35 +318,10 @@ export const MASTER_TABLES: TableDef[] = [
     table: 'flows',
     label: 'Flux',
     columns: [
+      // Dimension nue : tout le comportement (taux, écart, report, à-nouveau)
+      // se gère dans « Schémas de flux » (cf. Q32).
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
-      {
-        name: 'taux_conversion',
-        label: 'Taux conversion',
-        type: 'select',
-        options: ['close_n1', 'avg', 'close_n', 'terminal'],
-      },
-      {
-        name: 'flux_ecart',
-        label: 'Flux écart',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
-      },
-      {
-        name: 'flux_de_report',
-        label: 'Flux de report',
-        type: 'select',
-        nullable: true,
-        options: ['F00', 'F01', 'F20', 'F80', 'F81', 'F98', 'F99'],
-      },
-      {
-        name: 'flux_a_nouveau',
-        label: 'Flux d\'à-nouveau',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
-      },
     ],
   },
   {
@@ -361,18 +361,18 @@ export const MASTER_TABLES: TableDef[] = [
     label: 'Périmètre',
     columns: [
       {
+        name: 'perimeter_set',
+        label: 'Jeu de périmètre',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'perimeter_sets', value: 'code', label: 'libelle' },
+      },
+      {
         name: 'entity',
         label: 'Entité',
         type: 'select',
         pk: true,
         optionsFrom: { table: 'entities', value: 'code', label: 'libelle' },
-      },
-      {
-        name: 'scenario',
-        label: 'Définition de consolidation',
-        type: 'select',
-        pk: true,
-        optionsFrom: { table: 'scenarios', value: 'code' },
       },
       {
         name: 'period',
@@ -385,7 +385,7 @@ export const MASTER_TABLES: TableDef[] = [
         name: 'methode',
         label: 'Méthode',
         type: 'select',
-        options: ['globale', 'proportionnelle', 'équivalence'],
+        optionsFrom: { table: 'methods', value: 'code', label: 'libelle' },
       },
       { name: 'pct_interet', label: '% intérêt', type: 'number' },
       { name: 'pct_integration', label: '% intégration', type: 'number' },
@@ -420,6 +420,61 @@ export const MASTER_TABLES: TableDef[] = [
       },
       { name: 'taux_close', label: 'Taux clôture', type: 'number' },
       { name: 'taux_moyen', label: 'Taux moyen', type: 'number', nullable: true },
+    ],
+  },
+  {
+    table: 'flow_schemes',
+    label: 'Schémas de flux',
+    columns: [
+      { name: 'code', label: 'Code', type: 'text', pk: true },
+      { name: 'libelle', label: 'Libellé', type: 'text' },
+    ],
+  },
+  {
+    table: 'flow_scheme_items',
+    label: 'Articulation des flux (par schéma)',
+    columns: [
+      {
+        name: 'scheme',
+        label: 'Schéma',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'flow_schemes', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'flow',
+        label: 'Flux',
+        type: 'select',
+        pk: true,
+        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'taux_conversion',
+        label: 'Taux conversion',
+        type: 'select',
+        options: ['close_n1', 'avg', 'close_n', 'terminal'],
+      },
+      {
+        name: 'flux_ecart',
+        label: 'Flux écart',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'flux_de_report',
+        label: 'Flux de report',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'flux_a_nouveau',
+        label: 'Flux d\'à-nouveau',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'flows', value: 'code', label: 'libelle' },
+      },
     ],
   },
 ];

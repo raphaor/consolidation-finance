@@ -65,6 +65,7 @@ pub const REFERENCES: &[Reference] = &[
     r("dim_scenario", "variant", "dim_variant", "code"),
     r("dim_scenario", "ruleset_code", "dim_ruleset", "code"),
     r("dim_scenario", "rate_set", "dim_rate_set", "code"),
+    r("dim_scenario", "perimeter_set", "dim_perimeter_set", "code"),
     // Conso d'à-nouveau : auto-référence vers un autre scénario (N-1 figé).
     r("dim_scenario", "a_nouveau_scenario", "dim_scenario", "code"),
     // dim_entity
@@ -72,19 +73,25 @@ pub const REFERENCES: &[Reference] = &[
     r("dim_entity", "entite_parent", "dim_entity", "code"),
     // dim_account (compte_parent est désormais une référence directe dynamique)
     r("dim_account", "sous_classe", "dim_sous_classe", "code"),
-    // dim_flow (auto-références : flux d'écart / de report / d'à-nouveau)
-    r("dim_flow", "flux_ecart", "dim_flow", "code"),
-    r("dim_flow", "flux_de_report", "dim_flow", "code"),
-    r("dim_flow", "flux_a_nouveau", "dim_flow", "code"),
-    // sat_perimeter (entity/scenario/period = PK ; methode obligatoire)
+    // Schéma de flux du compte (nullable : NULL = défaut dérivé de la classe).
+    r("dim_account", "flow_scheme", "dim_flow_scheme", "code"),
+    // dim_flow est désormais une dimension nue (code, libelle) : tout le
+    // comportement (taux, écart, report, à-nouveau) vit dans sat_flow_scheme_item.
+    // sat_perimeter (perimeter_set/entity/period = PK ; methode obligatoire)
+    rq("sat_perimeter", "perimeter_set", "dim_perimeter_set", "code"),
     rq("sat_perimeter", "entity", "dim_entity", "code"),
-    rq("sat_perimeter", "scenario", "dim_scenario", "code"),
     rq("sat_perimeter", "period", "dim_period", "code"),
     rq("sat_perimeter", "methode", "dim_method", "code"),
     // sat_exchange_rate (rate_set/currency_source/period = PK)
     rq("sat_exchange_rate", "rate_set", "dim_rate_set", "code"),
     rq("sat_exchange_rate", "currency_source", "dim_currency", "code_iso"),
     rq("sat_exchange_rate", "period", "dim_period", "code"),
+    // sat_flow_scheme_item (scheme/flow = PK ; flux_* nullables vers dim_flow)
+    rq("sat_flow_scheme_item", "scheme", "dim_flow_scheme", "code"),
+    rq("sat_flow_scheme_item", "flow", "dim_flow", "code"),
+    r("sat_flow_scheme_item", "flux_ecart", "dim_flow", "code"),
+    r("sat_flow_scheme_item", "flux_de_report", "dim_flow", "code"),
+    r("sat_flow_scheme_item", "flux_a_nouveau", "dim_flow", "code"),
     // Écritures (stg_entry — mêmes cibles que fact_entry).
     // `analysis` / `analysis2` et les dimensions custom sont libres (pas de ref).
     // `partner` / `share` sont nullables ; les autres dimensions sont obligatoires.

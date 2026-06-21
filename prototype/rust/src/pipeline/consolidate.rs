@@ -59,9 +59,10 @@ FROM (\n\
     SELECT {col_list}, amount FROM stg_entry\n\
     WHERE substr(nature, 1, 1) = '3' AND scenario = ?\n\
 ) f\n\
+JOIN dim_scenario sc ON sc.code = f.scenario\n\
 JOIN sat_perimeter p\n\
-  ON p.entity = f.entity\n\
- AND p.scenario = f.scenario\n\
+  ON p.perimeter_set = sc.perimeter_set\n\
+ AND p.entity = f.entity\n\
  AND p.period = f.entry_period\n\
 JOIN dim_method m\n\
   ON m.code = p.methode\n\

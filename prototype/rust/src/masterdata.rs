@@ -46,6 +46,12 @@ const TABLES: &[TableDef] = &[
         columns: &["code", "libelle"],
         pk: &["code"],
     },
+    TableDef {
+        api_name: "perimeter_sets",
+        sql_name: "dim_perimeter_set",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+    },
     // --- Scénario v2 : category/entry_period/presentation_currency/variant/
     //     ruleset_code(nullable)/rate_set/statut (cf. SPEC_SCENARIO_V2_TECH §1.2) ---
     TableDef {
@@ -60,6 +66,7 @@ const TABLES: &[TableDef] = &[
             "variant",
             "ruleset_code",
             "rate_set",
+            "perimeter_set",
             "statut",
             "a_nouveau_scenario",
         ],
@@ -83,7 +90,8 @@ const TABLES: &[TableDef] = &[
         // `compte_parent` (réf. directe) et le regroupement par nature
         // (caractéristique) ne sont plus des colonnes en dur : ils sont gérés via
         // la page « Attributs de dimension » (characteristics / custom_references).
-        columns: &["code", "libelle", "classe", "sous_classe"],
+        // `flow_scheme` (nullable) sélectionne le schéma de flux du compte (Q32).
+        columns: &["code", "libelle", "classe", "sous_classe", "flow_scheme"],
         pk: &["code"],
     },
     TableDef {
@@ -95,8 +103,20 @@ const TABLES: &[TableDef] = &[
     TableDef {
         api_name: "flows",
         sql_name: "dim_flow",
-        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
+        columns: &["code", "libelle"],
         pk: &["code"],
+    },
+    TableDef {
+        api_name: "flow_schemes",
+        sql_name: "dim_flow_scheme",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+    },
+    TableDef {
+        api_name: "flow_scheme_items",
+        sql_name: "sat_flow_scheme_item",
+        columns: &["scheme", "flow", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
+        pk: &["scheme", "flow"],
     },
     TableDef {
         api_name: "currencies",
@@ -120,8 +140,8 @@ const TABLES: &[TableDef] = &[
         api_name: "perimeter",
         sql_name: "sat_perimeter",
         columns: &[
+            "perimeter_set",
             "entity",
-            "scenario",
             "period",
             "methode",
             "pct_interet",
@@ -129,7 +149,7 @@ const TABLES: &[TableDef] = &[
             "entree",
             "sortie",
         ],
-        pk: &["entity", "scenario", "period"],
+        pk: &["perimeter_set", "entity", "period"],
     },
     // PK étendue v2 : (rate_set, currency_source, period). `rate_set` en 1ère
     // position pour cohérence avec la PK (cf. SPEC_SCENARIO_V2_TECH §1.3).

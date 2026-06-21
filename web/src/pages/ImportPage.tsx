@@ -90,8 +90,8 @@ export function ImportPage() {
         />
         <UploadZone
           title="Périmètre de consolidation"
-          description="Upsert dans la table perimeter (clé : entity + scenario + period). Les colonnes entree/sortie acceptent true/false."
-          header="entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie"
+          description="Upsert dans la table perimeter (clé : perimeter_set + entity + period). Les colonnes entree/sortie acceptent true/false."
+          header="perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie"
           onImport={(f) => api.importPerimeter(f)}
         />
       </div>

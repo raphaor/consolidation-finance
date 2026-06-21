@@ -99,6 +99,14 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
+    // 4b. dim_perimeter_set : jeu de périmètre (référencé par sat_perimeter, Q35).
+    CsvMapping {
+        file: "perimeter_sets.csv",
+        table: "dim_perimeter_set",
+        columns: &["code", "libelle"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
     // 5. dim_scenario (v2) : 9 colonnes — category, entry_period,
     //    presentation_currency, variant, ruleset_code (nullable), rate_set, statut.
     CsvMapping {
@@ -113,6 +121,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
             "variant",
             "ruleset_code",
             "rate_set",
+            "perimeter_set",
             "statut",
             "a_nouveau_scenario",
         ],
@@ -152,11 +161,20 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: true,
     },
-    // 10. dim_flow : codes de flux (taux_conversion, flux_ecart, flux_de_report).
+    // 10. dim_flow : dimension nue (code, libelle). Le comportement vit dans les
+    //     schémas de flux (flow_scheme_items), résolu par compte via v_flow_behavior.
     CsvMapping {
         file: "flows.csv",
         table: "dim_flow",
-        columns: &["code", "libelle", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
+        columns: &["code", "libelle"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 10b. dim_flow_scheme : catalogue des schémas de flux (cf. Q32).
+    CsvMapping {
+        file: "flow_schemes.csv",
+        table: "dim_flow_scheme",
+        columns: &["code", "libelle"],
         casts: &[],
         use_explicit_schema: false,
     },
@@ -191,8 +209,8 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         file: "perimeter.csv",
         table: "sat_perimeter",
         columns: &[
+            "perimeter_set",
             "entity",
-            "scenario",
             "period",
             "methode",
             "pct_interet",
@@ -208,6 +226,14 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         file: "rates.csv",
         table: "sat_exchange_rate",
         columns: &["rate_set", "currency_source", "period", "taux_close", "taux_moyen"],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 14b. sat_flow_scheme_item : articulation complète des flux par schéma (Q32).
+    CsvMapping {
+        file: "flow_scheme_items.csv",
+        table: "sat_flow_scheme_item",
+        columns: &["scheme", "flow", "taux_conversion", "flux_ecart", "flux_de_report", "flux_a_nouveau"],
         casts: &[],
         use_explicit_schema: false,
     },

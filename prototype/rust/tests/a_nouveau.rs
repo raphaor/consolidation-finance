@@ -34,8 +34,11 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
     seed_all(&con).expect("seed_all");
 
     // Active l'à-nouveau (F99 → F00) — le seed laisse le champ NULL.
-    con.execute("UPDATE dim_flow SET flux_a_nouveau='F00' WHERE code='F99'", [])
-        .expect("activer flux_a_nouveau");
+    con.execute(
+        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme='BILAN' AND flow='F99'",
+        [],
+    )
+    .expect("activer flux_a_nouveau");
 
     // 1) Snapshot N-1 = run REEL (2024). REEL n'a pas d'à-nouveau → carry no-op.
     let p_reel = ConvertParams::load_params(&con, "REEL").expect("load_params REEL");
@@ -50,14 +53,16 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
         "INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut)
          VALUES ('2025','Exercice 2025','exercice','2025-01-01','2025-12-31','ouvert');
 
+         INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_CUR','Périmètre CUR 2025');
+
          INSERT INTO dim_scenario
             (code, libelle, category, entry_period, presentation_currency,
-             variant, ruleset_code, rate_set, statut, a_nouveau_scenario)
-         VALUES ('CUR','Réel 2025','REEL','2025','EUR','BASE',NULL,'RATES','ouvert','REEL');
+             variant, ruleset_code, rate_set, perimeter_set, statut, a_nouveau_scenario)
+         VALUES ('CUR','Réel 2025','REEL','2025','EUR','BASE',NULL,'RATES','PERIM_CUR','ouvert','REEL');
 
          INSERT INTO sat_perimeter
-            (entity, scenario, period, methode, pct_interet, pct_integration, entree, sortie)
-         VALUES ('M','CUR','2025','globale',1.0,1.0,FALSE,FALSE);
+            (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
+         VALUES ('PERIM_CUR','M','2025','globale',1.0,1.0,FALSE,FALSE);
 
          -- Liasse de M en 2025 : un F00 (9999, DOIT être écrasé par le report) + un F20.
          INSERT INTO stg_entry
@@ -105,8 +110,11 @@ fn sans_a_nouveau_le_f00_de_liasse_est_conserve() {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    con.execute("UPDATE dim_flow SET flux_a_nouveau='F00' WHERE code='F99'", [])
-        .expect("activer flux_a_nouveau");
+    con.execute(
+        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme='BILAN' AND flow='F99'",
+        [],
+    )
+    .expect("activer flux_a_nouveau");
 
     let p_reel = ConvertParams::load_params(&con, "REEL").expect("load_params REEL");
     assert!(p_reel.a_nouveau_scenario.is_none(), "REEL ne référence aucun à-nouveau");
@@ -123,17 +131,21 @@ fn snapshot_reel_et_cur() -> Connection {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    con.execute("UPDATE dim_flow SET flux_a_nouveau='F00' WHERE code='F99'", [])
-        .expect("activer flux_a_nouveau");
+    con.execute(
+        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme='BILAN' AND flow='F99'",
+        [],
+    )
+    .expect("activer flux_a_nouveau");
     let p = ConvertParams::load_params(&con, "REEL").expect("load_params REEL");
     run_pipeline(&con, &p).expect("run REEL");
     con.execute_batch(
         "INSERT INTO dim_period (code,libelle,type,date_debut,date_fin,statut)
          VALUES ('2025','Exercice 2025','exercice','2025-01-01','2025-12-31','ouvert');
+         INSERT INTO dim_perimeter_set (code,libelle) VALUES ('PERIM_CUR','Périmètre CUR 2025');
          INSERT INTO dim_scenario
             (code,libelle,category,entry_period,presentation_currency,variant,
-             ruleset_code,rate_set,statut,a_nouveau_scenario)
-         VALUES ('CUR','Réel 2025','REEL','2025','EUR','BASE',NULL,'RATES','ouvert','REEL');",
+             ruleset_code,rate_set,perimeter_set,statut,a_nouveau_scenario)
+         VALUES ('CUR','Réel 2025','REEL','2025','EUR','BASE',NULL,'RATES','PERIM_CUR','ouvert','REEL');",
     )
     .expect("seed période + scénario CUR");
     con
@@ -147,9 +159,9 @@ fn coherence_signale_divergences_et_orphelins() {
     // A et B sont consolidées en N-1 mais absentes du périmètre CUR → orphelines.
     con.execute_batch(
         "INSERT INTO sat_perimeter
-            (entity,scenario,period,methode,pct_interet,pct_integration,entree,sortie)
-         VALUES ('M','CUR','2025','globale',1.0,1.0,FALSE,FALSE),
-                ('NEW','CUR','2025','globale',1.0,1.0,FALSE,FALSE);",
+            (perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie)
+         VALUES ('PERIM_CUR','M','2025','globale',1.0,1.0,FALSE,FALSE),
+                ('PERIM_CUR','NEW','2025','globale',1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed périmètre CUR");
 
@@ -176,10 +188,10 @@ fn coherence_ok_quand_perimetre_aligne() {
     // consolidées en N-1 → aucune anomalie.
     con.execute_batch(
         "INSERT INTO sat_perimeter
-            (entity,scenario,period,methode,pct_interet,pct_integration,entree,sortie)
-         VALUES ('M','CUR','2025','globale',1.0,1.0,FALSE,FALSE),
-                ('A','CUR','2025','globale',1.0,1.0,FALSE,FALSE),
-                ('B','CUR','2025','globale',1.0,1.0,FALSE,FALSE);",
+            (perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie)
+         VALUES ('PERIM_CUR','M','2025','globale',1.0,1.0,FALSE,FALSE),
+                ('PERIM_CUR','A','2025','globale',1.0,1.0,FALSE,FALSE),
+                ('PERIM_CUR','B','2025','globale',1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed périmètre CUR");
 

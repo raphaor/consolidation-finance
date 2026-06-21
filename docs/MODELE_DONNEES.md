@@ -52,7 +52,7 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 - **Conso** : axe temporel d'agrégation et de conversion devise.
 
 ### `Account`
-- **Master** : `code`, `libellé`, `sens` (débit / crédit), `classe` (bilan / résultat / flux / hors-compte), `sous_classe`
+- **Master** : `code`, `libellé`, `sens` (débit / crédit), `classe` (bilan / résultat / flux / hors-compte), `sous_classe`, `flow_scheme` (schéma de flux → taux de conversion et flux d'écart **par flux**, cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) « Schémas de flux » ; NULL = défaut dérivé de la classe)
 - **Attributs ajoutés à l'exécution** (plus codés en dur) : le regroupement par nature (ex. `capitaux_propres`, utilisé par la **mise en équivalence**) se déclare comme **caractéristique** ; le **compte parent** (hiérarchie d'agrégation) comme **référence directe** vers `Account` lui-même (cf. §4 ter et la page « Attributs de dimension »).
 - **Conso** : cumul [B], agrégation hiérarchique pour les restitutions.
 
@@ -99,7 +99,7 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 ## 4. Tables satellites (référencées par les dimensions)
 
 ### Périmètre de consolidation
-Liste, par `Entity × Scenario × Period`, les entités du scope avec leurs caractéristiques de conso :
+Versionné comme les taux : un **jeu de périmètre** (`dim_perimeter_set`) est référencé par le scénario (`dim_scenario.perimeter_set`), symétrique de `rate_set` (cf. [Q35](./QUESTIONS_OUVERTES.md)). `sat_perimeter` est donc clé par `Perimeter_set × Entity × Period` (un même périmètre est réutilisable entre scénarios/variantes). Liste, par cette clé, les entités du scope avec leurs caractéristiques de conso :
 - `méthode` (globale / proportionnelle / équivalence / IFRS5)
 - `%_intérêt` et `%_intégration` (= % de contrôle)
 - `entrée_sortie_mid_exercice` (booléen, lié à `Period`)
@@ -113,7 +113,7 @@ Répond à [Q5](./QUESTIONS_OUVERTES.md).
 
 ### Taux de change
 - Définit, par `Currency_source × Currency_cible × Period` : `taux_clôture` et `taux_moyen` (moyenne **simple** sur la période).
-- **Application** (conversion multi-devises [B]) : `taux_clôture` pour les comptes de bilan, `taux_moyen` pour les comptes de résultat — règle dérivée de la `classe` du compte (cf. `Account`).
+- **Application** (conversion multi-devises [B]) : le **taux par flux** est piloté par le **schéma de flux** du compte (`dim_account.flow_scheme` → `sat_flow_scheme_item`), avec repli sur le défaut `dim_flow`. Un compte de **bilan** suit le défaut (`taux_clôture` à la clôture, écart F80/F81) ; un compte de **résultat** suit le schéma `RESULTAT` (`taux_moyen`, **sans écart**). Cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) « Schémas de flux » et [Q32](./QUESTIONS_OUVERTES.md).
 - **Saisie** : écran CRUD + import d'un fichier CSV (format à spécifier). Pas de récupération automatique externe au POC.
 
 ### Paramètres du groupe (configuration)
@@ -146,10 +146,10 @@ Conséquence pratique : **une ligne principale ne doit jamais porter de valeur a
 
 Le modèle n'a pas de FK dures (DuckDB, choix du proto). Les liens entre objets sont déclarés dans un **registre central** (`engine/src/references.rs`) : chaque `(table.colonne) → (table_cible.colonne)`. Il couvre notamment :
 
-- `dim_scenario.{category, entry_period, presentation_currency, variant, ruleset_code, rate_set}`
-- `dim_entity.{devise_fonctionnelle, entite_parent}`, `dim_account.sous_classe`, `dim_flow.{flux_ecart, flux_de_report}`
+- `dim_scenario.{category, entry_period, presentation_currency, variant, ruleset_code, rate_set, perimeter_set}`
+- `dim_entity.{devise_fonctionnelle, entite_parent}`, `dim_account.{sous_classe, flow_scheme}`, `dim_flow.{flux_ecart, flux_de_report}`, `sat_flow_scheme_item.{scheme, flow, flux_ecart}`
 - **références dynamiques** (ajoutées à l'exécution) : caractéristiques N1/N2 et **références directes** (patron B, ex. `dim_account.compte_parent → dim_account.code`), fusionnées au graphe statique par `references::all_references`
-- `sat_perimeter.{entity, scenario, period, methode}`, `sat_exchange_rate.{rate_set, currency_source, period}`
+- `sat_perimeter.{perimeter_set, entity, period, methode}`, `sat_exchange_rate.{rate_set, currency_source, period}`
 - écritures : `{scenario, entity, entry_period, period, account, flow, currency, nature}` + `{partner, share}` → **`dim_entity`** (les trois rôles de la §2.2)
 - `dim_ruleset_item.{ruleset_code, rule_code}`
 
