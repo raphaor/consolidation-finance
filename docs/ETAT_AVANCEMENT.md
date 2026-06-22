@@ -3,7 +3,7 @@
 > Vue consolidée de **ce qui est implémenté**, de son **comportement**, et de **ce qui reste**.
 > Pour le *pourquoi* d'une décision → [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) ;
 > pour le détail fonctionnel → les docs thématiques liées ci-dessous.
-> Dernière mise à jour : **2026-06-21**.
+> Dernière mise à jour : **2026-06-22**.
 
 **Légende** : ✅ implémenté & testé · 🟡 partiel / en cours · ⬜ reporté (post-MVP).
 
@@ -34,7 +34,9 @@ de clôture.
 ✅ **Sémantique « of which »** : une ligne dont une dimension analytique est renseignée est un
 *dont* de la ligne où elle est NULL — exclue des totaux, mais avec sa propre clôture.
 ✅ **Caractéristiques N1/N2** et **références directes** (patron B, ex. `compte_parent`) :
-définition + UI + consommation par les règles (mode `map`).
+définition + UI + consommation par les règles — **quatre points de consommation** :
+destination `map` (caractéristique), destination `map_ref` (référence directe), sélection
+`via` (filtre par valeur N1), sélection `ref` (filtre par référence directe).
 ✅ **Graphe de références** : validation à l'écriture (master data, import CSV, règles) +
 endpoint « santé des données ».
 
@@ -100,8 +102,15 @@ compte** : seul le bilan reporte (le résultat non). Contrôle de cohérence dan
 
 ✅ **Exécuteur générique** (`rules.rs`) : `scope` (conditions sur `sat_perimeter`) + `operations`
 (sélection à un niveau × coefficient × multiplicateur → écriture avec `destination` par
-dimension : `inherit` / `override` / `null` / `map`). Rulesets ordonnés. API REST + UI React.
-Sécurité SQL (identifiants validés contre des whitelists, valeurs paramétrées).
+dimension : `inherit` / `override` / `null` / `map` / `map_ref`). Rulesets ordonnés. API REST +
+UI React. Sécurité SQL (identifiants validés contre des whitelists, valeurs paramétrées).
+✅ **Sélection étendue** : filtres indirects par **attribut traversé** — `via` (caractéristique
+N1, ex. `comportement = VENTES_IC`) ou `ref` (référence directe patron B, ex. `compte_parent = 60`),
+en plus du filtre direct sur la dimension. INNER JOIN : un membre non classé / sans valeur de
+référence n'est pas sélectionné.
+✅ **UI riche** (`web/src/pages/RulesPage.tsx`) : dropdown « Traverser » dans la sélection ;
+multi-select repliable pour l'opérateur `IN` (tous cas : direct, via N1, ref) avec cases à cocher
+et fermeture au clic extérieur ; dropdowns adaptatifs pour les 5 modes de destination.
 ⬜ Catalogue métier à composer : interco avancées, intérêts minoritaires, retraitements,
 variations de capital, répartition des résultats. → [`REGLES_CONSO.md`](./REGLES_CONSO.md) §10.
 
@@ -117,6 +126,36 @@ nature, avec **détail par nature** dépliable. Les totaux excluent les « of wh
 (liasses, taux, périmètre). **Export / import** d'un paquet JSON complet (sauvegarde-restauration).
 🟡 Édition encore « à plat » (ligne par ligne) pour les satellites versionnés ; un écran « objet »
 (ouvrir un jeu, y insérer ses lignes) reste souhaitable.
+
+## Saisie manuelle d'écritures — [Q36]
+
+✅ **Vue dédiée « Saisie »** (`web/src/pages/SaisiePage.tsx`, onglet nav) — alternative à l'import
+CSV pour saisir des écritures unitaires ou par lot dans `stg_entry` (niveau `raw`). Trois endpoints
+REST dédiés (`prototype/rust/src/entries.rs`) : `POST /api/entries` (batch), `PUT
+/api/entries/{id}`, `DELETE /api/entries/{id}`.
+
+| Aspect | Comportement |
+|---|---|
+| **Cible** | `stg_entry` (saisie brute, niveau `raw`). Pipeline non relancé automatiquement — l'utilisateur déclenche `/api/run`. |
+| **Schéma** | `stg_entry` gagne une **PK `id`** auto-incrémentée (seq dédiée `seq_stg_entry`) ; `get_entries?level=raw` renvoie le vrai id et la colonne `source`. |
+| **Marqueur** | `source = 'MANUAL'` forcé à l'INSERT (champ existant non propagé par le pipeline). |
+| **Protection** | PUT/DELETE refusés si `source ≠ MANUAL` (anti-écrasement des imports CSV). Insert-only sur le POST (jamais d'écrasement). |
+| **Validation** | Champs obligatoires + cohérence référentielle (FK), transaction atomique au POST (lot entier valide ou rien). |
+| **En-tête commun** | 6 champs factorisés (Scénario, Entité, Exercice, Période, Devise, Nature) en haut du batch, pré-remplissent chaque nouvelle ligne. Bouton « ↧ Appliquer partout » pour propager aux lignes existantes. Grille allégée par défaut (Account, Flow, Partner, Titre, Analysis×2, Amount) avec toggle pour afficher les colonnes communes (override au cas par cas). |
+| **Distinction visuelle** | `EcrituresPage` surligne les lignes `source=MANUAL` (classe `row--manual`) pour la traçabilité. |
+
+⚠️ Le schéma `stg_entry` ayant évolué (`id` PK), un `POST /api/reset` ou `CONSO_FORCE_RESEED=1`
+est nécessaire après rebuild pour reconstruire la base.
+
+## Libellés & UX — [Q37], [Q38]
+
+✅ **Dimension `share`** : libellé renommé « **Titre** » (au lieu de « Quote-part » qui était une
+traduction ambiguë). Le nom technique `share` est inchangé.
+
+✅ **Dropdowns au format `code - libellé`** dans toute l'UI (Rules, Saisie, Filters, Master data,
+Pipeline) via le helper central `formatOptionLabel(code, libelle)` (`web/src/utils/format.ts`).
+Le hook `useDimValues` expose désormais `{code, libelle}[]` au lieu de `string[]`. Les dropdowns
+techniques (level, opérateur, type de coefficient…) restent en code seul.
 
 ## Recette (config ≠ moteur)
 

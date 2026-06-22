@@ -50,6 +50,10 @@ pub struct CustomReferenceDef {
     pub host_dimension: String,
     pub column: String,
     pub target_dimension: String,
+    /// `true` pour une référence native (FK du DDL statique, peuplée par
+    /// [`seed_native`]). Verrouillée contre l'édition/suppression via l'API.
+    #[serde(default)]
+    pub native: bool,
 }
 
 /// `true` si le registre existe (faux au tout premier démarrage avant DDL).
@@ -69,7 +73,8 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CustomReferenceD
         return Ok(Vec::new());
     }
     let mut stmt = con.prepare(
-        "SELECT host_dimension, column_name, target_dimension \
+        "SELECT host_dimension, column_name, target_dimension, \
+                 COALESCE(native, FALSE) AS native \
          FROM dim_custom_reference ORDER BY host_dimension, column_name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -77,9 +82,51 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CustomReferenceD
             host_dimension: row.get::<_, String>(0)?,
             column: row.get::<_, String>(1)?,
             target_dimension: row.get::<_, String>(2)?,
+            native: row.get::<_, bool>(3)?,
         })
     })?;
     rows.collect()
+}
+
+/// `true` si `(host, column)` est marqué `native=true`. Retourne `false` si la
+/// ligne n'existe pas ou si le registre est absent.
+fn is_native(con: &duckdb::Connection, host: &str, column: &str) -> duckdb::Result<bool> {
+    if !registry_exists(con) {
+        return Ok(false);
+    }
+    con.query_row(
+        "SELECT COALESCE(native, FALSE) FROM dim_custom_reference \
+         WHERE host_dimension = ? AND column_name = ?",
+        [host, column],
+        |r| r.get::<_, bool>(0),
+    )
+    .or_else(|e| match e {
+        duckdb::Error::QueryReturnedNoRows => Ok(false),
+        e => Err(e),
+    })
+}
+
+/// Dimension cible d'une référence directe `(host, column)`, si elle existe.
+/// Utilisé par le moteur de règles pour valider / bâtir la traversée
+/// `map_ref` (sélection et destination) sur une référence de patron B.
+pub fn target_of(
+    con: &duckdb::Connection,
+    host: &str,
+    column: &str,
+) -> duckdb::Result<Option<String>> {
+    if !registry_exists(con) {
+        return Ok(None);
+    }
+    match con.query_row(
+        "SELECT target_dimension FROM dim_custom_reference \
+         WHERE host_dimension = ? AND column_name = ?",
+        [host, column],
+        |r| r.get::<_, String>(0),
+    ) {
+        Ok(s) => Ok(Some(s)),
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Ré-applique, après un reset, la colonne `<column_name>` sur la master data de
@@ -101,6 +148,65 @@ pub fn reapply(con: &duckdb::Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Peuple `dim_custom_reference` avec les **FK natives** listées dans
+/// `references::NATIVE_MASTER_REFS` (clés étrangères du DDL statique des master
+/// data : `account.sous_classe`, `entity.entite_parent`, `scenario.category`,
+/// etc.). Les lignes sont marquées `native=TRUE` pour les verrouiller contre
+/// édition/suppression (cf. [`create`] / [`remove`]).
+///
+/// Idempotent : `INSERT OR IGNORE` préserve les lignes déjà présentes (custom ou
+/// native). À appeler après `create_schema` (bases fraîches) et au démarrage
+/// serveur pour migrer les bases existantes (cf. [`migrate_native`]).
+pub fn seed_native(con: &duckdb::Connection) -> duckdb::Result<()> {
+    if !registry_exists(con) {
+        return Ok(());
+    }
+    for &(host, column, target) in references::NATIVE_MASTER_REFS {
+        con.execute(
+            "INSERT OR IGNORE INTO dim_custom_reference \
+             (host_dimension, column_name, target_dimension, native) \
+             VALUES (?, ?, ?, TRUE)",
+            [&host, &column, &target],
+        )?;
+    }
+    Ok(())
+}
+
+/// Migration idempotente : ajoute la colonne `native` au registre si elle
+/// manque (bases DuckDB existantes antérieures à l'introduction du flag), puis
+/// appelle [`seed_native`]. À appeler au démarrage serveur, inconditionnellement,
+/// avant le branchement « base déjà initialisée » — couvre donc les bases
+/// existantes sans toucher aux éditions utilisateur.
+///
+/// DuckDB ne supporte pas `ADD COLUMN ... NOT NULL DEFAULT` : on ADD sans
+/// contrainte, puis on UPDATE les NULL existants vers FALSE (cohérent avec le
+/// DDL `CREATE TABLE` qui, lui, spécifie `NOT NULL DEFAULT FALSE` sur les bases
+/// fraîches — la lecture utilise `COALESCE(native, FALSE)` partout).
+pub fn migrate_native(con: &duckdb::Connection) -> duckdb::Result<()> {
+    if !registry_exists(con) {
+        return Ok(());
+    }
+    let native_col_exists: bool = con.query_row(
+        "SELECT COUNT(*) > 0 FROM information_schema.columns \
+         WHERE table_schema = 'main' \
+           AND table_name = 'dim_custom_reference' \
+           AND column_name = 'native'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !native_col_exists {
+        con.execute(
+            "ALTER TABLE dim_custom_reference ADD COLUMN native BOOLEAN",
+            [],
+        )?;
+        con.execute(
+            "UPDATE dim_custom_reference SET native = FALSE WHERE native IS NULL",
+            [],
+        )?;
+    }
+    seed_native(con)
+}
+
 // ───────────────────────────── Mutations (DDL dynamique) ────────────────────────
 
 fn ensure_valid_column(name: &str) -> Result<(), AppError> {
@@ -116,6 +222,10 @@ fn ensure_valid_column(name: &str) -> Result<(), AppError> {
 /// Crée une référence directe : registre + colonne sur la master data de la
 /// dimension hôte. `host` et `target` doivent avoir une master data ; `target`
 /// peut être égal à `host` (hiérarchie auto-référentielle).
+///
+/// Refuse `(host, column)` déjà occupé par une référence **native** (FK du DDL
+/// statique, marquée `native=TRUE` par [`seed_native`]). Ces références reflètent
+/// le schéma et ne sont pas éditables via l'API.
 pub fn create(
     con: &duckdb::Connection,
     host: &str,
@@ -123,12 +233,20 @@ pub fn create(
     target: &str,
 ) -> Result<(), AppError> {
     ensure_valid_column(column)?;
+    if is_native(con, host, column).map_err(db_err)? {
+        return Err(AppError::conflict(format!(
+            "référence native (non éditable) : {host}.{column}"
+        )));
+    }
     let (host_table, _) = references::dimension_master(host).ok_or_else(|| {
         AppError::bad_request(format!(
             "dimension hôte inconnue ou sans master data : {host}"
         ))
     })?;
-    if references::dimension_master(target).is_none() {
+    // La cible peut être une dimension d'écriture (`account`, `currency`…) ou
+    // une master data secondaire (`sous_classe`, `flow_scheme`…) — résolue par
+    // `target_master` qui englobe les deux.
+    if references::target_master(con, target).is_none() {
         return Err(AppError::bad_request(format!(
             "dimension cible inconnue ou sans master data : {target}"
         )));
@@ -152,8 +270,8 @@ pub fn create(
     )
     .map_err(db_err)?;
     con.execute(
-        "INSERT INTO dim_custom_reference (host_dimension, column_name, target_dimension) \
-         VALUES (?, ?, ?)",
+        "INSERT INTO dim_custom_reference (host_dimension, column_name, target_dimension, native) \
+         VALUES (?, ?, ?, FALSE)",
         &[&host, &column, &target],
     )
     .map_err(db_err)?;
@@ -161,8 +279,16 @@ pub fn create(
 }
 
 /// Supprime une référence directe : colonne sur la master data hôte + registre.
+///
+/// Refuse les références **natives** (FK du DDL statique) : leur suppression
+/// casserait les règles existantes qui s'y appuient et le catalogue système.
 pub fn remove(con: &duckdb::Connection, host: &str, column: &str) -> Result<(), AppError> {
     ensure_valid_column(column)?;
+    if is_native(con, host, column).map_err(db_err)? {
+        return Err(AppError::conflict(format!(
+            "référence native (non supprimable) : {host}.{column}"
+        )));
+    }
     let n: i64 = con
         .query_row(
             "SELECT COUNT(*) FROM dim_custom_reference \
@@ -350,10 +476,15 @@ mod tests {
             col_exists(&con, "dim_account", "compte_parent"),
             "colonne ajoutée sur dim_account"
         );
+        // La référence créée est trouvée et marquée non-native (les natives sont
+        // peuplées par `seed_native` au setup).
         let all = load_all(&con).unwrap();
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].host_dimension, "account");
-        assert_eq!(all[0].target_dimension, "account");
+        let ours = all
+            .iter()
+            .find(|r| r.column == "compte_parent" && r.host_dimension == "account")
+            .expect("référence custom présente");
+        assert_eq!(ours.target_dimension, "account");
+        assert!(!ours.native, "référence utilisateur = native FALSE");
     }
 
     #[test]
@@ -381,6 +512,98 @@ mod tests {
             create(&con, "account", "x", "analysis").is_err(),
             "analysis n'a pas de master data comme cible"
         );
+    }
+
+    #[test]
+    fn accepte_cible_master_data_secondaire() {
+        // Une référence custom peut cibler une master data secondaire (ex.
+        // `sous_classe`), résolue via `references::target_master`.
+        let con = setup();
+        // `account.comportement` → sous_classe (inventé pour le test).
+        create(&con, "account", "comportement", "sous_classe").unwrap();
+        let all = load_all(&con).unwrap();
+        assert!(all.iter().any(|r| r.host_dimension == "account"
+            && r.column == "comportement"
+            && r.target_dimension == "sous_classe"));
+    }
+
+    #[test]
+    fn seed_native_peuple_les_fk_natives() {
+        let con = setup();
+        // Après create_schema, les 12 FK natives du catalogue sont présentes.
+        let all = load_all(&con).unwrap();
+        let natives: Vec<_> = all.iter().filter(|r| r.native).collect();
+        assert_eq!(
+            natives.len(),
+            references::NATIVE_MASTER_REFS.len(),
+            "toutes les FK natives sont seedées"
+        );
+        // Vérifie deux cas représentatifs.
+        assert!(natives.iter().any(|r| r.host_dimension == "account"
+            && r.column == "sous_classe"
+            && r.target_dimension == "sous_classe"));
+        assert!(natives.iter().any(|r| r.host_dimension == "entity"
+            && r.column == "entite_parent"
+            && r.target_dimension == "entity"));
+    }
+
+    #[test]
+    fn seed_native_est_idempotent() {
+        let con = setup();
+        let n1: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .unwrap();
+        seed_native(&con).unwrap();
+        let n2: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n1, n2, "seed_native ne double pas les insertions");
+    }
+
+    #[test]
+    fn create_refuse_sur_ligne_native() {
+        let con = setup();
+        let err = create(&con, "account", "sous_classe", "sous_classe").unwrap_err();
+        let msg = err.1;
+        assert!(
+            msg.contains("native") || msg.contains("déjà existante"),
+            "message d'erreur pertinent : {msg}"
+        );
+    }
+
+    #[test]
+    fn remove_refuse_sur_ligne_native() {
+        let con = setup();
+        let err = remove(&con, "account", "sous_classe").unwrap_err();
+        let msg = err.1;
+        assert!(msg.contains("native"), "refus suppression native : {msg}");
+    }
+
+    #[test]
+    fn migrate_native_idempotent_apres_setup() {
+        // Après create_schema (qui appelle déjà seed_native), migrate_native
+        // doit rester idempotent : il ne double pas les insertions et ne
+        // plante pas (ALTER ADD COLUMN IF NOT EXISTS silencieux sur la colonne
+        // déjà présente).
+        let con = setup();
+        let before: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .unwrap();
+        migrate_native(&con).unwrap();
+        let after: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, after, "migrate_native idempotent");
+        // Toutes les lignes attendues du catalogue natif sont marquées native.
+        let all = load_all(&con).unwrap();
+        for &(host, column, _target) in references::NATIVE_MASTER_REFS {
+            assert!(
+                all.iter().any(|r| r.host_dimension == host
+                    && r.column == column
+                    && r.native),
+                "référence native présente : {host}.{column}"
+            );
+        }
     }
 
     #[test]
@@ -430,16 +653,20 @@ mod tests {
     fn survit_au_reset() {
         let con = setup();
         create(&con, "account", "compte_parent", "account").unwrap();
+        // Combien de références avant reset (natives + notre custom).
+        let before: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
+            .unwrap();
 
         // Reset complet du schéma.
         crate::schema::create_schema(&con).expect("re-create_schema");
 
-        let n: i64 = con
+        let after: i64 = con
             .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(n, 1, "registre survit au reset");
+        assert_eq!(before, after, "registre survit au reset (natives + custom)");
         assert!(
             col_exists(&con, "dim_account", "compte_parent"),
             "colonne réappliquée après reset"
@@ -455,11 +682,8 @@ mod tests {
             !col_exists(&con, "dim_account", "compte_parent"),
             "colonne retirée"
         );
-        let n: i64 = con
-            .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(n, 0);
+        // Les natives restent (le custom supprimé ne touche pas aux autres).
+        let all = load_all(&con).unwrap();
+        assert!(all.iter().all(|r| r.native), "il ne reste que des natives");
     }
 }

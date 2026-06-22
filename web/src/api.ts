@@ -16,9 +16,11 @@ import type {
   CustomReference,
   DataHealthReport,
   DimensionInfo,
+  EntryInput,
   HealthStatus,
   LevelCount,
   MasterTable,
+  NativeEnum,
   PipelineCounts,
   ReferenceInfo,
   ReportFilters,
@@ -125,8 +127,19 @@ export const api = {
   // Colonnes dynamiques (dimensions built-in + custom + level + amount) →
   // chaque ligne est un objet générique ; la vue Écritures construit ses
   // colonnes depuis /api/meta/dimensions.
-  entries: (params: { level: string; limit?: number; offset?: number } & ReportFilters) =>
+  entries: (params: { level: string; limit?: number; offset?: number } & ReportFilters & { source?: string }) =>
     getJson<Record<string, unknown>[]>(`/entries${buildQueryString(params)}`),
+  // Mutations unitaires / batch sur stg_entry (saisie manuelle). Toute ligne
+  // créée via create() est marquée `source = MANUAL` côté back ; edit/delete
+  // sont refusés sur les lignes importées par CSV (source ≠ MANUAL).
+  entriesMutations: {
+    create: (rows: EntryInput[]) =>
+      postJsonRaw<{ inserted: number; ids: number[] }>('/entries', { rows }),
+    update: (id: number, row: EntryInput) =>
+      putJson<{ updated: number; id: number }>(`/entries/${id}`, row),
+    remove: (id: number) =>
+      deleteJson<{ deleted: number; id: number }>(`/entries/${id}`),
+  },
   run: (scenario?: string) =>
     scenario && scenario.trim() !== ''
       ? postJsonRaw<PipelineCounts>('/run', { scenario })
@@ -208,6 +221,9 @@ export const api = {
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.
   references: () => getJson<ReferenceInfo[]>('/meta/references'),
+  // Enums natifs (CHECK du DDL des master data, ex : account.classe).
+  // Source de vérité pour le mode `attr` de `SelectionCond`.
+  nativeEnums: () => getJson<NativeEnum[]>('/meta/native-enums'),
   // Rapport « santé des données » : orphelins sur tout le graphe de références.
   dataHealth: () => getJson<DataHealthReport>('/meta/health'),
   dimensions: {

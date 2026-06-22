@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { Entity, Nature, Period, Scenario } from '../types';
+import { formatOptionLabel } from '../utils/format';
 
 interface Props {
   scenario: string;
@@ -77,7 +78,7 @@ export function Filters({
           <option value="">Tous</option>
           {scenarios.map((s) => (
             <option key={s.code} value={s.code}>
-              {s.libelle || s.code}
+              {formatOptionLabel(s.code, s.libelle)}
             </option>
           ))}
         </select>
@@ -92,7 +93,7 @@ export function Filters({
           <option value="">Toutes</option>
           {entities.map((e) => (
             <option key={e.code} value={e.code}>
-              {e.libelle || e.code}
+              {formatOptionLabel(e.code, e.libelle)}
             </option>
           ))}
         </select>
@@ -107,7 +108,7 @@ export function Filters({
           <option value="">Tous</option>
           {entryOptions.map((p) => (
             <option key={p.code} value={p.code}>
-              {p.libelle || p.code}
+              {formatOptionLabel(p.code, p.libelle)}
             </option>
           ))}
         </select>
@@ -122,7 +123,7 @@ export function Filters({
           <option value="">Toutes</option>
           {periods.map((p) => (
             <option key={p.code} value={p.code}>
-              {p.libelle || p.code}
+              {formatOptionLabel(p.code, p.libelle)}
             </option>
           ))}
         </select>
@@ -137,7 +138,7 @@ export function Filters({
           <option value="">Toutes</option>
           {natures.map((n) => (
             <option key={n.code} value={n.code}>
-              {n.libelle || n.code}
+              {formatOptionLabel(n.code, n.libelle)}
             </option>
           ))}
         </select>

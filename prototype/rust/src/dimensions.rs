@@ -139,7 +139,7 @@ pub fn builtin_dims() -> Vec<DimDef> {
             name: "share".into(),
             category: DimCategory::Analytical,
             custom: false,
-            label: "Quote-part".into(),
+            label: "Titre".into(),
         },
         DimDef {
             name: "analysis".into(),

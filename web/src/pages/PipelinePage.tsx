@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
 import type { LevelCount, PipelineCounts, ScenarioSummary } from '../types';
-import { formatInt } from '../utils/format';
+import { formatInt, formatOptionLabel } from '../utils/format';
 
 type RunStatus =
   | { kind: 'idle' }
@@ -244,7 +244,7 @@ export function PipelinePage() {
           {scenarios.length === 0 && <option value="">—</option>}
           {scenarios.map((s) => (
             <option key={s.code} value={s.code}>
-              {s.libelle && s.libelle.trim() !== '' ? `${s.libelle} (${s.code})` : s.code}
+              {formatOptionLabel(s.code, s.libelle)}
             </option>
           ))}
         </select>

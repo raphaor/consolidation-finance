@@ -905,6 +905,32 @@ async fn get_references(
     Ok(Json(out))
 }
 
+/// Ligne renvoyée par `GET /api/meta/native-enums` : un enum natif `CHECK` du
+/// DDL (ex. `account.classe`), exposé comme attribut traversable en sélection
+/// via le mode `attr` de `SelectionCond` (cf. `rules.rs`).
+#[derive(serde::Serialize)]
+struct NativeEnumDto {
+    host_dimension: &'static str,
+    column: &'static str,
+    values: &'static [&'static str],
+}
+
+/// GET /api/meta/native-enums — catalogue des enums natifs (`CHECK` du DDL).
+/// Contrairement à `references-custom` (FK natives auto-peuplées), ces enums
+/// n'ont pas de table cible : ils sont résolus par filtre direct sur la colonne
+/// de la master data hôte (cf. mode `attr` dans `rules.rs`).
+async fn get_native_enums() -> Json<Vec<NativeEnumDto>> {
+    let out = references::NATIVE_ENUMS
+        .iter()
+        .map(|e| NativeEnumDto {
+            host_dimension: e.host_dimension,
+            column: e.column,
+            values: e.values,
+        })
+        .collect();
+    Json(out)
+}
+
 /// Une anomalie d'intégrité : des valeurs de `table.column` n'existent pas dans
 /// `target_table.target_column`. `count` = nb de valeurs orphelines distinctes,
 /// `sample` = échantillon (max 20).
@@ -998,6 +1024,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/api/md/{table}/schema", get(table_schema))
         .route("/api/meta/references", get(get_references))
+        .route("/api/meta/native-enums", get(get_native_enums))
         .route("/api/meta/health", get(get_data_health))
 }
 

@@ -174,16 +174,43 @@ pub fn dimension_master(dim: &str) -> Option<(&'static str, &'static str)> {
     entry_dimension_target(dim).map(|r| (r.target_table, r.target_column))
 }
 
+/// Master data **secondaire** : tables référentielles `dim_*` qui ne sont **pas**
+/// des dimensions d'écriture (pas de colonne sur `stg_entry`) mais qui servent de
+/// cible à une FK native (ex. `dim_sous_classe`, `dim_flow_scheme`,
+/// `dim_scenario_category`, `dim_variant`, `dim_ruleset`, `dim_rate_set`,
+/// `dim_perimeter_set`). Résolution par inférence depuis `REFERENCES` :
+/// `dim → (dim_<dim>, target_column)` où `target_column` est la clé PK de la
+/// table cible (typiquement `code`). `None` si aucune table `dim_<dim>` n'apparaît
+/// comme cible dans le graphe statique.
+pub fn secondary_master_data(dim: &str) -> Option<(&'static str, &'static str)> {
+    for r in REFERENCES {
+        // Matche soit directement le nom de table (ex. "dim_sous_classe"), soit
+        // le nom logique de dimension (ex. "sous_classe" → "dim_sous_classe").
+        if r.target_table == dim || r.target_table.strip_prefix("dim_") == Some(dim) {
+            // Garde-fou : "dim_" tout court ne correspond à aucune dimension.
+            if r.target_table == "dim_" {
+                continue;
+            }
+            return Some((r.target_table, r.target_column));
+        }
+    }
+    None
+}
+
 /// Résout la cible référentielle d'un nom, qu'il désigne une **dimension**
-/// d'écriture (master data statique) ou une **liste de valeurs** (`lst_<code>`,
-/// cf. [`crate::value_lists`]). Renvoie `(table, colonne_clé)` possédés (les noms
-/// de listes ne sont pas `'static`). `None` si le nom n'est ni l'un ni l'autre.
+/// d'écriture (master data statique), une **master data secondaire** (FK native
+/// vers `dim_sous_classe`, `dim_flow_scheme`, etc.), ou une **liste de valeurs**
+/// (`lst_<code>`, cf. [`crate::value_lists`]). Renvoie `(table, colonne_clé)`
+/// possédés (les noms ne sont pas tous `'static`). `None` si le nom n'est
+/// aucun de ces trois.
 ///
 /// C'est le point d'entrée commun pour valider/résoudre la cible d'un attribut N2
-/// de caractéristique : un champ peut viser une dimension existante **ou** une
-/// liste de valeurs réutilisable.
+/// de caractéristique ou d'une référence directe (patron B) native ou utilisateur.
 pub fn target_master(con: &Connection, target: &str) -> Option<(String, String)> {
     if let Some((t, c)) = dimension_master(target) {
+        return Some((t.to_string(), c.to_string()));
+    }
+    if let Some((t, c)) = secondary_master_data(target) {
         return Some((t.to_string(), c.to_string()));
     }
     if crate::value_lists::list_exists(con, target) {
@@ -320,6 +347,81 @@ pub fn all_references(con: &Connection) -> Vec<OwnedReference> {
     let mut out: Vec<OwnedReference> = REFERENCES.iter().map(OwnedReference::from_static).collect();
     out.extend(dynamic_references(con));
     out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Catalogue des attributs natifs des master data
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Deux familles distinées, exposées automatiquement dans le dropdown « Traverser »
+// de l'éditeur de règles (zone Sélection) au même titre que les caractéristiques
+// N1 et références directes utilisateur :
+//
+// 1. `NATIVE_MASTER_REFS` : FK natives des master data vers d'autres master data
+//    (ex. `dim_account.sous_classe → dim_sous_classe`). Auto-peuplées dans le
+//    registre `dim_custom_reference` au démarrage (cf.
+//    `custom_references::seed_native`) — réutilise le mécanisme patron B.
+//
+// 2. `NATIVE_ENUMS` : colonnes `CHECK` (enums fermées) sans table cible. Exposées
+//    via le mode `attr` de `SelectionCond` (cf. `rules.rs`) : pas de JOIN vers une
+//    table cible, juste un filtre direct sur la colonne de la master data hôte.
+
+/// FK native : `(host_dimension, column, target_dimension)`.
+///
+/// `host_dimension` est le nom logique de la dimension d'écriture (ex. `account`),
+/// pas le nom de table (`dim_account`). Les cibles (`target_dimension`) peuvent
+/// être des dimensions d'écriture (`currency`, `entity`, `scenario`, `period`) ou
+/// des master data secondaires (`sous_classe`, `flow_scheme`,
+/// `scenario_category`, `variant`, `ruleset`, `rate_set`, `perimeter_set` —
+/// résolues par [`secondary_master_data`]).
+pub const NATIVE_MASTER_REFS: &[(&str, &str, &str)] = &[
+    // dim_scenario (8 FK natives)
+    ("scenario", "category", "scenario_category"),
+    ("scenario", "entry_period", "period"),
+    ("scenario", "presentation_currency", "currency"),
+    ("scenario", "variant", "variant"),
+    ("scenario", "ruleset_code", "ruleset"),
+    ("scenario", "rate_set", "rate_set"),
+    ("scenario", "perimeter_set", "perimeter_set"),
+    ("scenario", "a_nouveau_scenario", "scenario"),
+    // dim_entity (2 FK natives)
+    ("entity", "devise_fonctionnelle", "currency"),
+    ("entity", "entite_parent", "entity"),
+    // dim_account (2 FK natives ; classe est un enum → NATIVE_ENUMS)
+    ("account", "sous_classe", "sous_classe"),
+    ("account", "flow_scheme", "flow_scheme"),
+];
+
+/// Enum natif : contrainte `CHECK` documentée dans le DDL, sans table cible.
+/// Exposée via le mode `attr` de `SelectionCond` (JOIN sur la master data hôte +
+/// WHERE direct sur la colonne).
+pub struct NativeEnum {
+    pub host_dimension: &'static str,
+    pub column: &'static str,
+    pub values: &'static [&'static str],
+}
+
+/// Catalogue des enums natifs. Limite volontaire aux `CHECK` explicites du DDL
+/// (cf. `schema.rs`) : `dim_account.classe` ∈ {bilan, resultat, flux}.
+/// `dim_sous_classe.classe` existe aussi mais `sous_classe` n'est pas une
+/// dimension d'écriture (pas filtrable en sélection). `dim_method.consolidated`
+/// est un booléen mais `method` n'est qu'une dimension de périmètre (sat_perimeter)
+/// — pas non plus filtrable en sélection.
+pub const NATIVE_ENUMS: &[NativeEnum] = &[
+    NativeEnum {
+        host_dimension: "account",
+        column: "classe",
+        values: &["bilan", "resultat", "flux"],
+    },
+];
+
+/// Recherche d'un enum natif par `(host, column)`. Retourne la liste des valeurs
+/// autorisées si l'enum existe, `None` sinon.
+pub fn native_enum_lookup(host: &str, column: &str) -> Option<&'static [&'static str]> {
+    NATIVE_ENUMS
+        .iter()
+        .find(|e| e.host_dimension == host && e.column == column)
+        .map(|e| e.values)
 }
 
 /// Les références portées par une table donnée.

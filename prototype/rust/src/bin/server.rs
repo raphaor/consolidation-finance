@@ -31,7 +31,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use duckdb::params_from_iter;
@@ -47,9 +47,9 @@ use tower_http::services::{ServeDir, ServeFile};
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
-    characteristics, create_schema, custom_references, dimensions, export, import, load_all,
-    masterdata, money::Money, run_pipeline, run_pipeline_with_hook, seed_demo_attributes,
-    seed_demo_rules, value_lists, ConvertParams,
+    characteristics, create_schema, custom_references, dimensions, entries, export, import,
+    load_all, masterdata, money::Money, run_pipeline, run_pipeline_with_hook,
+    seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,6 +142,12 @@ struct EntriesQuery {
     period: Option<String>,
     #[serde(default)]
     nature: Option<String>,
+    /// Filtre par provenance (`source`) : ex. `MANUAL` pour ne voir que les
+    /// saisies manuelles, ou toute autre valeur de `stg_entry.source`. N'affecte
+    /// que le niveau `raw` (le pipeline ne propage pas `source` aux niveaux
+    /// corporate/converted/consolidated).
+    #[serde(default)]
+    source: Option<String>,
 }
 
 fn default_level() -> String {
@@ -352,8 +358,11 @@ async fn get_compte_resultat(
 /// dimensions custom apparaissent automatiquement (vue Écritures pilotée par
 /// `/api/meta/dimensions`).
 ///
-/// Niveau spécial `raw` : lit la saisie brute (`stg_entry`) avant pipeline,
-/// avec un id synthétique (ROW_NUMBER) pour la cohérence de pagination côté UI.
+/// Niveau spécial `raw` : lit la saisie brute (`stg_entry`) avant pipeline.
+/// `stg_entry` porte un `id` PK auto-incrémenté (seq_stg_entry) qui identifie
+/// chaque ligne pour l'édition/suppression via PUT/DELETE /api/entries. La
+/// colonne `source` (provenance) est exposée pour filtrer les saisies manuelles
+/// (`source=MANUAL`).
 async fn get_entries(
     Query(q): Query<EntriesQuery>,
     State(state): State<Arc<AppState>>,
@@ -371,26 +380,50 @@ async fn get_entries(
             &q.nature,
         );
         let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
-            let where_stg = if fsql.is_empty() {
-                String::new()
+            // Filtre source (raw uniquement) : n'a pas de sens aux autres
+            // niveaux car `source` n'est pas propagée par le pipeline.
+            let source_clause = match &q.source {
+                Some(s) => {
+                    let mut p = Vec::new();
+                    p.push(DbValue::Text(s.clone()));
+                    (format!(" AND source = ?"), p)
+                }
+                None => (String::new(), Vec::new()),
+            };
+            // Le WHERE sur stg_entry est composé à partir des filtres standards
+            // (préfixés " AND ..." par build_filters) et du filtre source.
+            let has_filters = !fsql.is_empty() || !source_clause.0.is_empty();
+            let where_stg = if has_filters {
+                format!("WHERE {}", {
+                    let mut combined = String::new();
+                    if !fsql.is_empty() {
+                        combined.push_str(fsql.trim_start_matches(" AND "));
+                    }
+                    if !source_clause.0.is_empty() {
+                        if !combined.is_empty() {
+                            combined.push_str(" AND");
+                        }
+                        combined.push_str(source_clause.0.trim_start_matches(" AND "));
+                    }
+                    combined
+                })
             } else {
-                format!("WHERE {}", fsql.trim_start_matches(" AND "))
+                String::new()
             };
             let sql = format!(
-                "SELECT * FROM (
-                    SELECT ROW_NUMBER() OVER (ORDER BY entity, scenario, period, account, flow) AS id,
-                           {col_list}, 'raw' AS level, amount
-                    FROM stg_entry {where_stg}
-                ) ORDER BY id
-                LIMIT ? OFFSET ?"
+                "SELECT id, {col_list}, source, 'raw' AS level, amount
+                 FROM stg_entry {where_stg}
+                 ORDER BY id
+                 LIMIT ? OFFSET ?"
             );
             let mut params = fparams;
+            params.extend(source_clause.1);
             params.push(DbValue::BigInt(q.limit));
             params.push(DbValue::BigInt(q.offset));
             (sql, params)
         } else {
             let sql = format!(
-                "SELECT id, {col_list}, level, amount
+                "SELECT id, {col_list}, NULL AS source, level, amount
                  FROM fact_entry
                  WHERE level = ? {fsql}
                  ORDER BY id
@@ -1241,6 +1274,12 @@ async fn main() {
             "   Base déjà initialisée ({n} lignes dans fact_entry) — CSV non réimportés, éditions UI préservées."
         );
         println!("   (Pour forcer le rechargement : POST /api/reset ou CONSO_FORCE_RESEED=1)");
+        // Migration idempotente : ajoute la colonne `native` au registre des
+        // références directes (introduite après les premières bases) et peuple
+        // les FK natives (account.sous_classe, entity.entite_parent, …).
+        if let Err(e) = custom_references::migrate_native(&con) {
+            eprintln!("   ⚠ migrate_native (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");
@@ -1315,7 +1354,14 @@ async fn main() {
         .route("/api/levels", get(get_levels))
         .route("/api/bilan", get(get_bilan))
         .route("/api/compte-resultat", get(get_compte_resultat))
-        .route("/api/entries", get(get_entries))
+        .route(
+            "/api/entries",
+            get(get_entries).post(entries::create_entries),
+        )
+        .route(
+            "/api/entries/{id}",
+            put(entries::update_entry).delete(entries::delete_entry),
+        )
         .route("/api/run", post(run_pipeline_handler))
         .route("/api/reset", post(reset_handler))
         .route("/api/scenarios", get(list_scenarios))

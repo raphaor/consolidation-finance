@@ -5,6 +5,7 @@
 
 import type { ReactNode } from 'react';
 import type { ColumnDef } from '../types';
+import { formatOptionLabel } from '../utils/format';
 
 type Row = Record<string, unknown>;
 
@@ -39,11 +40,10 @@ export function FieldInput({
         {col.nullable && <option value="">—</option>}
         {rows.map((r) => {
           const v = String(r[keys.value] ?? '');
-          const l = String(r[keys.label] ?? v);
-          // On affiche le code ; le libellé reste accessible en infobulle.
+          const l = String(r[keys.label] ?? '');
           return (
-            <option key={v} value={v} title={l !== v ? l : undefined}>
-              {v}
+            <option key={v} value={v}>
+              {formatOptionLabel(v, l)}
             </option>
           );
         })}
@@ -77,11 +77,10 @@ export function FieldInput({
         )}
         {filtered.map((r) => {
           const v = String(r[valueKey] ?? '');
-          const l = String(r[labelKey] ?? v);
-          // On affiche le code ; le libellé reste accessible en infobulle.
+          const l = String(r[labelKey] ?? '');
           return (
-            <option key={v} value={v} title={l !== v ? l : undefined}>
-              {v}
+            <option key={v} value={v}>
+              {formatOptionLabel(v, l)}
             </option>
           );
         })}

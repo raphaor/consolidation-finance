@@ -81,9 +81,18 @@ Beaucoup de logique (ordre des flux, scopes autorisés, whitelists SQL) dérive 
 
 ### Moteur de règles (`src/rules.rs`) — exécuteur générique
 
-C'est un **exécuteur générique**, PAS l'endroit où coder une règle métier (interco, participation…) en dur. Une règle est un JSON (`dim_rule.definition`) avec un `scope` (conditions sur `sat_perimeter`) et des `operations` (sélection à un niveau de `fact_entry` × coefficient × multiplicateur → écriture avec `destination` par dimension). Un *ruleset* (`dim_ruleset` + `dim_ruleset_item` ordonnés) enchaîne plusieurs règles ; `run_ruleset` l'exécute. Les clôtures sont reconstruites après chaque règle.
+C'est un **exécuteur générique**, PAS l'endroit où coder une règle métier (interco, participation…) en dur. Une règle est un JSON (`dim_rule.definition`) avec un `scope` (conditions sur `sat_perimeter`) et des `operations` (sélection à un niveau de `fact_entry` × coefficient × multiplicateur → écriture avec `destination` par dimension). Un *ruleset* (`dim_ruleset` + `dim_ruleset_item` ordonnés) enchaîne plusieurs règles ; `run_ruleset` l'exécute. La reconstruction des clôtures après chaque règle est **désactivée par défaut** (flag `RECONSTRUCT_CLOSURES_AFTER_RULE = false`, 2026-06-21 : le F99 relève de la transition de niveau, pas d'une reconstruction post-règle ; les règles gèrent F99 flux à flux).
 
-**Sécurité SQL** : les identifiants (noms de colonnes/dimensions, niveaux) sont validés contre des whitelists dérivées du registre / `information_schema` ; les valeurs passent par des `?` paramétrés. Ne jamais interpoler un identifiant venant du JSON utilisateur.
+**JSON schema** (spec complète : `docs/REGLES_CONSO.md` §4) :
+- `SelectionCond` : `dim` + `op` + `val`, avec traversée optionnelle `via` (caractéristique N1) ou `ref` (référence directe patron B), mutuellement exclusives — filtre indirect par attribut du membre.
+- `Destination` : 5 modes par dimension pilotable — `inherit` / `override` / `null` / `map` (caractéristique N1→N2) / `map_ref` (référence directe). `map` et `map_ref` exigent `target_dimension = dim` écrit (compatibilité de type) et font INNER JOIN (les membres sans valeur de référence ou non classés ne génèrent rien).
+
+**Modules connexes** :
+- `characteristics.rs` — caractéristiques N1 (regroupement, table `car_<code>`) + attributs N2 typés. Registres `dim_characteristic` / `dim_characteristic_attribute` (survivent au reset). Routes `/api/meta/characteristics*`. Consommé par `map` et sélection `via`.
+- `custom_references.rs` — références directes (patron B, colonne sur master data pointant vers une dimension, y compris elle-même : hiérarchie `compte_parent`). Registre `dim_custom_reference` (survit au reset). Routes `/api/meta/references-custom*`. Consommé par `map_ref` et sélection `ref`.
+- `references.rs` — graphe central des références : `REFERENCES` (const statique) + `dynamic_references` (caractéristiques + patron B fusionnés) = `all_references`. Source unique de validation à l'écriture + dropdowns UI via `/api/meta/references`.
+
+**Sécurité SQL** : les identifiants (noms de colonnes/dimensions, niveaux, `via`/`attr`/`ref`) sont validés contre des whitelists dérivées du registre / `information_schema` ; les valeurs passent par des `?` paramétrés. Ne jamais interpoler un identifiant venant du JSON utilisateur.
 
 ### Serveur (`src/bin/server.rs`)
 

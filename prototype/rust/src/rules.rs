@@ -176,9 +176,84 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
 
     for op in &def.operations {
         for s in &op.selection {
+            // Cible référentielle pour valider `val` : par défaut c'est la master
+            // data de `dim` ; en cas de traversée (`via` ou `ref`), la valeur
+            // comparée vit dans une autre table.
+            let target: Option<(String, String)> = if let Some(via) = &s.via {
+                // Caractéristique N1 : on filtre sur car_<via>.code (valeur N1).
+                // La caractéristique doit exister avec base_dimension = dim.
+                match characteristics::base_dimension_of(con, via).map_err(|e| e.to_string())? {
+                    Some(base) if base == s.dim => {
+                        Some((format!("car_{via}"), "code".to_string()))
+                    }
+                    Some(other) => {
+                        return Err(format!(
+                            "selection.{dim} via : la caractéristique '{via}' a pour base \
+                             '{other}', pas '{dim}'",
+                            dim = s.dim
+                        ))
+                    }
+                    None => {
+                        return Err(format!(
+                            "selection.{} via : caractéristique inconnue : {via}",
+                            s.dim
+                        ))
+                    }
+                }
+            } else if let Some(rf) = &s.ref_field {
+                // Référence directe (patron B) : on filtre sur la master data de
+                // la dimension cible de la référence (souvent = dim en cas
+                // d'auto-référence hiérarchique type compte_parent).
+                match crate::custom_references::target_of(con, &s.dim, rf)
+                    .map_err(|e| e.to_string())?
+                {
+                    Some(target_dim) => references::target_master(con, &target_dim),
+                    None => {
+                        return Err(format!(
+                            "selection.{} ref : référence inconnue : {}.{}",
+                            s.dim, s.dim, rf
+                        ))
+                    }
+                }
+            } else if let Some(attr) = &s.attr {
+                // Enum natif (CHECK du DDL) : pas de table cible, pas de check
+                // référentiel. On valide simplement que la valeur (ou chaque
+                // valeur d'un IN) fait partie de la liste autorisée.
+                let values = references::native_enum_lookup(&s.dim, attr).ok_or_else(|| {
+                    format!(
+                        "selection.{} attr : enum natif inconnu : {}.{}",
+                        s.dim, s.dim, attr
+                    )
+                })?;
+                if s.op != "IS NULL" && s.op != "IS NOT NULL" {
+                    let vals: Vec<String> = match &s.val {
+                        Some(JsonValue::Array(a)) => a
+                            .iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect(),
+                        Some(JsonValue::String(x)) => vec![x.clone()],
+                        _ => vec![],
+                    };
+                    for v in &vals {
+                        if !values.contains(&v.as_str()) {
+                            return Err(format!(
+                                "selection.{}.{} : valeur '{}' invalide (autorisées : {:?})",
+                                s.dim, attr, v, values
+                            ));
+                        }
+                    }
+                }
+                None
+            } else {
+                references::entry_dimension_target(&s.dim)
+                    .map(|r| (r.target_table.to_string(), r.target_column.to_string()))
+            };
+            // Conversion vers Option<(&str, &str)> pour check_ref_value.
+            let target_ref: Option<(&str, &str)> =
+                target.as_ref().map(|(t, c)| (t.as_str(), c.as_str()));
             check_ref_value(
                 con,
-                references::entry_dimension_target(&s.dim),
+                target_ref,
                 &s.op,
                 &s.val,
                 &format!("selection.{}", s.dim),
@@ -226,13 +301,37 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
                     }
                     _ => {}
                 }
+            } else if dest.mode == "map_ref" {
+                // Référence directe (patron B) portée par la dimension écrite.
+                // `ref` doit exister, avoir `host_dimension = dim` et
+                // `target_dimension = dim` (la valeur écrite doit être un code
+                // valide pour `dim`).
+                let r = dest.ref_field.as_deref().unwrap_or("");
+                match crate::custom_references::target_of(con, dim, r)
+                    .map_err(|e| e.to_string())?
+                {
+                    None => {
+                        return Err(format!(
+                            "destination.{dim} map_ref : référence inconnue : {dim}.{r}"
+                        ))
+                    }
+                    Some(t) if t != *dim => {
+                        return Err(format!(
+                            "destination.{dim} map_ref : la référence {dim}.{r} pointe vers \
+                             '{t}', incompatible avec la dimension écrite '{dim}'"
+                        ))
+                    }
+                    _ => {}
+                }
             }
         }
     }
     for c in &def.scope {
+        let target_ref: Option<(&str, &str)> =
+            references::perimeter_target(&c.dim).map(|r| (r.target_table, r.target_column));
         check_ref_value(
             con,
-            references::perimeter_target(&c.dim),
+            target_ref,
             &c.op,
             &c.val,
             &format!("scope.{} ({})", c.dim, c.target),
@@ -243,14 +342,18 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
 
 /// Vérifie qu'une valeur de condition (ou chaque élément d'un `IN`) existe dans
 /// la table cible. `None` (dimension libre) et ops de nullité → rien à vérifier.
+///
+/// `target` est passé en `(table, column)` plutôt que `&Reference` pour permettre
+/// de cibler une table non-statique (ex. `car_<via>` d'une caractéristique N1
+/// lors d'une sélection traversée).
 fn check_ref_value(
     con: &Connection,
-    target: Option<&references::Reference>,
+    target: Option<(&str, &str)>,
     op: &str,
     val: &Option<JsonValue>,
     label: &str,
 ) -> Result<(), String> {
-    let Some(r) = target else { return Ok(()) };
+    let Some((table, col)) = target else { return Ok(()) };
     if op == "IS NULL" || op == "IS NOT NULL" {
         return Ok(());
     }
@@ -266,12 +369,9 @@ fn check_ref_value(
         if v.is_empty() {
             continue;
         }
-        if !references::value_exists(con, r.target_table, r.target_column, &v)
-            .map_err(|e| e.to_string())?
-        {
+        if !references::value_exists(con, table, col, &v).map_err(|e| e.to_string())? {
             return Err(format!(
-                "{label} : '{v}' inexistant dans {}.{}",
-                r.target_table, r.target_column
+                "{label} : '{v}' inexistant dans {table}.{col}"
             ));
         }
     }
@@ -350,11 +450,33 @@ struct Operation {
 }
 
 /// Une condition de sélection (`operations[].selection[]`).
+///
+/// Par défaut, la condition porte directement sur la colonne dimensionnelle de
+/// `fact_entry` (`e.<dim>`). Trois traversées optionnelles permettent de filtrer
+/// par **attribut** de la dimension :
+///
+/// - `via` : traverse une caractéristique N1 (regroupement). Le filtre porte
+///   alors sur `car_<via>.code` (la valeur N1 du membre). Ex. : tous les
+///   comptes dont le `comportement` = `VENTES_IC`.
+/// - `ref_field` (sérialisé `ref` en JSON) : traverse une référence directe
+///   (patron B, colonne sur la master data). Ex. : tous les comptes dont le
+///   `compte_parent` = `60`. Couvre aussi les **FK natives** auto-peuplées
+///   (ex. `account.sous_classe`, `entity.entite_parent`) depuis le catalogue
+///   `references::NATIVE_MASTER_REFS`.
+/// - `attr` : traverse un **enum natif** (`CHECK` du DDL, ex. `account.classe`
+///   ∈ {bilan, resultat, flux}). Pas de table cible : la condition porte
+///   directement sur la colonne de la master data hôte via un JOIN simple
+///   `dim_<host> smda_<host>_<attr>`.
+///
+/// Les trois sont mutuellement exclusives (exactement une traverse au plus).
 #[derive(Debug, Clone)]
 struct SelectionCond {
     dim: String,
     op: String,
     val: Option<JsonValue>,
+    via: Option<String>,
+    ref_field: Option<String>,
+    attr: Option<String>,
 }
 
 /// Coefficient appliqué au montant source.
@@ -368,13 +490,18 @@ enum Coefficient {
 /// Destination d'une dimension pilotable.
 #[derive(Debug, Clone)]
 struct Destination {
-    mode: String, // "inherit" | "override" | "null" | "map"
+    mode: String, // "inherit" | "override" | "null" | "map" | "map_ref"
     value: Option<String>,
     /// Mode `map` : caractéristique N1 (`via`) traversée et attribut N2 (`attr`)
     /// dont la valeur surcharge la dimension. La valeur est résolue par jointure
     /// sur la dimension de base de la caractéristique (cf. `exec_operation`).
     via: Option<String>,
     attr: Option<String>,
+    /// Mode `map_ref` : référence directe (patron B) portée par la dimension
+    /// écrite (ex. `compte_parent` sur `account`). La valeur est résolue par un
+    /// seul JOIN sur la master data de la dimension (cf. `exec_operation`).
+    /// Stocké `ref_field` car `ref` est un mot-clé Rust ; sérialisé `ref` en JSON.
+    ref_field: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -543,7 +670,43 @@ fn parse_selection_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Selecti
             "selection.val null pour op='{op}' — utilisez IS NULL pour tester la nullité"
         ));
     }
-    Ok(SelectionCond { dim, op, val })
+    // Traversée optionnelle par attribut : `via` (caractéristique N1), `ref`
+    // (référence directe patron B, y compris FK natives auto-peuplées), ou
+    // `attr` (enum natif `CHECK` du DDL, ex. `account.classe`). Mutuellement
+    // exclusives. Validées à l'enregistrement (validate_definition) et à
+    // l'exécution (exec_operation). `level` n'est pas une dimension pilotable
+    // et ne peut pas être traversé.
+    let via = obj.get("via").and_then(JsonValue::as_str).map(String::from);
+    let ref_field = obj
+        .get("ref")
+        .and_then(JsonValue::as_str)
+        .map(String::from);
+    let attr = obj
+        .get("attr")
+        .and_then(JsonValue::as_str)
+        .map(String::from);
+    let n_traverses = [via.is_some(), ref_field.is_some(), attr.is_some()]
+        .iter()
+        .filter(|&&b| b)
+        .count();
+    if n_traverses > 1 {
+        return Err(format!(
+            "selection.{dim} : 'via', 'ref' et 'attr' sont mutuellement exclusives (traversée d'attribut)"
+        ));
+    }
+    if n_traverses > 0 && dim == "level" {
+        return Err(format!(
+            "selection.{dim} : 'level' n'est pas une dimension traversable (pas de master data)"
+        ));
+    }
+    Ok(SelectionCond {
+        dim,
+        op,
+        val,
+        via,
+        ref_field,
+        attr,
+    })
 }
 
 fn parse_coefficient(v: &JsonValue) -> RuleResult_<Coefficient> {
@@ -568,16 +731,24 @@ fn parse_destination(v: &JsonValue) -> RuleResult_<Destination> {
         .as_object()
         .ok_or("destination.<dim> doit être un objet")?;
     let mode = expect_str(obj, "mode")?;
-    let (value, via, attr) = match mode.as_str() {
-        "inherit" | "null" => (None, None, None),
-        "override" => (Some(expect_str(obj, "value")?), None, None),
+    let (value, via, attr, ref_field) = match mode.as_str() {
+        "inherit" | "null" => (None, None, None, None),
+        "override" => (Some(expect_str(obj, "value")?), None, None, None),
         // Mode `map` : la valeur provient de l'attribut N2 `attr` de la
         // caractéristique N1 `via` (existence validée à l'enregistrement et à
         // l'exécution — cf. validate_definition / exec_operation).
         "map" => {
             let via = expect_str(obj, "via")?;
             let attr = expect_str(obj, "attr")?;
-            (None, Some(via), Some(attr))
+            (None, Some(via), Some(attr), None)
+        }
+        // Mode `map_ref` : la valeur provient d'une référence directe (patron B)
+        // portée par la dimension écrite (ex. `compte_parent`). La référence
+        // doit être auto-référentielle ou cibler la dimension écrite (validé à
+        // l'enregistrement et à l'exécution). `ref` est lu depuis le JSON.
+        "map_ref" => {
+            let r = expect_str(obj, "ref")?;
+            (None, None, None, Some(r))
         }
         other => return Err(format!("destination.mode inconnu : {other}")),
     };
@@ -586,6 +757,7 @@ fn parse_destination(v: &JsonValue) -> RuleResult_<Destination> {
         value,
         via,
         attr,
+        ref_field,
     })
 }
 
@@ -688,6 +860,13 @@ fn dest_expr(
                 let attr = d.attr.clone().unwrap_or_default();
                 format!("cg_{via}.\"{attr}\"")
             }
+            // Mode `map_ref` : valeur tirée d'une référence directe via l'alias
+            // `mdr_<ref>` (master data de la dimension écrite, cf. exec_operation).
+            // `ref` est validé (alphanumérique + existence) avant interpolation.
+            "map_ref" => {
+                let r = d.ref_field.clone().unwrap_or_default();
+                format!("mdr_{r}.\"{r}\"")
+            }
             _ => format!("e.{dim}"),
         },
     }
@@ -741,31 +920,51 @@ fn exec_operation(
 ) -> Result<usize, duckdb::Error> {
     let snap = format!("_rule_snap_{}", op.level);
 
-    // Valider les destinations `map` AVANT toute interpolation (via/attr
-    // viennent du JSON de la règle). On vérifie : identifiants sûrs
-    // (alphanumériques), existence de l'attribut N2, et compatibilité de type
-    // (la dimension écrite doit correspondre à la dimension cible de l'attribut).
+    // Valider les destinations `map` et `map_ref` AVANT toute interpolation
+    // (via/attr/ref viennent du JSON de la règle). On vérifie : identifiants sûrs
+    // (alphanumériques), existence de la cible, et compatibilité de type
+    // (la dimension écrite doit correspondre à la dimension cible de la traversée).
     for (dim, d) in &op.destination {
-        if d.mode != "map" {
-            continue;
-        }
-        let via = d.via.as_deref().unwrap_or("");
-        let attr = d.attr.as_deref().unwrap_or("");
-        if !dimensions::is_valid_custom_name(via) || !dimensions::is_valid_custom_name(attr) {
-            return Err(duckdb_synthesis_error(format!(
-                "destination.{dim} map : identifiants invalides (via={via:?}, attr={attr:?})"
-            )));
-        }
-        let target = characteristics::attribute_target(con, via, attr)?.ok_or_else(|| {
-            duckdb_synthesis_error(format!(
-                "destination.{dim} map : attribut inconnu {via}.{attr}"
-            ))
-        })?;
-        if target != *dim {
-            return Err(duckdb_synthesis_error(format!(
-                "destination.{dim} map : l'attribut {via}.{attr} pointe vers '{target}', \
-                 incompatible avec la dimension '{dim}'"
-            )));
+        if d.mode == "map" {
+            let via = d.via.as_deref().unwrap_or("");
+            let attr = d.attr.as_deref().unwrap_or("");
+            if !dimensions::is_valid_custom_name(via) || !dimensions::is_valid_custom_name(attr) {
+                return Err(duckdb_synthesis_error(format!(
+                    "destination.{dim} map : identifiants invalides (via={via:?}, attr={attr:?})"
+                )));
+            }
+            let target = characteristics::attribute_target(con, via, attr)?.ok_or_else(|| {
+                duckdb_synthesis_error(format!(
+                    "destination.{dim} map : attribut inconnu {via}.{attr}"
+                ))
+            })?;
+            if target != *dim {
+                return Err(duckdb_synthesis_error(format!(
+                    "destination.{dim} map : l'attribut {via}.{attr} pointe vers '{target}', \
+                     incompatible avec la dimension '{dim}'"
+                )));
+            }
+        } else if d.mode == "map_ref" {
+            // Validation `map_ref` : référence directe (patron B) portée par la
+            // dimension écrite. Identifiant sûr + existence + target = dim.
+            let r = d.ref_field.as_deref().unwrap_or("");
+            if !dimensions::is_valid_custom_name(r) {
+                return Err(duckdb_synthesis_error(format!(
+                    "destination.{dim} map_ref : identifiant invalide (ref={r:?})"
+                )));
+            }
+            let target = crate::custom_references::target_of(con, dim, r)?
+                .ok_or_else(|| {
+                    duckdb_synthesis_error(format!(
+                        "destination.{dim} map_ref : référence inconnue {dim}.{r}"
+                    ))
+                })?;
+            if target != *dim {
+                return Err(duckdb_synthesis_error(format!(
+                    "destination.{dim} map_ref : la référence {dim}.{r} pointe vers '{target}', \
+                     incompatible avec la dimension écrite '{dim}'"
+                )));
+            }
         }
     }
 
@@ -901,10 +1100,193 @@ fn exec_operation(
         ));
     }
 
-    // WHERE (sélection).
+    // JOINs des références directes (destinations `map_ref`, patron B). Pour
+    // chaque `ref` distincte, joindre la master data de la dimension écrite
+    // (alias `mdr_<ref>` pour éviter toute collision avec les alias `md_<via>`
+    // / `cg_<via>` des caractéristiques). INNER JOIN volontaire : seules les
+    // lignes dont le membre a une valeur de référence génèrent une écriture
+    // (symétrique au comportement du mode `map`).
+    let mut map_refs: Vec<String> = Vec::new();
+    for (_, d) in &op.destination {
+        if d.mode == "map_ref" {
+            if let Some(r) = &d.ref_field {
+                if !map_refs.contains(r) {
+                    map_refs.push(r.clone());
+                }
+            }
+        }
+    }
+    for r in &map_refs {
+        // `r` déjà validé (identifiant sûr + existence + target = dim) par la
+        // boucle de validation map_ref. On retrouve la dimension hôte (écrite)
+        // via le registre.
+        let host_dim = op
+            .destination
+            .iter()
+            .find(|(_, d)| d.mode == "map_ref" && d.ref_field.as_deref() == Some(r.as_str()))
+            .map(|(dim, _)| dim.clone())
+            .ok_or_else(|| {
+                duckdb_synthesis_error(format!(
+                    "destination map_ref : dimension hôte introuvable pour ref={r}"
+                ))
+            })?;
+        let (host_table, host_key) = references::dimension_master(&host_dim).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "destination map_ref : dimension hôte sans master data : {host_dim}"
+            ))
+        })?;
+        // La condition `IS NOT NULL` sur la colonne référencée est essentielle :
+        // sans elle, l'INNER JOIN réussirait même pour les membres sans valeur
+        // (la master data existe toujours), écrivant un `NULL` dans fact_entry
+        // (rejeté par la contrainte NOT NULL). Symétrique au comportement `map`
+        // (qui exclut les membres non classés via le double JOIN sur car_<via>).
+        joins.push_str(&format!(
+            "\nJOIN {host_table} mdr_{r}\n  ON mdr_{r}.{host_key} = e.{host_dim}\
+             \n  AND mdr_{r}.\"{r}\" IS NOT NULL"
+        ));
+    }
+
+    // JOINs des traversées de sélection (caractéristiques N1 `via`, références
+    // directes `ref`, et enums natifs `attr`). Alias **préfixés par `s`**
+    // (smd_/scg_/smdr_/smda_) pour éviter toute collision avec les JOINs de
+    // destination (md_/cg_/mdr_). INNER JOIN volontaire : seules les lignes dont
+    // le membre est classé / a une valeur de référence sont éligibles au filtre.
+    let mut sel_vias: Vec<String> = Vec::new();
+    let mut sel_refs: Vec<(String, String)> = Vec::new(); // (ref_column, dim) — dim utile pour le JOIN
+    let mut sel_attrs: Vec<(String, String)> = Vec::new(); // (attr_column, dim)
+    for s in &op.selection {
+        if let Some(via) = &s.via {
+            // Validation runtime (identifiant sûr + base_dimension = dim).
+            if !dimensions::is_valid_custom_name(via) {
+                return Err(duckdb_synthesis_error(format!(
+                    "selection.{} via : identifiant invalide ({via:?})",
+                    s.dim
+                )));
+            }
+            let base = characteristics::base_dimension_of(con, via)?.ok_or_else(|| {
+                duckdb_synthesis_error(format!(
+                    "selection.{} via : caractéristique inconnue : {via}",
+                    s.dim
+                ))
+            })?;
+            if base != s.dim {
+                return Err(duckdb_synthesis_error(format!(
+                    "selection.{} via : la caractéristique '{via}' a pour base '{base}', pas '{}'",
+                    s.dim, s.dim
+                )));
+            }
+            if !sel_vias.contains(via) {
+                sel_vias.push(via.clone());
+            }
+        } else if let Some(rf) = &s.ref_field {
+            if !dimensions::is_valid_custom_name(rf) {
+                return Err(duckdb_synthesis_error(format!(
+                    "selection.{} ref : identifiant invalide ({rf:?})",
+                    s.dim
+                )));
+            }
+            let target =
+                crate::custom_references::target_of(con, &s.dim, rf)?.ok_or_else(|| {
+                    duckdb_synthesis_error(format!(
+                        "selection.{} ref : référence inconnue : {}.{}",
+                        s.dim, s.dim, rf
+                    ))
+                })?;
+            // `target` doit avoir une master data (dimension d'écriture ou
+            // master data secondaire résolvable par `target_master`).
+            if references::target_master(con, &target).is_none() {
+                return Err(duckdb_synthesis_error(format!(
+                    "selection.{} ref : la cible '{target}' n'a pas de master data",
+                    s.dim
+                )));
+            }
+            let key = (rf.clone(), s.dim.clone());
+            if !sel_refs.contains(&key) {
+                sel_refs.push(key);
+            }
+        } else if let Some(attr) = &s.attr {
+            // Validation runtime : l'enum natif doit exister dans le catalogue
+            // (re-validation défensive, déjà faite dans validate_definition).
+            if !dimensions::is_valid_custom_name(attr) {
+                return Err(duckdb_synthesis_error(format!(
+                    "selection.{} attr : identifiant invalide ({attr:?})",
+                    s.dim
+                )));
+            }
+            if references::native_enum_lookup(&s.dim, attr).is_none() {
+                return Err(duckdb_synthesis_error(format!(
+                    "selection.{} attr : enum natif inconnu : {}.{}",
+                    s.dim, s.dim, attr
+                )));
+            }
+            let key = (attr.clone(), s.dim.clone());
+            if !sel_attrs.contains(&key) {
+                sel_attrs.push(key);
+            }
+        }
+    }
+    // JOINs caractéristiques N1 de sélection : dim_<base> smd_<via> + car_<via> scg_<via>.
+    for via in &sel_vias {
+        let base_dim = characteristics::base_dimension_of(con, via)?.ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "selection via : caractéristique inconnue : {via}"
+            ))
+        })?;
+        let (base_table, base_key) = references::dimension_master(&base_dim).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "selection via : dimension de base sans master data : {base_dim}"
+            ))
+        })?;
+        let value_table = format!("car_{via}");
+        joins.push_str(&format!(
+            "\nJOIN {base_table} smd_{via}\n  ON smd_{via}.{base_key} = e.{base_dim}\
+             \nJOIN {value_table} scg_{via}\n  ON scg_{via}.code = smd_{via}.\"{via}\""
+        ));
+    }
+    // JOINs références directes de sélection : dim_<host> smdr_<ref>.
+    // `IS NOT NULL` sur la colonne référencée pour exclure les membres sans
+    // valeur de référence (symétrique au comportement destination `map_ref`).
+    for (rf, host_dim) in &sel_refs {
+        let (host_table, host_key) = references::dimension_master(host_dim).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "selection ref : dimension hôte sans master data : {host_dim}"
+            ))
+        })?;
+        joins.push_str(&format!(
+            "\nJOIN {host_table} smdr_{rf}\n  ON smdr_{rf}.{host_key} = e.{host_dim}\
+             \n  AND smdr_{rf}.\"{rf}\" IS NOT NULL"
+        ));
+    }
+    // JOINs enums natifs de sélection : dim_<host> smda_<host>_<attr>.
+    // Alias suffixé par la dimension pour éviter les collisions si plusieurs
+    // dimensions portent un enum du même nom (ex. classe sur account/sous_classe).
+    for (attr, host_dim) in &sel_attrs {
+        let (host_table, host_key) = references::dimension_master(host_dim).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "selection attr : dimension hôte sans master data : {host_dim}"
+            ))
+        })?;
+        joins.push_str(&format!(
+            "\nJOIN {host_table} smda_{host_dim}_{attr}\n  ON smda_{host_dim}_{attr}.{host_key} = e.{host_dim}"
+        ));
+    }
+
+    // WHERE (sélection). L'opérande dépend de la traverse éventuelle :
+    // - via N1 → `scg_<via>.code` (valeur N1 du membre).
+    // - ref    → `smdr_<ref>.<ref>` (colonne de référence directe).
+    // - attr   → `smda_<dim>_<attr>.<attr>` (colonne enum natif sur master data).
+    // - sinon  → `e.<dim>` (comportement historique).
     let mut where_clauses: Vec<String> = Vec::new();
     for sel in &op.selection {
-        let operand = format!("e.{}", sel.dim);
+        let operand = if let Some(via) = &sel.via {
+            format!("scg_{via}.code")
+        } else if let Some(rf) = &sel.ref_field {
+            format!("smdr_{rf}.\"{rf}\"")
+        } else if let Some(attr) = &sel.attr {
+            format!("smda_{}_{}.{}", sel.dim, attr, attr)
+        } else {
+            format!("e.{}", sel.dim)
+        };
         let cond = push_condition(&operand, &sel.op, &sel.val, &mut params)
             .map_err(duckdb_synthesis_error)?;
         where_clauses.push(cond);
@@ -1442,6 +1824,99 @@ mod tests {
         );
     }
 
+    // ── Sélection étendue (via / ref) ────────────────────────────────────
+
+    #[test]
+    fn parse_accepte_selection_avec_via_n1() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","via":"regroupement","op":"=","val":"PROD"}]
+        }] }"#;
+        let def = parse_definition(json, &ctx).expect("via N1 valide");
+        let s = &def.operations[0].selection[0];
+        assert_eq!(s.dim, "account");
+        assert_eq!(s.via.as_deref(), Some("regroupement"));
+        assert!(s.ref_field.is_none(), "via et ref sont exclusifs");
+    }
+
+    #[test]
+    fn parse_accepte_selection_avec_ref_patron_b() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","ref":"compte_parent","op":"=","val":"700"}]
+        }] }"#;
+        let def = parse_definition(json, &ctx).expect("ref patron B valide");
+        let s = &def.operations[0].selection[0];
+        assert_eq!(s.dim, "account");
+        assert_eq!(s.ref_field.as_deref(), Some("compte_parent"));
+        assert!(s.via.is_none(), "via et ref sont exclusifs");
+    }
+
+    #[test]
+    fn parse_rejette_selection_via_et_ref_simultanes() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","via":"x","ref":"y","op":"=","val":"z"}]
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(
+            err.contains("exclusives") || err.contains("via") || err.contains("ref"),
+            "doit rejeter via+ref simultanés : {err}"
+        );
+    }
+
+    #[test]
+    fn parse_rejette_selection_via_sur_level() {
+        // `level` n'est pas une dimension traversable (pas de master data).
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"level","via":"x","op":"=","val":"z"}]
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(
+            err.contains("level") || err.contains("traversable"),
+            "doit rejeter la traversée de level : {err}"
+        );
+    }
+
+    // ── Destination `map_ref` ─────────────────────────────────────────────
+
+    #[test]
+    fn parse_accepte_destination_map_ref_avec_ref() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "destination":{"account":{"mode":"map_ref","ref":"compte_parent"}}
+        }] }"#;
+        let def = parse_definition(json, &ctx).expect("map_ref valide");
+        let (_, d) = def.operations[0]
+            .destination
+            .iter()
+            .find(|(k, _)| k == "account")
+            .expect("destination account");
+        assert_eq!(d.mode, "map_ref");
+        assert_eq!(d.ref_field.as_deref(), Some("compte_parent"));
+        assert!(d.via.is_none() && d.attr.is_none());
+    }
+
+    #[test]
+    fn parse_rejette_destination_map_ref_sans_ref() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "destination":{"account":{"mode":"map_ref"}}
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(
+            err.contains("ref") || err.contains("manquant"),
+            "doit exiger ref pour map_ref : {err}"
+        );
+    }
+
     #[test]
     fn parse_coefficient_constant_avec_value() {
         let v = serde_json::json!({"type":"constant","value":0.25});
@@ -1575,6 +2050,7 @@ mod tests {
                 value: None,
                 via: None,
                 attr: None,
+                ref_field: None,
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
@@ -1592,6 +2068,7 @@ mod tests {
                 value: Some("2ELI".into()),
                 via: None,
                 attr: None,
+                ref_field: None,
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
@@ -1602,6 +2079,30 @@ mod tests {
             DbValue::Text(s) => assert_eq!(s, "2ELI"),
             other => panic!("attendu Text(2ELI), eu {other:?}"),
         }
+    }
+
+    #[test]
+    fn dest_expr_map_ref_pointe_vers_alias_mdr() {
+        // map_ref : la valeur est lue depuis la colonne de référence, via l'alias
+        // `mdr_<ref>` (master data de la dimension écrite, joinée à exec_operation).
+        let dests = vec![(
+            "account".to_string(),
+            Destination {
+                mode: "map_ref".into(),
+                value: None,
+                via: None,
+                attr: None,
+                ref_field: Some("compte_parent".into()),
+            },
+        )];
+        let mut params: Vec<DbValue> = Vec::new();
+        let expr = dest_expr("account", &dests, &mut params);
+        assert_eq!(
+            expr,
+            "mdr_compte_parent.\"compte_parent\"",
+            "mode map_ref → colonne via alias mdr_<ref>"
+        );
+        assert!(params.is_empty(), "map_ref ne bind rien");
     }
 
     #[test]
@@ -1624,5 +2125,93 @@ mod tests {
             json_to_dbvalue(&serde_json::json!(3.14)),
             DbValue::Double(_)
         ));
+    }
+
+    // ── Sélection étendue (attr — enums natifs) ────────────────────────────
+
+    #[test]
+    fn parse_accepte_selection_avec_attr_enum() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","attr":"classe","op":"=","val":"bilan"}]
+        }] }"#;
+        let def = parse_definition(json, &ctx).expect("attr enum valide");
+        let s = &def.operations[0].selection[0];
+        assert_eq!(s.dim, "account");
+        assert_eq!(s.attr.as_deref(), Some("classe"));
+        assert!(s.via.is_none() && s.ref_field.is_none(), "attr exclusif");
+    }
+
+    #[test]
+    fn parse_rejette_attr_et_via_simultanes() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","via":"x","attr":"classe","op":"=","val":"bilan"}]
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(
+            err.contains("exclusives"),
+            "doit rejeter via+attr simultanés : {err}"
+        );
+    }
+
+    #[test]
+    fn parse_rejette_attr_et_ref_simultanes() {
+        let ctx = ctx_fixture();
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","ref":"x","attr":"classe","op":"=","val":"bilan"}]
+        }] }"#;
+        let err = parse_definition(json, &ctx).unwrap_err();
+        assert!(
+            err.contains("exclusives"),
+            "doit rejeter ref+attr simultanés : {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejette_attr_inconnu() {
+        // `account.toto` n'est pas dans le catalogue NATIVE_ENUMS.
+        let con = duckdb::Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","attr":"toto","op":"=","val":"x"}]
+        }] }"#;
+        let err = validate_definition(&con, json).unwrap_err();
+        assert!(
+            err.contains("enum natif inconnu") || err.contains("toto"),
+            "doit rejeter un attr non catalogué : {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejette_attr_avec_valeur_invalide() {
+        // `account.classe = 'inexistant'` — hors enum.
+        let con = duckdb::Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","attr":"classe","op":"=","val":"inexistant"}]
+        }] }"#;
+        let err = validate_definition(&con, json).unwrap_err();
+        assert!(
+            err.contains("invalide") || err.contains("inexistant"),
+            "doit rejeter une valeur hors enum : {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepte_attr_avec_valeurs_enum() {
+        // `account.classe IN ('bilan', 'flux')` — toutes deux autorisées.
+        let con = duckdb::Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        let json = r#"{ "operations":[{
+            "seq":1,"level":"consolidated",
+            "selection":[{"dim":"account","attr":"classe","op":"IN","val":["bilan","flux"]}]
+        }] }"#;
+        validate_definition(&con, json).expect("valeurs enum autorisées");
     }
 }

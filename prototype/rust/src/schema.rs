@@ -26,6 +26,12 @@
 /// Séquence d'identifiants auto-incrémentés pour la table de faits.
 pub const DDL_SEQ_ENTRY: &str = "CREATE SEQUENCE IF NOT EXISTS seq_entry START 1;";
 
+/// Séquence d'identifiants dédiée à `stg_entry` (distincte de `seq_entry` pour
+/// éviter toute collision d'id avec `fact_entry`). Permet l'édition/suppression
+/// unitaire des saisies manuelles (`Source = 'MANUAL'`) via `POST/PUT/DELETE
+/// /api/entries`.
+pub const DDL_SEQ_STG_ENTRY: &str = "CREATE SEQUENCE IF NOT EXISTS seq_stg_entry START 1;";
+
 // --- Config applicative (singleton d'instance) --------------------------------
 
 /// 0. app_config : configuration de l'instance (clé/valeur).
@@ -386,11 +392,17 @@ CREATE TABLE IF NOT EXISTS dim_characteristic_attribute (
 /// `dim_entity.entite_parent`). Comme les registres ci-dessus, il **survit au
 /// reset** (CREATE IF NOT EXISTS, hors `ALL_DROP`) ; `create_schema` ré-applique
 /// ensuite les colonnes perdues (cf. `crate::custom_references::reapply`).
+///
+/// Colonne `native` : les lignes marquées `TRUE` sont peuplées automatiquement
+/// par `custom_references::seed_native` depuis le catalogue statique
+/// `references::NATIVE_MASTER_REFS` (FK natives des master data). Elles sont
+/// verrouillées (non éditables/supprimables via l'API) car elles reflètent le DDL.
 pub const DDL_DIM_CUSTOM_REFERENCE: &str = "\
 CREATE TABLE IF NOT EXISTS dim_custom_reference (
     host_dimension   TEXT NOT NULL,
     column_name      TEXT NOT NULL,
     target_dimension TEXT NOT NULL,
+    native           BOOLEAN NOT NULL DEFAULT FALSE,
     PRIMARY KEY (host_dimension, column_name)
 );";
 
@@ -414,8 +426,13 @@ CREATE TABLE IF NOT EXISTS dim_value_list (
 /// 9. stg_entry : saisie brute — mêmes dimensions que fact_entry sans `level`,
 /// **plus** une colonne `source` non-dimensionnelle (métadonnée de provenance,
 /// NON propagée par le pipeline).
+///
+/// `id` (PK auto-incrémentée via `seq_stg_entry`) : rend chaque ligne stable
+/// pour l'édition/suppression unitaire via l'API REST. Les imports CSV ne
+/// fournissent pas d'id (DEFAULT nextval).
 pub const DDL_STG_ENTRY: &str = "\
 CREATE TABLE stg_entry (
+    id           INTEGER DEFAULT nextval('seq_stg_entry') PRIMARY KEY,
     scenario     TEXT,
     entity       TEXT,
     entry_period TEXT,
@@ -473,6 +490,7 @@ CREATE TABLE fact_entry (
 ///   `dim_scenario`.
 pub const ALL_DDL: &[&str] = &[
     DDL_SEQ_ENTRY,
+    DDL_SEQ_STG_ENTRY,
     DDL_APP_CONFIG,
     DDL_DIM_SCENARIO_CATEGORY,
     DDL_DIM_RATE_SET,
@@ -534,6 +552,7 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS dim_rate_set;",
     "DROP TABLE IF EXISTS dim_scenario_category;",
     "DROP TABLE IF EXISTS app_config;",
+    "DROP SEQUENCE IF EXISTS seq_stg_entry;",
     "DROP SEQUENCE IF EXISTS seq_entry;",
 ];
 
@@ -572,6 +591,12 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
     // 6. Ré-appliquer les colonnes des références directes (patron B), perdues
     //    elles aussi au DROP des dimensions hôtes (le registre survit au reset).
     crate::custom_references::reapply(con)?;
+
+    // 7. Peupler les FK natives du DDL statique dans `dim_custom_reference`
+    //    (account.sous_classe, entity.entite_parent, scenario.category, …).
+    //    Marquées `native=TRUE` et verrouillées contre édition via l'API.
+    //    Idempotent : INSERT OR IGNORE préserve les customs utilisateur.
+    crate::custom_references::seed_native(con)?;
 
     Ok(())
 }

@@ -30,6 +30,25 @@ export interface Entry {
   amount: number;
 }
 
+// Saisie manuelle d'une écriture (POST/PUT /api/entries). Toutes les valeurs
+// sont en `string` (le back parse le montant, tolère la virgule décimale).
+// Les champs optionnels (partner, share, analysis, analysis2) peuvent être ''.
+export interface EntryInput {
+  scenario: string;
+  entity: string;
+  entry_period: string;
+  period: string;
+  account: string;
+  flow: string;
+  currency: string;
+  nature: string;
+  partner: string;
+  share: string;
+  analysis: string;
+  analysis2: string;
+  amount: string;
+}
+
 export interface PipelineCounts {
   corporate: number;
   converted: number;
@@ -571,11 +590,29 @@ export interface ScopeCond {
   val: unknown;
 }
 
-// Une condition de sélection sur fact_entry
+// Une condition de sélection sur fact_entry.
+//
+// Par défaut, la condition porte directement sur la colonne dimensionnelle de
+// `fact_entry` (`e.<dim>`). Deux traversées optionnelles permettent de filtrer
+// par **attribut** de la dimension (mutuellement exclusives) :
+//   - `via` : traverse une caractéristique N1 (regroupement). Le filtre porte
+//     alors sur la valeur N1 du membre (ex : tous les comptes dont le
+//     `comportement` = `VENTES_IC`).
+//   - `ref` : traverse une référence directe (patron B, colonne sur la master
+//     data). Ex : tous les comptes dont le `compte_parent` = `60`. Couvre aussi
+//     les **FK natives** auto-peuplées (ex : `account.sous_classe`,
+//     `entity.entite_parent`) via `seed_native`.
+//   - `attr` : traverse un **enum natif** (CHECK du DDL, ex : `account.classe`
+//     ∈ {bilan, resultat, flux}). Pas de table cible, filtre direct sur la
+//     colonne master data. Cf. `references::NATIVE_ENUMS`.
+// Cf. `docs/REGLES_CONSO.md` §4.1 et `rules.rs::parse_selection_cond`.
 export interface SelectionCond {
   dim: string; // scenario, entity, account, flow, etc.
   op: string;
   val: unknown;
+  via?: string;
+  ref?: string;
+  attr?: string;
 }
 
 // Une opération
@@ -588,12 +625,20 @@ export interface Operation {
   destination: Record<
     string,
     {
-      mode: 'inherit' | 'override' | 'null' | 'map';
+      // Modes de destination :
+      // - `inherit` : conserve la valeur source (`e.<dim>`).
+      // - `override` : force une constante (`value`).
+      // - `null` : vide la valeur (`NULL`).
+      // - `map` : traverse une caractéristique N1 (`via`) pour lire un attribut
+      //   N2 (`attr`) dont la valeur surcharge la dimension.
+      // - `map_ref` : traverse une référence directe patron B (`ref`) portée par
+      //   la dimension écrite (ex : `compte_parent` sur `account`). La valeur
+      //   est résolue par un seul JOIN sur la master data.
+      mode: 'inherit' | 'override' | 'null' | 'map' | 'map_ref';
       value?: string;
-      // Mode `map` : caractéristique N1 traversée (`via`) et attribut N2 (`attr`)
-      // dont la valeur surcharge la dimension (cf. characteristics.rs).
       via?: string;
       attr?: string;
+      ref?: string;
     }
   >;
 }
@@ -669,11 +714,28 @@ export interface Characteristic {
 // Une colonne ajoutée à l'exécution sur la master data d'une dimension hôte,
 // pointant directement vers une dimension cible (y compris elle-même :
 // hiérarchie). Pas de table intermédiaire (cf. custom_references.rs).
+//
+// `native = true` : FK native auto-peuplée par `seed_native` (ex :
+// `account.sous_classe`, `entity.entite_parent`). Reflète le DDL statique,
+// verrouillée contre édition/suppression via l'API.
 
 export interface CustomReference {
   host_dimension: string;
   column: string;
   target_dimension: string;
+  native?: boolean;
+}
+
+// ---------- Enums natifs (CHECK du DDL, GET /api/meta/native-enums) -------------
+// Attribut natif d'une master data dont les valeurs sont une liste fermée
+// (ex : `account.classe` ∈ {bilan, resultat, flux}). Pas de table cible —
+// exposé via le mode `attr` de `SelectionCond` (filtre direct sur la colonne).
+// Cf. `references::NATIVE_ENUMS`.
+
+export interface NativeEnum {
+  host_dimension: string;
+  column: string;
+  values: string[];
 }
 
 // ---------- Listes de valeurs (référentiels, GET /api/meta/value-lists) ---------

@@ -65,6 +65,17 @@ Cible un sous-ensemble de grains dans `fact_entry` en filtrant sur **toutes les 
 
 Les deux modes peuvent être combinés dans une même sélection.
 
+**Sélection par attribut traversé** (filtre indirect) : une condition de sélection peut traverser un **attribut** de la dimension plutôt que de porter sur sa valeur directe. Deux mécanismes, mutuellement exclusifs :
+
+| Traversée | Champ JSON | Sémantique | Exemple |
+|-----------|------------|------------|---------|
+| **Caractéristique N1** | `via` | Filtre sur la valeur N1 (regroupement) du membre. INNER JOIN sur `dim_<base>` puis `car_<via>` : les membres non classés sont exclus. | `account` dont le `comportement` = `VENTES_IC` : `{dim:"account", via:"comportement", op:"=", val:"VENTES_IC"}` |
+| **Référence directe** (patron B) | `ref` | Filtre sur une colonne de référence directe portée par la master data de la dimension (auto-référence hiérarchique typique). INNER JOIN sur la master data + condition `IS NOT NULL` sur la colonne. | `account` dont le `compte_parent` = `60` : `{dim:"account", ref:"compte_parent", op:"=", val:"60"}` |
+
+La valeur comparée est validée à l'enregistrement contre la master data cible :
+- `via` N1 → `car_<via>.code` ;
+- `ref` → master data de la dimension cible de la référence (le plus souvent la dimension elle-même en cas d'auto-référence).
+
 **Grain sélectionné** : un grain = une combinaison unique de valeurs dimensionnelles au niveau courant. Le montant associé est le solde agrégé à ce grain.
 
 ### 4.2 Facteur
@@ -88,7 +99,7 @@ Cas particuliers :
 
 ### 4.3 Destination
 
-Définit où et comment écrire l'écriture générée. Pour **chaque dimension pilotable** de l'écriture destination, quatre modes possibles :
+Définit où et comment écrire l'écriture générée. Pour **chaque dimension pilotable** de l'écriture destination, cinq modes possibles :
 
 | Mode | Sémantique | Exemple |
 |------|------------|---------|
@@ -96,8 +107,11 @@ Définit où et comment écrire l'écriture générée. Pour **chaque dimension 
 | `override` | La valeur est forcée à une constante saisie. | `nature` → `2ELI`. |
 | `null` | La valeur est vidée (`NULL`). | `partner` vidé sur la ligne principale. |
 | `map` | La valeur est **résolue en traversant une caractéristique** du membre source. `via` = la caractéristique N1, `attr` = l'attribut N2 dont la valeur surcharge la dimension. La dimension écrite doit **correspondre à la dimension cible de l'attribut** (validé au moteur). **INNER JOIN** : seuls les membres *classés* (ayant une valeur pour la caractéristique) génèrent une écriture. | `account` → map `comportement.compte_destination` ; `nature` → map `comportement.nature` (même caractéristique, **multi-cible**). |
+| `map_ref` | La valeur est **résolue en traversant une référence directe** (patron B) portée par la dimension écrite. `ref` = la colonne de référence (ex : `compte_parent`). La référence doit être **auto-référentielle** sur la dimension écrite (`host_dimension = target_dimension = dim`, ex : `compte_parent` sur `account`), afin que la valeur lue soit un code valide. **INNER JOIN** + condition `IS NOT NULL` sur la colonne : seuls les membres *ayant une valeur de référence* génèrent une écriture. | `account` → `map_ref compte_parent` (le compte source est remplacé par son parent hiérarchique). |
 
 > **Mode `map` — caractéristiques N1/N2.** Une *caractéristique N1* (ex. `comportement`) regroupe les membres d'une dimension de base (les comptes) ; chacune de ses valeurs porte des *attributs N2* typés pointant vers d'autres dimensions (`compte_destination → comptes`, `nature → natures`). En `map`, le moteur joint `e.<base> → master_data.<N1> → car_<N1>.<attr>`. C'est la réalisation générique du mapping par compte source de [R3](#7-questions-ouvertes) : la règle ne liste pas les comptes ni ne code en dur le compte de liaison — elle route selon le comportement attribué au compte. Définition et affectation des caractéristiques : onglet **Caractéristiques** de l'UI. Implémentation : `prototype/rust/src/characteristics.rs` + `rules.rs` (parsing/validation/`exec_operation`).
+
+> **Mode `map_ref` — références directes (patron B).** Une *référence directe* est une colonne ajoutée à l'exécution sur la master data d'une dimension, pointant vers une autre dimension (y compris elle-même : hiérarchie). Contrairement à une caractéristique (regroupement N1 avec table de valeurs `car_<code>`), une référence directe **n'introduit aucune table intermédiaire** : la colonne pointe directement vers la master data cible. En `map_ref`, le moteur joint `e.<dim> → dim_<dim>.<ref>` (un seul JOIN) et lit la valeur de la colonne. Définition et affectation des références : onglet **Caractéristiques** (branche B) de l'UI. Implémentation : `prototype/rust/src/custom_references.rs` + `rules.rs` (parsing/validation/`exec_operation`).
 
 Les dimensions d'une écriture se répartissent en deux catégories :
 
@@ -111,7 +125,7 @@ Les dimensions d'une écriture se répartissent en deux catégories :
 | `currency` | Même devise que le grain source |
 | `analysis` | Non modifiable (R4) |
 
-**Dimensions pilotables** (hériter / surcharger / vider) :
+**Dimensions pilotables** (5 modes destination : hériter / surcharger / vider / `map` / `map_ref`, cf. §4.3) :
 
 | Dimension | Exemples d'usage |
 |-----------|-----------------|
@@ -231,44 +245,97 @@ Les règles ne sont pas exécutées individuellement mais assemblées dans des *
 
 ## 9. Interface utilisateur
 
+> Implémentée dans `web/src/pages/RulesPage.tsx`. Trois sous-onglets : **Bibliothèque** (CRUD des règles), **Jeux de règles** (composition ordonnée + exécution → rapport), **Dimensions** (gestion des dimensions custom).
+
 ### 9.1 Liste des règles
 
-- Vue tabulaire : nom, description courte, ordre d'exécution, statut (active / inactive).
-- **Réordonnancement** par glisser-déposer (drag-and-drop) — l'ordre d'exécution suit l'ordre de la liste.
-- Actions : activer / désactiver, dupliquer, supprimer.
-- L'ergonomie précise reste à travailler.
+- Vue tabulaire (TanStack Table) : code, libellé, actions (Éditer / Dupliquer / Supprimer).
+- **Duplication** : ouvre la modale d'édition en mode création pré-remplie, avec un code suggéré `{code}_COPIE` (l'utilisateur ajuste puis enregistre).
+- Boutons : « Nouvelle règle », « Rafraîchir ».
 
-### 9.2 Éditeur de règle
+### 9.2 Éditeur de règle (modale)
 
-Une règle se définit sur une page unique. Les déclencheurs de scope (conditions de périmètre) peuvent être sur une page secondaire ou en section repliable.
-
-**Page principale** (une règle) :
+Une règle se définit dans une **modale** unique. Le **niveau d'exécution** est un attribut global (commun à toutes les opérations d'une règle), modifiable en haut du formulaire.
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Nom de la règle : [________________]            │
-│  Scope périmètre  : [configurer →]  (page sec.)  │
-│                                                   │
-│  ── Opération 1 ──────────────────────────────   │
-│  │ Sélection  : niveau [▼] + filtres dimensionnels│
-│  │ Facteur    : coefficient [▼] × mult [___]      │
-│  │ Destination: [hériter / surcharger / vider]    │
-│  └─────────────────────────────────────────────   │
-│  ── Opération 2 ──────────────────────────────   │
-│  │ ...                                             │
-│  └─────────────────────────────────────────────   │
-│  [+ Ajouter une opération]                        │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  Code • [________]   Libellé [________]              │
+│  Niveau d'exécution : [consolidated ▾]               │
+│                                                       │
+│  ── Périmètre (scope) ─────────────────────────────  │
+│  │ [Cible ▾] [Dim ▾] [Op ▾] [Valeur ▾] [✕]           │
+│  │ + Ajouter une condition                           │
+│  └────────────────────────────────────────────────   │
+│                                                       │
+│  ── Opérations ────────────────────────────────────  │
+│  │ ── Opération 1 ───────────────────────────────    │
+│  │ │ [Seq] [Niveau] [Coefficient ▾] [Valeur]         │
+│  │ │ [Multiplicateur ____]                           │
+│  │ │ ── Sélection ──                                 │
+│  │ │ [Dim ▾] [Traverser ▾] [Op ▾] [Valeur ▾] [✕]     │
+│  │ │ + Ajouter une condition                         │
+│  │ │ ── Destination ──                               │
+│  │ │ account  [inherit ▾]                            │
+│  │ │ flow     [inherit ▾]                            │
+│  │ │ nature   [override ▾] [valeur ▾]                │
+│  │ │ partner  [null ▾]                               │
+│  │ │ share    [inherit ▾]                            │
+│  │ │ ... (toutes les dimensions pilotables)          │
+│  │ └─────────────────────────────────────────────    │
+│  │ + Ajouter une opération                           │
+│  └────────────────────────────────────────────────   │
+└──────────────────────────────────────────────────────┘
 ```
 
-**Règle d'or** : sélection, facteurs et destination d'une opération doivent être visibles sur la même page. Le scope périmètre peut être mis à part car il est partagé entre toutes les opérations.
+**Règle d'or** : sélection, facteurs et destination d'une opération sont visibles sur la même page. Le scope périmètre est partagé entre toutes les opérations.
 
 ### 9.3 Sous-formulaire opération
 
-Chaque opération est un sous-formulaire répétable :
-- **Sélection** : choix du niveau + filtres (par caractéristiques et/ou par énumération sur chaque dimension).
-- **Facteur** : choix du coefficient (liste déroulante : aucun, `pct_integration`, `pct_interet`, …) × multiplicateur (champ numérique, défaut 1).
-- **Destination** : pour chaque dimension, trois choix (hériter / surcharger avec valeur / vider).
+Chaque opération est un sous-formulaire répétable, composé de trois blocs.
+
+#### Sélection
+
+Pour chaque condition, cinq champs :
+
+| Champ | Comportement |
+|-------|--------------|
+| **Dim** | Dimension à filtrer (toutes les dimensions propagées + `level`). |
+| **Traverser** | `(direct)` par défaut, ou filtrer par **attribut** : `Caractéristique N1` (ex. `comportement`) ou `Référence directe` (ex. `compte_parent`). Optgroups separées, désactivé si aucune traversée possible pour la dimension (ex. `level`, dimensions sans master data). |
+| **Op** | `=` `!=` `>` `<` `>=` `<=` `IN` `IS NULL` `IS NOT NULL`. |
+| **Valeur** | Adaptatif (cf. ci-dessous). |
+| **✕** | Supprimer la condition. |
+
+**Champ Valeur adaptatif** :
+- **Op `IN`** → **multi-select repliable** avec cases à cocher (fermeture au clic extérieur). Display fermé : « — choisir — » / codes (≤3) / « N valeurs sélectionnées ». S'alimente selon le mode de traversée :
+  - `direct` → master data de la dimension ;
+  - `via` N1 → valeurs de `car_<via>` ;
+  - `ref` → master data de la dimension cible de la référence.
+  - Fallback texte séparé par virgules pour les dimensions libres sans master data (ex. `analysis`).
+- **Ops unaires (`=` `!=` etc.)** → `<select>` (même source que ci-dessus) ou `<input>` texte libre si pas de master data.
+- **`IS NULL` / `IS NOT NULL`** → pas de champ valeur.
+
+Le changement de **Traverser** réinitialise la valeur (la cible change).
+
+#### Facteur
+
+- **Coefficient** : liste déroulante (`pct_integration` / `pct_interet` / `constant` + champ numérique si `constant`).
+- **Multiplicateur** : champ numérique (défaut `1`), accepte la virgule ou le point décimal. `NaN` rejeté à l'enregistrement.
+
+#### Destination
+
+Pour **chaque dimension pilotable** (entity, account, flow, nature, partner, share, analysis, analysis2 + customs), une ligne `[label] [mode ▾] (champ conditionnel)` :
+
+| Mode | Champ conditionnel |
+|------|--------------------|
+| `inherit` | aucun (valeur source conservée). |
+| `override` | `<select>` de la master data de la dimension (ou saisie libre). |
+| `null` | aucun. |
+| `map` | `<select>` de la caractéristique N1 + `<select>` de l'attribut N2. Désactivé si aucune caractéristique n'a un attribut ciblant cette dimension. |
+| `map_ref` | `<select>` de la référence directe (auto-référentielle sur la dimension). Désactivé si aucune réf éligible. |
+
+### 9.4 Sous-onglet « Dimensions »
+
+CRUD sur les dimensions **custom** (toujours `Analytical`). Voir aussi l'onglet **Caractéristiques** (page dédiée) pour la définition des N1/N2 et des références directes.
 
 ---
 

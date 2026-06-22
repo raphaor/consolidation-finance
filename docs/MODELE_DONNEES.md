@@ -156,9 +156,48 @@ Le modèle n'a pas de FK dures (DuckDB, choix du proto). Les liens entre objets 
 **Validation à l'écriture** (rejet d'une référence inexistante, message explicite) :
 - **Master data** : `create`/`update` (`masterdata.rs`) — avec tolérance d'auto-référence (`flux_de_report = F99` sur la ligne F99).
 - **Imports CSV** : entries / rates / perimeter (`import.rs`) — anti-jointure du fichier contre les tables cibles **avant** insertion.
-- **Définitions de règles** : valeurs de `selection` / `destination override` / `scope` (`rules.rs::validate_definition`, appelée à `POST`/`PUT /api/rules`).
+- **Définitions de règles** (`rules.rs::validate_definition`, appelée à `POST`/`PUT /api/rules`) :
+  - `selection` : valeurs de condition validées contre la master data cible (directe : `dim` ; `via` N1 : `car_<via>.code` ; `ref` patron B : master data de la dimension cible de la réf).
+  - `destination override` : valeur contre la master data de la dimension écrite.
+  - `destination map` : existence de la caractéristique `via` + de l'attribut `attr` + compatibilité `target_dimension = dim` écrit.
+  - `destination map_ref` : existence de la référence `ref` (patron B sur `dim` écrit) + contrainte `host_dimension = target_dimension = dim` (la valeur lue doit être un code valide pour la dimension écrite).
+  - `scope` : valeurs de condition sur `sat_perimeter`.
 
 Les dimensions **Analytical libres** (`analysis`, `analysis2`, custom) n'ont **pas** de référence → saisie libre.
+
+## 4 quinquies. Attributs dynamiques (caractéristiques N1/N2 et références directes)
+
+Au-delà des attributs master data **statiques** du §3 (classe, sous_classe, devise_fonctionnelle…), deux mécanismes permettent à l'utilisateur de rajouter, à l'exécution, des **attributs** à une dimension — typiquement pour porter des regroupements ou des hiérarchies consommés par les règles de consolidation. Tous deux survivent au reset (registre hors `ALL_DROP`, colonnes réappliquées par `reapply`).
+
+### Patron A — Caractéristiques N1 / N2 (`characteristics.rs`)
+
+Une **caractéristique N1** est un **regroupement** des membres d'une dimension de base (ex. `comportement` sur `account`). Chaque valeur N1 porte des **attributs N2** typés, chacun pointant vers une dimension cible (ex. `compte_destination → account`, `nature → nature`) — ou une liste de valeurs (`lst_<code>`).
+
+- **Modèle physique** : table de valeurs `car_<code>` (PK `code`, libellé, une colonne par attribut N2) + colonne de rattachement `<code>` sur la master data de la dimension de base (`dim_account.comportement → car_comportement.code`).
+- **Registres** : `dim_characteristic` (code, libelle, base_dimension) + `dim_characteristic_attribute` (characteristic_code, name, libelle, target_dimension).
+- **Routes API** : `/api/meta/characteristics` (CRUD), `/api/meta/characteristics/{code}/attributes` (N2), `/api/meta/characteristics/{code}/values` (valeurs), `/api/meta/characteristics/{code}/assign` (classement d'un membre).
+- **Consommé par** : destination `map` (`via` + `attr`) ; sélection `via` (filtre par valeur N1).
+
+### Patron B — Références directes (`custom_references.rs`)
+
+Une **référence directe** est une **colonne ajoutée** sur la master data d'une dimension hôte, pointant directement vers une autre dimension (y compris elle-même : hiérarchie auto-référentielle type `compte_parent`). Contrairement à une caractéristique, **pas de table intermédiaire** — la colonne pointe directement vers la master data cible.
+
+- **Modèle physique** : colonne `<column_name>` (TEXT, nullable) sur la master data de la dimension hôte (`dim_account.compte_parent → dim_account.code`).
+- **Registre** : `dim_custom_reference` (host_dimension, column_name, target_dimension).
+- **Routes API** : `/api/meta/references-custom` (CRUD), `/api/meta/references-custom/{host}/{column}/assign` (affectation d'une valeur de référence à un membre).
+- **Consommé par** : destination `map_ref` (`ref`) ; sélection `ref` (filtre par valeur de référence).
+- **Cas typique** : hiérarchie de comptes (`compte_parent`), hiérarchie d'entités (`entite_parent` est natif mais pourrait être basculé en référence directe dynamique).
+
+### Choix A vs B
+
+| Critère | Patron A (caractéristique) | Patron B (référence directe) |
+|---------|----------------------------|------------------------------|
+| Sémantique | **Regroupement** (un membre → une valeur N1, qui a ses propres attributs) | **Lien** direct vers un autre membre (un membre → un parent) |
+| Table intermédiaire | Oui (`car_<code>`) | Non |
+| Attributs secondaires | Oui (N2 typés, multi-cibles) | Non (un seul lien par colonne) |
+| Rôle dans les règles | `map` (destination), `via` (sélection) | `map_ref` (destination), `ref` (sélection) |
+
+→ Définition et affectation via l'onglet **Caractéristiques** de l'UI (`web/src/pages/CaracteristiquesPage.tsx`). Implémentation détaillée dans les en-têtes de module Rust (`characteristics.rs:1-24`, `custom_references.rs:1-27`).
 
 ## 4 quater. Export / import complet (sauvegarde-restauration)
 

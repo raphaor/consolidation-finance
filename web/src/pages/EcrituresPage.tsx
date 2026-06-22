@@ -240,15 +240,22 @@ export function EcrituresPage() {
                 </td>
               </tr>
             )}
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {table.getRowModel().rows.map((row) => {
+              const isManual = String(row.original.source ?? '') === 'MANUAL';
+              return (
+                <tr
+                  key={row.id}
+                  className={isManual ? 'row--manual' : undefined}
+                  title={isManual ? 'Saisie manuelle (source = MANUAL)' : undefined}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

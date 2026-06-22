@@ -8,11 +8,10 @@
 
 import {
   type FormEvent,
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -23,12 +22,22 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
+import { formatOptionLabel } from '../utils/format';
+import {
+  DIM_TO_TABLE_FALLBACK,
+  DimRefContext,
+  buildDimToTable,
+  useDimValues,
+  useSelectionValues,
+  type DimToTable,
+  type DimValue,
+} from '../hooks/useDimValues';
 import type {
   Characteristic,
+  CustomReference,
   DimensionInfo,
-  MasterTable,
+  NativeEnum,
   Operation,
-  ReferenceInfo,
   RuleDefinition,
   RuleSummary,
   RulesetDetail,
@@ -60,14 +69,14 @@ const BUILTIN_DIMS_FALLBACK: DimensionInfo[] = [
   { name: 'currency',     category: 'Fixed',      custom: false, label: 'Devise',     pilotable: false },
   { name: 'nature',       category: 'Active',     custom: false, label: 'Nature',     pilotable: true  },
   { name: 'partner',      category: 'Analytical', custom: false, label: 'Partenaire', pilotable: true  },
-  { name: 'share',        category: 'Analytical', custom: false, label: 'Quote-part', pilotable: true  },
+  { name: 'share',        category: 'Analytical', custom: false, label: 'Titre',       pilotable: true  },
   { name: 'analysis',     category: 'Analytical', custom: false, label: 'Analyse 1',  pilotable: true  },
   { name: 'analysis2',    category: 'Analytical', custom: false, label: 'Analyse 2',  pilotable: true  },
 ];
 
 type Notice = { kind: 'success' | 'error'; text: string } | null;
 type Subtab = 'biblio' | 'jeux' | 'dims';
-type DestMode = 'inherit' | 'override' | 'null' | 'map';
+type DestMode = 'inherit' | 'override' | 'null' | 'map' | 'map_ref';
 
 interface RuleDraft {
   code: string;
@@ -122,105 +131,8 @@ function parseMultiplicateur(raw: string): number {
   return Number(cleaned);
 }
 
-// Mapping dimension → table master data pour les listes déroulantes contextuelles.
-type DimToTable = Record<string, { table: MasterTable; pkCol: string }>;
-
-// Fallback mode-dégradé si `GET /api/meta/references` est injoignable (serveur
-// obsolète, réseau en panne) : miroir codé en dur du graphe de références
-// serveur (`engine/src/references.rs`). En fonctionnement normal, ce mapping est
-// **dérivé de l'API** (cf. RulesPage / DimRefContext) et non de cette constante.
-// Les dimensions libres (analysis, analysis2, custom) sont absentes → saisie
-// texte. `partner` / `share` sont des rôles sur la liste des entités.
-const DIM_TO_TABLE_FALLBACK: DimToTable = {
-  scenario: { table: 'scenarios', pkCol: 'code' },
-  entity: { table: 'entities', pkCol: 'code' },
-  entry_period: { table: 'periods', pkCol: 'code' },
-  period: { table: 'periods', pkCol: 'code' },
-  account: { table: 'accounts', pkCol: 'code' },
-  flow: { table: 'flows', pkCol: 'code' },
-  currency: { table: 'currencies', pkCol: 'code_iso' },
-  nature: { table: 'natures', pkCol: 'code' },
-  partner: { table: 'entities', pkCol: 'code' },
-  share: { table: 'entities', pkCol: 'code' },
-  methode: { table: 'methods', pkCol: 'code' },
-};
-
-// Construit le mapping dimension → table depuis le graphe de références exposé
-// par l'API. On ne garde que les sources `stg_entry` (dimensions d'écriture) et
-// `perimeter` (scope des règles, dont `methode`) : ce sont les colonnes
-// pilotables dans l'éditeur. `target_table` est déjà un nom de table master data.
-function buildDimToTable(refs: ReferenceInfo[]): DimToTable {
-  const out: DimToTable = {};
-  for (const r of refs) {
-    if (r.table === 'stg_entry' || r.table === 'perimeter') {
-      out[r.column] = {
-        table: r.target_table as MasterTable,
-        pkCol: r.target_column,
-      };
-    }
-  }
-  return out;
-}
-
-// Contexte fournissant le mapping dimension → table aux champs de saisie
-// (`useDimValues`), évitant de threader la prop à travers toute la hiérarchie.
-// Défaut = fallback, pour rester fonctionnel avant le chargement / en échec.
-const DimRefContext = createContext<DimToTable>(DIM_TO_TABLE_FALLBACK);
-
-// Cache module-level des valeurs de dimensions (évite les refetchs à chaque
-// ouverture de modale). Clé = nom de dimension.
-const dimValuesCache = new Map<string, string[]>();
-
-/// Hook : charge les valeurs possibles d'une dimension depuis la master data.
-/// Retourne `values = []` si la dimension n'a pas de table associée (saisie libre).
-function useDimValues(dim: string): { values: string[]; loading: boolean } {
-  const dimToTable = useContext(DimRefContext);
-  const [values, setValues] = useState<string[]>(
-    dimValuesCache.get(dim) ?? [],
-  );
-  const [loading, setLoading] = useState(!dimValuesCache.has(dim));
-
-  useEffect(() => {
-    const mapping = dimToTable[dim];
-    if (!mapping) {
-      setValues([]);
-      setLoading(false);
-      return;
-    }
-    if (dimValuesCache.has(dim)) {
-      setValues(dimValuesCache.get(dim)!);
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    void (async () => {
-      try {
-        const rows = await api.masterData.list(mapping.table);
-        const codes = rows
-          .map((r) => {
-            const v = (r as Record<string, unknown>)[mapping.pkCol];
-            return v == null ? '' : String(v);
-          })
-          .filter((s) => s.length > 0);
-        if (cancelled) return;
-        dimValuesCache.set(dim, codes);
-        setValues(codes);
-      } catch {
-        if (cancelled) return;
-        dimValuesCache.set(dim, []);
-        setValues([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [dim, dimToTable]);
-
-  return { values, loading };
-}
+// Le mapping dimension → table master data et le hook `useDimValues` sont
+// désormais fournis par `hooks/useDimValues.tsx` (partagés avec la page Saisie).
 
 /// Champ de saisie pour l'opérateur `IN` (valeurs multiples séparées par des
 /// virgules). Maintient un **buffer texte local** : on ne reformate PAS depuis
@@ -250,9 +162,11 @@ function InValueField({
 }
 
 /// Champ de saisie de valeur de condition, adaptatif :
+/// - si op = IN → multi-select repliable (checkboxes) si la dimension a une
+///   master data, sinon `<input type="text">` (saisie multi-valeurs séparées
+///   par virgules). Même logique que `SelectionValueField`.
 /// - si la dimension a une liste de valeurs connue (master data) et l'opérateur
 ///   n'est pas IN → `<select>` avec les valeurs + option vide.
-/// - si op = IN → `<input type="text">` (saisie multi-valeurs séparées par virgules).
 /// - sinon → `<input type="text">` (saisie libre).
 function ValueField({
   dim,
@@ -265,33 +179,50 @@ function ValueField({
   value: unknown;
   onRawChange: (raw: string) => void;
 }) {
-  const { values } = useDimValues(dim);
+  const { values, loading } = useDimValues(dim);
 
-  // IN : toujours en texte libre (saisie multi-valeurs), avec buffer local pour
-  // préserver les virgules pendant la frappe (cf. InValueField).
+  // IN : multi-select si on a des valeurs (master data), sinon fallback texte
+  // (dimensions libres type pct_interet / entree / sortie). Buffer local via
+  // InValueField pour préserver les virgules pendant la frappe.
   if (op === 'IN') {
+    if (values.length > 0) {
+      const arr: string[] = Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string')
+        : typeof value === 'string' && value !== ''
+          ? [value]
+          : [];
+      return (
+        <MultiSelectDropdown
+          options={values}
+          selected={arr}
+          loading={loading}
+          onChange={(newArr) => onRawChange(newArr.join(','))}
+        />
+      );
+    }
     return <InValueField value={value} onRawChange={onRawChange} />;
   }
 
   // Liste déroulante si des valeurs sont disponibles.
   if (values.length > 0) {
     const current = formatCondVal(value);
+    const codes = values.map((v) => v.code);
     return (
       <select
-        value={values.includes(current) ? current : ''}
+        value={codes.includes(current) ? current : ''}
         onChange={(e) => onRawChange(e.target.value)}
       >
         <option value="" disabled>
           — choisir —
         </option>
         {values.map((v) => (
-          <option key={v} value={v}>
-            {v}
+          <option key={v.code} value={v.code}>
+            {formatOptionLabel(v.code, v.libelle)}
           </option>
         ))}
         {/* Si la valeur actuelle n'est pas dans la liste (ex: règle existante
             avec une valeur supprimée de la master data), on l'affiche quand même. */}
-        {current && !values.includes(current) && (
+        {current && !codes.includes(current) && (
           <option value={current}>{current} (hors liste)</option>
         )}
       </select>
@@ -323,21 +254,23 @@ function OverrideValueField({
 }) {
   const { values } = useDimValues(dim);
   if (values.length > 0) {
+    const codes = values.map((v) => v.code);
     return (
       <select
         className="rule-dest-input"
-        value={values.includes(value) ? value : ''}
+        value={codes.includes(value) ? value : ''}
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="" disabled>
           — choisir —
         </option>
         {values.map((v) => (
-          <option key={v} value={v}>
-            {v}
+          <option key={v.code} value={v.code}>
+            {formatOptionLabel(v.code, v.libelle)}
           </option>
         ))}
-        {value && !values.includes(value) && (
+        {/* Si la valeur actuelle n'est pas dans la liste, on l'affiche quand même. */}
+        {value && !codes.includes(value) && (
           <option value={value}>{value} (hors liste)</option>
         )}
       </select>
@@ -350,6 +283,161 @@ function OverrideValueField({
       placeholder={`valeur ${dim}`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+/// Multi-select repliable pour l'opérateur `IN`. Bouton qui ouvre un panel
+/// absolu avec checkboxes ; fermeture au clic extérieur. Affichage fermé :
+/// 0 → placeholder, 1-3 → codes séparés par virgule, >3 → compteur. Pas de
+/// recherche ni de boutons globaux (cf. choix utilisateur).
+function MultiSelectDropdown({
+  options,
+  selected,
+  onChange,
+  loading,
+}: {
+  options: DimValue[];
+  selected: string[];
+  onChange: (newArr: string[]) => void;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fermeture au clic extérieur (listener global tant que le panel est ouvert).
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const display =
+    selected.length === 0
+      ? '— choisir —'
+      : selected.length <= 3
+        ? selected.join(', ')
+        : `${selected.length} valeurs sélectionnées`;
+
+  const toggle = (code: string) => {
+    if (selected.includes(code)) onChange(selected.filter((c) => c !== code));
+    else onChange([...selected, code]);
+  };
+
+  return (
+    <div className="multiselect" ref={ref}>
+      <button
+        type="button"
+        className="multiselect__btn"
+        onClick={() => setOpen((o) => !o)}
+        disabled={loading}
+      >
+        {loading ? '…' : display}
+      </button>
+      {open && (
+        <div className="multiselect__panel">
+          {options.length === 0 && (
+            <div className="multiselect__empty">(aucune valeur)</div>
+          )}
+          {options.map((o) => {
+            const checked = selected.includes(o.code);
+            return (
+              <label key={o.code} className="multiselect__item">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(o.code)}
+                />
+                <span>{formatOptionLabel(o.code, o.libelle)}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/// Champ de valeur unifié pour une SelectionCond, adaptatif selon :
+///   - l'opérateur (`IN` → multi-select repliable, ops unaires → `<select>` ou texte) ;
+///   - la source des valeurs, résolue via `useSelectionValues` (`via` N1, `ref`
+///     patron B, `attr` enum natif, ou direct sur la dimension).
+///
+/// Remplace l'ancien chemin `{s.via ? <input> : <ValueField>}` dans la zone
+/// Sélection. La zone Scope continue d'utiliser `ValueField` (pas de traversée).
+function SelectionValueField({
+  sel,
+  customReferences,
+  nativeEnums,
+  op,
+  value,
+  onRawChange,
+}: {
+  sel: SelectionCond;
+  customReferences: CustomReference[];
+  nativeEnums: NativeEnum[];
+  op: string;
+  value: unknown;
+  onRawChange: (raw: string) => void;
+}) {
+  const { values, loading } = useSelectionValues(sel, customReferences, nativeEnums);
+
+  // IN : multi-select si on a des valeurs, sinon fallback texte (dimensions
+  // libres type analysis, qui n'ont pas de master data).
+  if (op === 'IN') {
+    if (values.length > 0) {
+      const arr: string[] = Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string')
+        : typeof value === 'string' && value !== ''
+          ? [value]
+          : [];
+      return (
+        <MultiSelectDropdown
+          options={values}
+          selected={arr}
+          loading={loading}
+          onChange={(newArr) => onRawChange(newArr.join(','))}
+        />
+      );
+    }
+    return <InValueField value={value} onRawChange={onRawChange} />;
+  }
+
+  // Ops unaires : dropdown si valeurs, sinon input texte libre.
+  if (values.length > 0) {
+    const current = formatCondVal(value);
+    const codes = values.map((v) => v.code);
+    return (
+      <select
+        value={codes.includes(current) ? current : ''}
+        onChange={(e) => onRawChange(e.target.value)}
+      >
+        <option value="" disabled>
+          — choisir —
+        </option>
+        {values.map((v) => (
+          <option key={v.code} value={v.code}>
+            {formatOptionLabel(v.code, v.libelle)}
+          </option>
+        ))}
+        {/* Si la valeur actuelle n'est pas dans la liste (ex: règle existante
+            avec une valeur supprimée de la master data), on l'affiche quand même. */}
+        {current && !codes.includes(current) && (
+          <option value={current}>{current} (hors liste)</option>
+        )}
+      </select>
+    );
+  }
+  return (
+    <input
+      type="text"
+      value={formatCondVal(value)}
+      onChange={(e) => onRawChange(e.target.value)}
     />
   );
 }
@@ -432,16 +520,34 @@ function RuleFormModal({
   const [draft, setDraft] = useState<RuleDraft>(initial);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  // Caractéristiques N1/N2 disponibles pour les destinations `map`.
+  // Caractéristiques N1/N2 disponibles pour les destinations `map` et les
+  // sélections `via`.
   const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
+  // Références directes (patron B) disponibles pour les destinations `map_ref`
+  // et les sélections `ref`. Inclut les FK natives auto-peuplées (`native=true`).
+  const [customReferences, setCustomReferences] = useState<CustomReference[]>([]);
+  // Enums natifs (CHECK du DDL) disponibles pour les sélections `attr`.
+  const [nativeEnums, setNativeEnums] = useState<NativeEnum[]>([]);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const cs = await api.characteristics.list();
-        if (!cancelled) setCharacteristics(cs);
+        const [cs, refs, enums] = await Promise.all([
+          api.characteristics.list(),
+          api.customReferences.list(),
+          api.nativeEnums(),
+        ]);
+        if (!cancelled) {
+          setCharacteristics(cs);
+          setCustomReferences(refs);
+          setNativeEnums(enums);
+        }
       } catch {
-        if (!cancelled) setCharacteristics([]);
+        if (!cancelled) {
+          setCharacteristics([]);
+          setCustomReferences([]);
+          setNativeEnums([]);
+        }
       }
     })();
     return () => {
@@ -589,7 +695,7 @@ function RuleFormModal({
   function updateDestination(
     opIdx: number,
     dim: string,
-    patch: Partial<{ mode: DestMode; value: string; via: string; attr: string }>,
+    patch: Partial<{ mode: DestMode; value: string; via: string; attr: string; ref: string }>,
   ) {
     setDraft((d) => {
       const operations = d.definition.operations.map((o, i) => {
@@ -672,7 +778,9 @@ function RuleFormModal({
             <p className="rule-section__hint">
               Toutes les conditions ci-dessous sont combinées par <strong>ET</strong>.
               Pour exprimer un <strong>OU</strong> sur une même dimension, utilisez l'opérateur{' '}
-              <code>IN</code> (ex : <code>methode IN globale, proportionnelle</code>).
+              <code>IN</code> et cochez plusieurs valeurs (ex :{' '}
+              <code>methode IN [globale, proportionnelle]</code>). Pour les dimensions
+              sans liste de référence, saisissez les valeurs séparées par des virgules.
             </p>
             {draft.definition.scope.map((c, idx) => (
               <div key={idx} className="rule-condition">
@@ -838,63 +946,180 @@ function RuleFormModal({
                   <h4 className="rule-section__title">Sélection</h4>
                   <p className="rule-section__hint">
                     Conditions combinées par <strong>ET</strong> (toutes doivent être vraies).
+                   {' '}
+                    <em>
+                      Par défaut, le filtre porte sur la valeur directe de la dimension.
+                      Utilisez « Traverser » pour filtrer par <strong>attribut</strong> :
+                      caractéristique N1 (regroupement) ou référence directe
+                      (ex. <code>compte_parent</code>).
+                    </em>
                   </p>
-                  {op.selection.map((s, sIdx) => (
-                    <div key={sIdx} className="rule-condition">
-                      <label className="field">
-                        <span>Dim</span>
-                        <select
-                          value={s.dim}
-                          onChange={(e) =>
-                            updateSelection(opIdx, sIdx, { dim: e.target.value })
-                          }
-                        >
-                          {selectionDims.map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Op</span>
-                        <select
-                          value={s.op}
-                          onChange={(e) =>
-                            updateSelection(opIdx, sIdx, { op: e.target.value })
-                          }
-                        >
-                          {OPS.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {!NULL_OPS.has(s.op) && (
+                  {op.selection.map((s, sIdx) => {
+                    // Options de traversée pour `s.dim` :
+                    // - caractéristiques N1 dont la dimension de base est `s.dim`
+                    //   (filtre sur la valeur N1 du membre, ex : `comportement = VENTES_IC`).
+                    // - références directes (patron B) portées par `s.dim`
+                    //   (filtre sur la colonne de référence, ex : `compte_parent = 60`).
+                    // - enums natifs `attr` (CHECK du DDL, ex : `account.classe`).
+                    const viaOptions = characteristics.filter(
+                      (c) => c.base_dimension === s.dim,
+                    );
+                    const refOptions = customReferences.filter(
+                      (r) => r.host_dimension === s.dim,
+                    );
+                    const attrOptions = nativeEnums.filter(
+                      (e) => e.host_dimension === s.dim,
+                    );
+                    // Valeur courante du dropdown « Traverser » :
+                    // - '' → direct (pas de traversée)
+                    // - `via:<code>` → caractéristique N1
+                    // - `ref:<column>` → référence directe (custom ou native)
+                    // - `attr:<column>` → enum natif (CHECK du DDL)
+                    const traverseVal = s.via
+                      ? `via:${s.via}`
+                      : s.ref
+                        ? `ref:${s.ref}`
+                        : s.attr
+                          ? `attr:${s.attr}`
+                          : '';
+                    return (
+                      <div key={sIdx} className="rule-condition">
                         <label className="field">
-                          <span>Valeur</span>
-                          <ValueField
-                            dim={s.dim}
-                            op={s.op}
-                            value={s.val}
-                            onRawChange={(raw) =>
+                          <span>Dim</span>
+                          <select
+                            value={s.dim}
+                            onChange={(e) =>
                               updateSelection(opIdx, sIdx, {
-                                val: parseCondVal(s.op, raw),
+                                dim: e.target.value,
+                                via: undefined,
+                                ref: undefined,
+                                attr: undefined,
                               })
                             }
-                          />
+                          >
+                            {selectionDims.map((d) => (
+                              <option key={d} value={d}>
+                                {d}
+                              </option>
+                            ))}
+                          </select>
                         </label>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn--sm btn--danger"
-                        onClick={() => removeSelection(opIdx, sIdx)}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
+                        <label className="field">
+                          <span>Traverser</span>
+                          <select
+                            value={traverseVal}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === '') {
+                                updateSelection(opIdx, sIdx, {
+                                  via: undefined,
+                                  ref: undefined,
+                                  attr: undefined,
+                                  val: '',
+                                });
+                              } else if (v.startsWith('via:')) {
+                                updateSelection(opIdx, sIdx, {
+                                  via: v.slice(4),
+                                  ref: undefined,
+                                  attr: undefined,
+                                  val: '',
+                                });
+                              } else if (v.startsWith('ref:')) {
+                                updateSelection(opIdx, sIdx, {
+                                  via: undefined,
+                                  ref: v.slice(4),
+                                  attr: undefined,
+                                  val: '',
+                                });
+                              } else if (v.startsWith('attr:')) {
+                                updateSelection(opIdx, sIdx, {
+                                  via: undefined,
+                                  ref: undefined,
+                                  attr: v.slice(5),
+                                  val: '',
+                                });
+                              }
+                            }}
+                            disabled={
+                              s.dim === 'level' ||
+                              (viaOptions.length === 0 &&
+                                refOptions.length === 0 &&
+                                attrOptions.length === 0)
+                            }
+                          >
+                            <option value="">(direct)</option>
+                            {viaOptions.length > 0 && (
+                              <optgroup label="Caractéristique N1">
+                                {viaOptions.map((c) => (
+                                  <option key={`via:${c.code}`} value={`via:${c.code}`}>
+                                    {c.code}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {refOptions.length > 0 && (
+                              <optgroup label="Référence directe">
+                                {refOptions.map((r) => (
+                                  <option key={`ref:${r.column}`} value={`ref:${r.column}`}>
+                                    {r.column}
+                                    {r.native ? ' (natif)' : ''}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {attrOptions.length > 0 && (
+                              <optgroup label="Attribut natif">
+                                {attrOptions.map((e) => (
+                                  <option key={`attr:${e.column}`} value={`attr:${e.column}`}>
+                                    {e.column}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Op</span>
+                          <select
+                            value={s.op}
+                            onChange={(e) =>
+                              updateSelection(opIdx, sIdx, { op: e.target.value })
+                            }
+                          >
+                            {OPS.map((o) => (
+                              <option key={o} value={o}>
+                                {o}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {!NULL_OPS.has(s.op) && (
+                          <label className="field">
+                            <span>Valeur</span>
+                            <SelectionValueField
+                              sel={s}
+                              customReferences={customReferences}
+                              nativeEnums={nativeEnums}
+                              op={s.op}
+                              value={s.val}
+                              onRawChange={(raw) =>
+                                updateSelection(opIdx, sIdx, {
+                                  val: parseCondVal(s.op, raw),
+                                })
+                              }
+                            />
+                          </label>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--danger"
+                          onClick={() => removeSelection(opIdx, sIdx)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
                   <button
                     type="button"
                     className="rule-add-btn"
@@ -919,6 +1144,14 @@ function RuleFormModal({
                     const attrOptions = (viaChar?.attributes ?? []).filter(
                       (a) => a.target_dimension === dim,
                     );
+                    // Mode `map_ref` : seules les références directes (patron B)
+                    // auto-référentielles sur `dim` sont proposées (host = target
+                    // = dim, ex : `compte_parent` sur `account`). Le moteur
+                    // exige en effet target = dim (la valeur écrite doit être un
+                    // code valide pour `dim`).
+                    const mapRefOptions = customReferences.filter(
+                      (r) => r.host_dimension === dim && r.target_dimension === dim,
+                    );
                     return (
                       <div key={dim} className="rule-dest-row">
                         <span className="rule-dest-label">{dim}</span>
@@ -935,6 +1168,9 @@ function RuleFormModal({
                           <option value="null">null</option>
                           <option value="map" disabled={viaOptions.length === 0}>
                             map (caractéristique)
+                          </option>
+                          <option value="map_ref" disabled={mapRefOptions.length === 0}>
+                            map_ref (référence)
                           </option>
                         </select>
                         {dest.mode === 'override' && (
@@ -985,6 +1221,24 @@ function RuleFormModal({
                               ))}
                             </select>
                           </>
+                        )}
+                        {dest.mode === 'map_ref' && (
+                          <select
+                            className="rule-dest-input"
+                            value={dest.ref ?? ''}
+                            onChange={(e) =>
+                              updateDestination(opIdx, dim, { ref: e.target.value })
+                            }
+                          >
+                            <option value="" disabled>
+                              — référence —
+                            </option>
+                            {mapRefOptions.map((r) => (
+                              <option key={r.column} value={r.column}>
+                                {r.column}
+                              </option>
+                            ))}
+                          </select>
                         )}
                       </div>
                     );

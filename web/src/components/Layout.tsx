@@ -8,6 +8,7 @@ import type { HealthState } from '../hooks/useHealth';
 export type PageId =
   | 'rapports'
   | 'ecritures'
+  | 'saisie'
   | 'pipeline'
   | 'masterdata'
   | 'schemas'
@@ -25,6 +26,7 @@ interface Props {
 const TABS: { id: PageId; label: string }[] = [
   { id: 'rapports', label: 'Rapports' },
   { id: 'ecritures', label: 'Écritures' },
+  { id: 'saisie', label: 'Saisie' },
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'masterdata', label: 'Master data' },
   { id: 'schemas', label: 'Schémas & jeux' },

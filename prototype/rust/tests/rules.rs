@@ -488,3 +488,146 @@ fn destination_map_traverse_caracteristique() {
         "une seule sortie mappée (le non-classé n'a rien produit)"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  11. Destination `map_ref` : traversée d'une référence directe (patron B).
+//      Le compte source est redirigé vers son `compte_parent` (auto-référence).
+//      INNER JOIN : un compte sans parent ne génère rien.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn destination_map_ref_traverse_reference_directe() {
+    use conso_engine::custom_references::{create, assign};
+
+    let con = engine();
+
+    // Référence directe `compte_parent` sur account → account (hiérarchie).
+    create(&con, "account", "compte_parent", "account").unwrap();
+    // 705 → 700 (a un parent) ; 200 n'a pas de parent.
+    assign(&con, "account", "compte_parent", "705", Some("700")).unwrap();
+
+    put(&con, "M", "705", "F20", None, "0LIASS", 100.0, "converted"); // a un parent → mappé
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // sans parent → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"flow","op":"=","val":"F20"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"account":{"mode":"map_ref","ref":"compte_parent"},
+                            "nature":{"mode":"override","value":"MAPRF"}}}]}"#,
+    );
+
+    // Seul 705 (qui a un parent) génère ; 200 sans parent est exclu.
+    assert_eq!(run_one(&con, "R"), 1, "seul le compte avec parent est mappé");
+    // Sortie : account = 700 (parent de 705), nature MAPRF, flux F20 hérité.
+    assert_eq!(
+        scount(&con, "account='700' AND nature='MAPRF' AND flow='F20'"),
+        1,
+        "account redirigé vers son compte_parent"
+    );
+    assert!((ssum(&con, "account='700' AND nature='MAPRF'") - 100.0).abs() < TOL);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  12. Sélection par caractéristique N1 (`via`) : filtre les lignes dont le
+//      membre est classé dans une valeur N1 donnée. INNER JOIN : un compte non
+//      classé dans la caractéristique n'est pas sélectionné, même s'il serait
+//      matché par les autres conditions.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn selection_via_n1_filtre_par_valeur_de_caracteristique() {
+    use conso_engine::characteristics::create_characteristic;
+
+    let con = engine();
+
+    // N1 « regroupement » sur les comptes. Valeurs : PROD (ventes), CHGES (achats).
+    create_characteristic(&con, "regroupement", "Regroupement", "account").unwrap();
+    con.execute(
+        "INSERT INTO car_regroupement (code, libelle) VALUES \
+         ('PROD', 'Produits'), ('CHGES', 'Charges')",
+        [],
+    )
+    .unwrap();
+    // 700 et 705 classés PROD ; 600 classé CHGES ; 300 non classé.
+    con.execute(
+        "UPDATE dim_account SET regroupement = CASE \
+            WHEN code IN ('700','705') THEN 'PROD' \
+            WHEN code = '600' THEN 'CHGES' END \
+         WHERE code IN ('700','705','600')",
+        [],
+    )
+    .unwrap();
+
+    put(&con, "M", "700", "F20", None, "0LIASS", 100.0, "converted"); // PROD → match
+    put(&con, "M", "705", "F20", None, "0LIASS", 100.0, "converted"); // PROD → match
+    put(&con, "M", "600", "F20", None, "0LIASS", 100.0, "converted"); // CHGES → exclu
+    put(&con, "M", "300", "F20", None, "0LIASS", 100.0, "converted"); // non classé → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","via":"regroupement","op":"=","val":"PROD"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"SELN1"}}}]}"#,
+    );
+
+    // Seuls 700 et 705 (classés PROD) sont matchés.
+    assert_eq!(run_one(&con, "R"), 2, "2 comptes PROD sélectionnés");
+    assert_eq!(scount(&con, "nature='SELN1' AND account IN ('700','705')"), 2);
+    assert_eq!(scount(&con, "nature='SELN1' AND account='600'"), 0, "CHGES exclu");
+    assert_eq!(
+        scount(&con, "nature='SELN1' AND account='300'"),
+        0,
+        "non classé exclu par l'INNER JOIN"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  13. Sélection par référence directe (`ref`, patron B) : filtre les lignes
+//      dont le membre a une valeur de référence donnée. Ex : comptes dont le
+//      `compte_parent` = 700. INNER JOIN : un compte sans parent n'est pas
+//      sélectionné.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn selection_via_ref_filtre_par_reference_directe() {
+    use conso_engine::custom_references::{assign, create};
+
+    let con = engine();
+
+    // Référence directe `compte_parent` sur account → account.
+    create(&con, "account", "compte_parent", "account").unwrap();
+    // 705 → 700 ; 700 → 100 ; 600 n'a pas de parent.
+    assign(&con, "account", "compte_parent", "705", Some("700")).unwrap();
+    assign(&con, "account", "compte_parent", "700", Some("100")).unwrap();
+
+    put(&con, "M", "705", "F20", None, "0LIASS", 100.0, "converted"); // parent=700 → match
+    put(&con, "M", "700", "F20", None, "0LIASS", 100.0, "converted"); // parent=100 → exclu
+    put(&con, "M", "600", "F20", None, "0LIASS", 100.0, "converted"); // sans parent → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","ref":"compte_parent","op":"=","val":"700"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"SELRF"}}}]}"#,
+    );
+
+    // Seul 705 (dont le parent est 700) est matché.
+    assert_eq!(run_one(&con, "R"), 1, "un seul compte a parent=700");
+    assert_eq!(scount(&con, "nature='SELRF' AND account='705'"), 1);
+    assert_eq!(scount(&con, "nature='SELRF' AND account='700'"), 0);
+    assert_eq!(
+        scount(&con, "nature='SELRF' AND account='600'"),
+        0,
+        "sans parent → exclu par l'INNER JOIN"
+    );
+}

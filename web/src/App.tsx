@@ -11,6 +11,7 @@ import { MasterDataPage } from './pages/MasterDataPage';
 import { PipelinePage } from './pages/PipelinePage';
 import { RapportsPage } from './pages/RapportsPage';
 import { RulesPage } from './pages/RulesPage';
+import { SaisiePage } from './pages/SaisiePage';
 import { SchemasJeuxPage } from './pages/SchemasJeuxPage';
 import './App.css';
 
@@ -22,6 +23,7 @@ export default function App() {
     <Layout active={page} onNavigate={setPage} health={health}>
       {page === 'rapports' && <RapportsPage />}
       {page === 'ecritures' && <EcrituresPage />}
+      {page === 'saisie' && <SaisiePage />}
       {page === 'pipeline' && <PipelinePage />}
       {page === 'masterdata' && <MasterDataPage />}
       {page === 'schemas' && <SchemasJeuxPage />}

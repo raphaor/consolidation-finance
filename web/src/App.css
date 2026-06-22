@@ -741,6 +741,119 @@
   border: 1px solid var(--border);
 }
 
+.rule-section__header {
+  margin-bottom: 10px;
+}
+
+/* ---------- Saisie d'écritures (page Saisie) ---------- */
+
+/* En-tête de section (`rule-section__header` + `.rule-section__title` + hint)
+   réutilisé tel quel par la page Saisie. */
+
+/* Grille dense pour les saisies inline (cellules compactes, inputs inline). */
+.grid--dense thead th {
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.grid--dense tbody td {
+  padding: 4px 6px;
+}
+
+.grid--dense tbody td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Inputs inline dans les cellules de la grille de saisie. */
+.field-inline {
+  width: 100%;
+  min-width: 70px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.field-inline:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.field-inline--invalid {
+  border-color: #d33;
+  background: #fff5f5;
+}
+
+/* Astérisque des champs obligatoires. */
+.required {
+  color: #d33;
+  margin-left: 2px;
+  font-weight: 600;
+}
+
+/* Ligne de saisie manuelle mise en évidence dans la page Écritures. */
+.grid tbody tr.row--manual td {
+  background: rgba(255, 196, 0, 0.08);
+}
+
+.grid tbody tr.row--manual:hover td {
+  background: rgba(255, 196, 0, 0.16);
+}
+
+/* Espacement dans form-actions (spacer flexible + info texte). */
+.form-actions__spacer {
+  flex: 1;
+}
+
+.form-actions__info {
+  font-size: 11px;
+  color: var(--text-muted);
+  align-self: center;
+}
+
+/* En-tête commun de la page Saisie (champs factorisés + actions). */
+.saisie-common {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.saisie-common__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.saisie-common__title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.saisie-common__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.saisie-common__actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.saisie-common__actions .field--check {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .rule-condition {
   display: flex;
   align-items: flex-end;
@@ -805,6 +918,74 @@
   font-size: 12px;
   min-width: 0;
   width: 100%;
+}
+
+/* ─── Multi-select repliable (opérateur IN de la sélection) ─── */
+.multiselect {
+  position: relative;
+  display: inline-block;
+  min-width: 180px;
+}
+
+.multiselect__btn {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multiselect__btn:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.multiselect__panel {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 50;
+  min-width: 100%;
+  max-width: 320px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.multiselect__empty {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.multiselect__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.multiselect__item:hover {
+  background: var(--surface-alt, rgba(0, 0, 0, 0.04));
+}
+
+.multiselect__item input[type='checkbox'] {
+  margin: 0;
 }
 
 .rule-add-btn {
