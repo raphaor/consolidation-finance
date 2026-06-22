@@ -51,7 +51,16 @@ import type {
 const SCOPE_DIMS = ['methode', 'pct_interet', 'pct_integration', 'entree', 'sortie'];
 const LEVELS_LIST = ['corporate', 'converted', 'consolidated'];
 const OPS = ['=', '!=', '>', '<', '>=', '<=', 'IN', 'IS NULL', 'IS NOT NULL'];
-const COEFF_TYPES = ['pct_integration', 'pct_interet', 'constant'];
+const COEFF_TYPES = [
+  'pct_integration',
+  'pct_interet',
+  // Élimination IC corporate : Min(1, INTEG_PA / INTEG_EN) en N / N-1 et leur
+  // variation. N-1 lu via le périmètre du scénario d'à-nouveau (cf. REGLES_CONSO §4.2).
+  'elim_ic_corp_n',
+  'elim_ic_corp_n1',
+  'elim_ic_corp_var',
+  'constant',
+];
 
 const NULL_OPS = new Set(['IS NULL', 'IS NOT NULL']);
 

@@ -88,8 +88,37 @@ facteur = coefficient × multiplicateur
 
 | Composante | Description | Exemples |
 |------------|-------------|----------|
-| **Coefficient** | Valeur dynamique issue du périmètre ou d'un taux. Peut varier par grain. | `pct_integration`, `pct_interet`, taux futurs (à définir) |
+| **Coefficient** | Valeur dynamique issue du périmètre ou d'un taux. Peut varier par grain. | `pct_integration`, `pct_interet`, `elim_ic_corp_n` / `elim_ic_corp_n1` / `elim_ic_corp_var`, `constant` |
 | **Multiplicateur** | Constante, typiquement 1 ou −1. | 1 (reproduire), −1 (extourner / contre-passer) |
+
+**Coefficients disponibles** :
+
+| `type` | Expression | Périmètre lu |
+|--------|------------|--------------|
+| `pct_integration` | `pct_integration` de l'entité | `p_ent` (période courante) |
+| `pct_interet` | `pct_interet` de l'entité | `p_ent` (période courante) |
+| `constant` | littéral `value` | — |
+| `elim_ic_corp_n` | `Min(1, INTEG_PA_N / INTEG_EN_N)` | entité + partenaire, période courante |
+| `elim_ic_corp_n1` | `Min(1, INTEG_PA_N-1 / INTEG_EN_N-1)` | entité + partenaire, période **N-1** |
+| `elim_ic_corp_var` | `elim_ic_corp_n − elim_ic_corp_n1` | les deux ci-dessus |
+
+> **Coefficients d'élimination interco (`elim_ic_corp_*`).** Élimination IC au
+> prorata du **plus faible taux d'intégration** des deux entités liées
+> (`INTEG = sat_perimeter.pct_integration` ; `EN` = `entity`, `PA` = `partner`).
+> Appliqués à un flux **corporate** (100 %), `Min(1, PA/EN)` redonne, après le ×
+> `INTEG_EN` de l'étape D, `Min(INTEG_EN, INTEG_PA)`. Le coefficient reste
+> néanmoins agnostique au niveau : l'utilisateur choisit le niveau de l'opération.
+>
+> **Source N-1.** Le taux N-1 est lu dans `sat_perimeter` du **scénario
+> d'à-nouveau** du run courant (`dim_scenario.a_nouveau_scenario` → son
+> `perimeter_set` à son `entry_period`) — même snapshot N-1 que le carry
+> (`pipeline/a_nouveau.rs`), donc cohérence garantie, sans schéma ni donnée
+> supplémentaires. Une entité/partenaire **absent** du périmètre N-1 (entrant) →
+> taux N-1 = 0 (`elim_ic_corp_var` = N, élimination intégralement nouvelle) ;
+> idem si le scénario n'a **pas** d'à-nouveau. `INTEG_EN = 0` (non intégrée) →
+> coefficient 0 (pas de division par zéro). Implémentation :
+> `prototype/rust/src/rules.rs` (`coefficient_expr`, JOINs `p_part` / `p_ent_n1`
+> / `p_part_n1`).
 
 Cas particuliers :
 - Si aucun coefficient n'est spécifié → coefficient implicite = 1.
@@ -318,7 +347,7 @@ Le changement de **Traverser** réinitialise la valeur (la cible change).
 
 #### Facteur
 
-- **Coefficient** : liste déroulante (`pct_integration` / `pct_interet` / `constant` + champ numérique si `constant`).
+- **Coefficient** : liste déroulante (`pct_integration` / `pct_interet` / `elim_ic_corp_n` / `elim_ic_corp_n1` / `elim_ic_corp_var` / `constant` + champ numérique si `constant`). Cf. §4.2 pour la sémantique des `elim_ic_corp_*`.
 - **Multiplicateur** : champ numérique (défaut `1`), accepte la virgule ou le point décimal. `NaN` rejeté à l'enregistrement.
 
 #### Destination

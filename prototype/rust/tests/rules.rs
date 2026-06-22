@@ -631,3 +631,131 @@ fn selection_via_ref_filtre_par_reference_directe() {
         "sans parent → exclu par l'INNER JOIN"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Coefficients d'élimination IC corporate (N / N-1 / Var).
+//
+//  Vérifie la mécanique : facteur = Min(1, INTEG_PA / INTEG_EN), taux N-1 lu via
+//  le périmètre du scénario d'à-nouveau. Source : ligne corporate M→B.
+//   - N   : INTEG_EN(M)=1.0, INTEG_PA(B)=0.5 → Min(1, 0.5) = 0.5
+//   - N-1 : INTEG_EN(M)=1.0, INTEG_PA(B)=0.4 → Min(1, 0.4) = 0.4
+//   - Var : 0.5 − 0.4 = 0.1
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Force le `pct_integration` (= pct_interet) d'une entité dans le périmètre N
+/// courant (`PERIM_REEL`, 2024) — `seed_all` met toutes les entités à 1.0.
+fn set_pct_n(con: &Connection, entity: &str, pct: f64) {
+    con.execute(
+        "UPDATE sat_perimeter SET pct_integration = ?, pct_interet = ? \
+         WHERE perimeter_set = 'PERIM_REEL' AND entity = ? AND period = '2024'",
+        duckdb::params![pct, pct, entity],
+    )
+    .unwrap_or_else(|e| panic!("set_pct_n({entity}): {e}"));
+}
+
+/// Branche un scénario d'à-nouveau `REEL_N1` (périmètre `PSET_N1`, exercice
+/// 2023) sur `REEL`, et seede le périmètre N-1 : M=1.0, B=`pct_b_n1`.
+fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
+    con.execute(
+        "INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PSET_N1', 'Périmètre N-1')",
+        [],
+    )
+    .expect("perimeter_set N-1");
+    con.execute(
+        "INSERT INTO dim_scenario (code, libelle, category, entry_period, \
+            presentation_currency, variant, rate_set, perimeter_set, statut) \
+         VALUES ('REEL_N1', 'Réel 2023', 'REEL', '2023', 'EUR', 'BASE', 'RATES', 'PSET_N1', 'verrouillé')",
+        [],
+    )
+    .expect("scénario à-nouveau");
+    con.execute(
+        "UPDATE dim_scenario SET a_nouveau_scenario = 'REEL_N1' WHERE code = 'REEL'",
+        [],
+    )
+    .expect("lien à-nouveau");
+    // Périmètre N-1 : M intégrée à 1.0, B à `pct_b_n1`.
+    for (entity, pct) in [("M", 1.0_f64), ("B", pct_b_n1)] {
+        con.execute(
+            "INSERT INTO sat_perimeter \
+                (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
+             VALUES ('PSET_N1', ?, '2023', 'globale', ?, ?, false, false)",
+            duckdb::params![entity, pct, pct],
+        )
+        .expect("sat_perimeter N-1");
+    }
+}
+
+#[test]
+fn coefficient_elim_ic_corp_n_n1_var() {
+    let con = engine();
+    setup_a_nouveau_perimeter(&con, 0.4);
+    // INTEG N : M=1.0 (seedé), B forcé à 0.5 (seed_all met tout à 1.0).
+    set_pct_n(&con, "B", 0.5);
+    // Ligne interco corporate M→B, 1000.
+    put(&con, "M", "700", "F20", Some("B"), "0LIASS", 1000.0, "corporate");
+
+    // Une règle, 3 opérations (même snapshot), chaque coefficient taggé sur
+    // `analysis` (dimension libre) pour distinguer les sorties.
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"corporate",
+             "selection":[{"dim":"partner","op":"IS NOT NULL"}],
+             "coefficient":{"type":"elim_ic_corp_n"},"multiplicateur":1,
+             "destination":{"analysis":{"mode":"override","value":"N"}}},
+            {"seq":2,"level":"corporate",
+             "selection":[{"dim":"partner","op":"IS NOT NULL"}],
+             "coefficient":{"type":"elim_ic_corp_n1"},"multiplicateur":1,
+             "destination":{"analysis":{"mode":"override","value":"N1"}}},
+            {"seq":3,"level":"corporate",
+             "selection":[{"dim":"partner","op":"IS NOT NULL"}],
+             "coefficient":{"type":"elim_ic_corp_var"},"multiplicateur":1,
+             "destination":{"analysis":{"mode":"override","value":"VAR"}}}]}"#,
+    );
+    assert_eq!(run_one(&con, "R"), 3, "3 opérations → 3 lignes");
+
+    assert!(
+        (ssum(&con, "analysis='N'") - 500.0).abs() < TOL,
+        "N : 1000 × Min(1, 0.5/1.0) = 500"
+    );
+    assert!(
+        (ssum(&con, "analysis='N1'") - 400.0).abs() < TOL,
+        "N-1 : 1000 × Min(1, 0.4/1.0) = 400"
+    );
+    assert!(
+        (ssum(&con, "analysis='VAR'") - 100.0).abs() < TOL,
+        "Var : 1000 × (0.5 − 0.4) = 100"
+    );
+}
+
+/// Sans scénario d'à-nouveau, le taux N-1 dégrade à 0 : `N1 = 0`, `Var = N`.
+#[test]
+fn coefficient_elim_ic_corp_sans_a_nouveau_n1_nul() {
+    let con = engine();
+    // Pas de setup_a_nouveau_perimeter : REEL.a_nouveau_scenario reste NULL.
+    set_pct_n(&con, "B", 0.5);
+    put(&con, "M", "700", "F20", Some("B"), "0LIASS", 1000.0, "corporate");
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"corporate",
+             "selection":[{"dim":"partner","op":"IS NOT NULL"}],
+             "coefficient":{"type":"elim_ic_corp_n1"},"multiplicateur":1,
+             "destination":{"analysis":{"mode":"override","value":"N1"}}},
+            {"seq":2,"level":"corporate",
+             "selection":[{"dim":"partner","op":"IS NOT NULL"}],
+             "coefficient":{"type":"elim_ic_corp_var"},"multiplicateur":1,
+             "destination":{"analysis":{"mode":"override","value":"VAR"}}}]}"#,
+    );
+    run_one(&con, "R");
+    assert!(
+        ssum(&con, "analysis='N1'").abs() < TOL,
+        "pas d'à-nouveau → taux N-1 = 0 → N1 = 0"
+    );
+    assert!(
+        (ssum(&con, "analysis='VAR'") - 500.0).abs() < TOL,
+        "Var = N − 0 = 500"
+    );
+}

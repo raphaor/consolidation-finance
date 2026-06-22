@@ -485,6 +485,18 @@ enum Coefficient {
     PctIntegration,
     PctInteret,
     Constant(f64),
+    /// Élimination interco corporate N : `Min(1, INTEG_PA_N / INTEG_EN_N)`.
+    /// Lit le `pct_integration` de l'entité (`p_ent`) et du partenaire
+    /// (`p_part`) à la période courante. Appliqué à un flux corporate (100 %),
+    /// l'étape D le re-multiplie par `INTEG_EN` → `Min(INTEG_EN, INTEG_PA)`.
+    ElimIcCorpN,
+    /// Élimination interco corporate N-1 : `Min(1, INTEG_PA_N-1 / INTEG_EN_N-1)`.
+    /// Les taux N-1 sont lus dans `sat_perimeter` du scénario d'à-nouveau
+    /// (`dim_scenario.a_nouveau_scenario` → son `perimeter_set` à son
+    /// `entry_period`). Pas d'à-nouveau → taux N-1 = 0.
+    ElimIcCorpN1,
+    /// Variation d'élimination interco corporate : `ElimIcCorpN - ElimIcCorpN1`.
+    ElimIcCorpVar,
 }
 
 /// Destination d'une dimension pilotable.
@@ -715,6 +727,9 @@ fn parse_coefficient(v: &JsonValue) -> RuleResult_<Coefficient> {
     match t.as_str() {
         "pct_integration" => Ok(Coefficient::PctIntegration),
         "pct_interet" => Ok(Coefficient::PctInteret),
+        "elim_ic_corp_n" => Ok(Coefficient::ElimIcCorpN),
+        "elim_ic_corp_n1" => Ok(Coefficient::ElimIcCorpN1),
+        "elim_ic_corp_var" => Ok(Coefficient::ElimIcCorpVar),
         "constant" => {
             let value = obj
                 .get("value")
@@ -872,19 +887,91 @@ fn dest_expr(
     }
 }
 
+/// JOINs `sat_perimeter` requis par un coefficient.
+///
+/// Indique quelles perspectives de périmètre l'expression du coefficient lit,
+/// afin que `exec_operation` ajoute les JOINs correspondants :
+/// - `p_ent` / `p_part` : entité / partenaire à la **période courante** ;
+/// - `p_ent_n1` / `p_part_n1` : idem à la période **N-1** (via le scénario
+///   d'à-nouveau, cf. [`Coefficient::ElimIcCorpN1`]).
+#[derive(Debug, Clone, Copy, Default)]
+struct CoeffJoins {
+    p_ent: bool,
+    p_part: bool,
+    p_ent_n1: bool,
+    p_part_n1: bool,
+}
+
+/// Construit l'expression SQL `Min(1, pa / en)` sans recourir à `LEAST` (qui,
+/// sous DuckDB, **ignore les NULL** : `LEAST(1.0, NULL)` vaut `1.0`, pas `NULL`).
+///
+/// `en` et `pa` sont des expressions SQL déjà `COALESCE`-ées à 0. Le `CASE`
+/// gère explicitement `en = 0` (entité non intégrée → coefficient 0, évite la
+/// division par zéro) et borne le ratio à 1.0.
+fn min_ratio(pa: &str, en: &str) -> String {
+    format!(
+        "CASE WHEN {en} = 0 THEN 0.0 \
+         WHEN {pa} / {en} < 1.0 THEN {pa} / {en} \
+         ELSE 1.0 END"
+    )
+}
+
 /// Construit l'expression SQL du coefficient.
 ///
-/// Renvoie `(expr_sql, needs_p_ent_join)` : si le coefficient lit `p_ent`,
-/// il faut s'assurer que le JOIN `p_ent` est présent.
-fn coefficient_expr(c: &Coefficient) -> (String, bool) {
+/// Renvoie `(expr_sql, joins)` : `joins` indique quelles perspectives de
+/// `sat_perimeter` l'expression lit, pour que les JOINs soient ajoutés.
+fn coefficient_expr(c: &Coefficient) -> (String, CoeffJoins) {
+    // Opérandes : pct_integration COALESCE à 0 (absence de ligne périmètre →
+    // taux nul). `p_ent` est en INNER JOIN, les autres en LEFT.
+    const EN_N: &str = "COALESCE(p_ent.pct_integration, 0)";
+    const PA_N: &str = "COALESCE(p_part.pct_integration, 0)";
+    const EN_N1: &str = "COALESCE(p_ent_n1.pct_integration, 0)";
+    const PA_N1: &str = "COALESCE(p_part_n1.pct_integration, 0)";
     match c {
-        Coefficient::PctIntegration => ("COALESCE(p_ent.pct_integration, 1.0)".to_string(), true),
-        Coefficient::PctInteret => ("COALESCE(p_ent.pct_interet, 1.0)".to_string(), true),
+        Coefficient::PctIntegration => (
+            "COALESCE(p_ent.pct_integration, 1.0)".to_string(),
+            CoeffJoins {
+                p_ent: true,
+                ..Default::default()
+            },
+        ),
+        Coefficient::PctInteret => (
+            "COALESCE(p_ent.pct_interet, 1.0)".to_string(),
+            CoeffJoins {
+                p_ent: true,
+                ..Default::default()
+            },
+        ),
+        Coefficient::ElimIcCorpN => (
+            min_ratio(PA_N, EN_N),
+            CoeffJoins {
+                p_ent: true,
+                p_part: true,
+                ..Default::default()
+            },
+        ),
+        Coefficient::ElimIcCorpN1 => (
+            min_ratio(PA_N1, EN_N1),
+            CoeffJoins {
+                p_ent_n1: true,
+                p_part_n1: true,
+                ..Default::default()
+            },
+        ),
+        Coefficient::ElimIcCorpVar => (
+            format!("({}) - ({})", min_ratio(PA_N, EN_N), min_ratio(PA_N1, EN_N1)),
+            CoeffJoins {
+                p_ent: true,
+                p_part: true,
+                p_ent_n1: true,
+                p_part_n1: true,
+            },
+        ),
         Coefficient::Constant(v) => {
             // Littéral inline : un f64 sert de coefficient multiplicatif.
             // On formate sans locale pour garantir un point décimal.
             let s = format_float(*v);
-            (s, false)
+            (s, CoeffJoins::default())
         }
     }
 }
@@ -977,15 +1064,18 @@ fn exec_operation(
         .collect();
 
     // Pour savoir quels JOINs ajouter :
-    //  - p_ent : si scope sur entity, ou coefficient pct_integration/pct_interet
-    //  - p_part : si scope sur partner
-    let (coeff_expr, coeff_needs_p_ent) = coefficient_expr(&op.coefficient);
+    //  - p_ent  : si scope sur entity, ou coefficient lisant le périmètre entité
+    //  - p_part : si scope sur partner, ou coefficient lisant le périmètre partenaire
+    //  - p_ent_n1 / p_part_n1 : coefficients d'élimination IC N-1 (via à-nouveau)
+    let (coeff_expr, cj) = coefficient_expr(&op.coefficient);
     let scope_has_entity = scope.iter().any(|c| c.target == "entity");
     let scope_has_partner = scope.iter().any(|c| c.target == "partner");
     let scope_has_share = scope.iter().any(|c| c.target == "share");
-    let need_p_ent = scope_has_entity || coeff_needs_p_ent;
-    let need_p_part = scope_has_partner;
+    let need_p_ent = scope_has_entity || cj.p_ent;
+    let need_p_part = scope_has_partner || cj.p_part;
     let need_p_share = scope_has_share;
+    let need_p_ent_n1 = cj.p_ent_n1;
+    let need_p_part_n1 = cj.p_part_n1;
 
     // Construction du SELECT et de la liste INSERT dans le même ordre.
     // Chaque dim propagated devient une colonne du SELECT + une colonne INSERT,
@@ -1011,8 +1101,11 @@ fn exec_operation(
     insert_parts.push("amount");
     select_parts.push("? AS level".to_string());
     params.push(DbValue::Text(op.level.clone()));
+    // Parenthèses autour du coefficient : il peut contenir une opération de
+    // niveau supérieur (ex. soustraction de `elim_ic_corp_var`) qui, sans
+    // parenthèses, serait mal associée vis-à-vis du `*` (précédence SQL).
     select_parts.push(format!(
-        "e.amount * {coeff_expr} * {mult} AS amount",
+        "e.amount * ({coeff_expr}) * {mult} AS amount",
         mult = format_float(op.multiplicateur),
     ));
 
@@ -1064,6 +1157,42 @@ fn exec_operation(
             let cond = push_condition(&operand, &c.op, &c.val, &mut params)
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
+        }
+    }
+
+    // JOINs de périmètre **N-1** (coefficients d'élimination IC N-1 / Var). Le
+    // taux N-1 est lu dans le `sat_perimeter` du scénario d'à-nouveau du run
+    // courant : `dim_scenario.a_nouveau_scenario` → son `perimeter_set` à son
+    // `entry_period`. Même source que le carry d'à-nouveau (cf.
+    // `pipeline/a_nouveau.rs`) — pas de duplication, cohérence N-1 garantie.
+    //
+    // LEFT JOIN volontaire : une entité / un partenaire absent du périmètre N-1
+    // (entrant) n'a pas de ligne → `pct_integration` NULL → COALESCE 0 dans
+    // l'expression du coefficient (entrant traité comme intégralement nouveau,
+    // `Var = N`). Aucun `?` : sous-requêtes scalaires sur `e.scenario` —
+    // n'affectent pas l'ordre des paramètres.
+    //
+    // Si le scénario n'a pas d'à-nouveau, les sous-requêtes renvoient NULL → la
+    // condition de JOIN est fausse → taux N-1 = 0 (dégradation documentée).
+    for (alias, key_col) in [("p_ent_n1", "entity"), ("p_part_n1", "partner")] {
+        let needed = if alias == "p_ent_n1" {
+            need_p_ent_n1
+        } else {
+            need_p_part_n1
+        };
+        if needed {
+            joins.push_str(&format!(
+                "\nLEFT JOIN sat_perimeter {alias}\n  \
+                    ON {alias}.entity = e.{key_col}\n \
+                    AND {alias}.perimeter_set = (\
+                        SELECT s_an.perimeter_set FROM dim_scenario s_cur \
+                        JOIN dim_scenario s_an ON s_an.code = s_cur.a_nouveau_scenario \
+                        WHERE s_cur.code = e.scenario)\n \
+                    AND {alias}.period = (\
+                        SELECT s_an.entry_period FROM dim_scenario s_cur \
+                        JOIN dim_scenario s_an ON s_an.code = s_cur.a_nouveau_scenario \
+                        WHERE s_cur.code = e.scenario)"
+            ));
         }
     }
 
@@ -1628,6 +1757,50 @@ mod tests {
         assert!(op.selection.is_empty(), "sélection vide par défaut");
     }
 
+    #[test]
+    fn parse_coefficients_elim_ic() {
+        // Les 3 coefficients d'élimination IC corporate (N / N-1 / Var) sont
+        // reconnus au parsing.
+        let ctx = ctx_fixture();
+        for (ty, want) in [
+            ("elim_ic_corp_n", "n"),
+            ("elim_ic_corp_n1", "n1"),
+            ("elim_ic_corp_var", "var"),
+        ] {
+            let json = format!(
+                r#"{{ "operations":[{{
+                    "seq":1,"level":"corporate",
+                    "coefficient":{{"type":"{ty}"}}
+                }}] }}"#
+            );
+            let def = parse_definition(&json, &ctx)
+                .unwrap_or_else(|e| panic!("coefficient {ty} devrait parser : {e}"));
+            let ok = match (&def.operations[0].coefficient, want) {
+                (Coefficient::ElimIcCorpN, "n") => true,
+                (Coefficient::ElimIcCorpN1, "n1") => true,
+                (Coefficient::ElimIcCorpVar, "var") => true,
+                _ => false,
+            };
+            assert!(ok, "coefficient {ty} : variant inattendu");
+        }
+    }
+
+    #[test]
+    fn coefficient_expr_elim_ic_joins() {
+        // Les besoins de JOIN sont correctement signalés : N → p_ent+p_part,
+        // N-1 → p_ent_n1+p_part_n1, Var → les quatre.
+        let (_, jn) = coefficient_expr(&Coefficient::ElimIcCorpN);
+        assert!(jn.p_ent && jn.p_part && !jn.p_ent_n1 && !jn.p_part_n1);
+        let (_, j1) = coefficient_expr(&Coefficient::ElimIcCorpN1);
+        assert!(!j1.p_ent && !j1.p_part && j1.p_ent_n1 && j1.p_part_n1);
+        let (expr_var, jv) = coefficient_expr(&Coefficient::ElimIcCorpVar);
+        assert!(jv.p_ent && jv.p_part && jv.p_ent_n1 && jv.p_part_n1);
+        // L'expression Var est bien une soustraction de deux ratios bornés.
+        assert!(expr_var.contains(" - "), "Var = ratio N - ratio N-1");
+        // On n'utilise jamais LEAST (sémantique NULL dangereuse sous DuckDB).
+        assert!(!expr_var.to_uppercase().contains("LEAST"));
+    }
+
     // ── Rejets par les whitelists (sécurité SQL) ─────────────────────────
 
     #[test]
@@ -1950,10 +2123,10 @@ mod tests {
 
     #[test]
     fn coefficient_expr_pct_integration_necessite_join_perimeter() {
-        let (expr, needs_join) = coefficient_expr(&Coefficient::PctIntegration);
+        let (expr, joins) = coefficient_expr(&Coefficient::PctIntegration);
         assert!(
-            needs_join,
-            "PctIntegration doit déclencher le JOIN sat_perimeter"
+            joins.p_ent,
+            "PctIntegration doit déclencher le JOIN sat_perimeter (p_ent)"
         );
         assert!(
             expr.contains("pct_integration"),
@@ -1963,8 +2136,11 @@ mod tests {
 
     #[test]
     fn coefficient_expr_constant_ne_necessite_pas_join() {
-        let (expr, needs_join) = coefficient_expr(&Coefficient::Constant(0.5));
-        assert!(!needs_join, "Constant n'a pas besoin du JOIN sat_perimeter");
+        let (expr, joins) = coefficient_expr(&Coefficient::Constant(0.5));
+        assert!(
+            !joins.p_ent && !joins.p_part && !joins.p_ent_n1 && !joins.p_part_n1,
+            "Constant n'a pas besoin du JOIN sat_perimeter"
+        );
         assert!(
             !expr.contains("pct_"),
             "expression ne doit pas lire le périmètre : {expr}"
