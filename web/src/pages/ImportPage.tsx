@@ -79,7 +79,7 @@ export function ImportPage() {
         <UploadZone
           title="Liasses (écritures)"
           description="Ajout (append) dans la table stg_entry. Les colonnes Partner, Share et Analysis sont optionnelles."
-          header="Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Audit_id, Partner*, Share*, Analysis*, Amount"
+          header="Phase, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Partner*, Share*, Analysis*, Analysis2*, Source*, Amount"
           onImport={(f) => api.importEntries(f)}
         />
         <UploadZone

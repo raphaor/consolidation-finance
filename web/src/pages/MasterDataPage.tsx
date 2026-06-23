@@ -198,6 +198,8 @@ function RowForm({
         <form className="modal__body" onSubmit={submit}>
           <div className="form-grid">
             {tableDef.columns.map((col) => {
+              // Champ auto-généré (ex : consolidations.id) masqué à la création.
+              if (!isEdit && col.auto) return null;
               const locked = isEdit && col.pk === true;
               const optSource = col.optionsApi ?? col.optionsFrom?.table;
               const optRows = optSource ? optionsData[optSource] : undefined;
@@ -449,6 +451,9 @@ export function MasterDataPage() {
     if (tableDef === null) return;
     const payload: Record<string, unknown> = {};
     for (const col of tableDef.columns) {
+      // Clé primaire auto-générée (ex : consolidations.id) : omise à la création
+      // (le serveur fait INSERT ... RETURNING id). Présente et verrouillée à l'édition.
+      if (formState?.mode === 'create' && col.auto) continue;
       payload[col.name] = coerceValue(col, values[col.name] ?? '');
     }
     if (formState?.mode === 'create') {

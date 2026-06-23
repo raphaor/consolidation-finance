@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
-import type { Entity, Nature, Period, Scenario } from '../types';
+import type { ConsolidationSummary, Entity, Nature, Period } from '../types';
 import { formatOptionLabel } from '../utils/format';
 
 interface Props {
-  scenario: string;
+  consolidation: number | undefined;
   entity: string;
   entryPeriod: string;
   period: string;
   nature: string;
-  onScenarioChange: (v: string) => void;
+  onConsolidationChange: (v: number | undefined) => void;
+  // Remonte la liste des consolidations chargée en interne : permet au parent
+  // de dériver la phase / l'exercice de la consolidation sélectionnée (utile
+  // pour filtrer le niveau raw par `phase=<phase>`).
+  onConsolidationsLoaded?: (list: ConsolidationSummary[]) => void;
   onEntityChange: (v: string) => void;
   onEntryPeriodChange: (v: string) => void;
   onPeriodChange: (v: string) => void;
@@ -18,19 +22,20 @@ interface Props {
 }
 
 export function Filters({
-  scenario,
+  consolidation,
   entity,
   entryPeriod,
   period,
   nature,
-  onScenarioChange,
+  onConsolidationChange,
+  onConsolidationsLoaded,
   onEntityChange,
   onEntryPeriodChange,
   onPeriodChange,
   onNatureChange,
   disabled,
 }: Props) {
-  const [scenarios, setScenarios] = useState<Scenario[]>([]);
+  const [consolidations, setConsolidations] = useState<ConsolidationSummary[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [periods, setPeriods] = useState<Period[]>([]);
   const [natures, setNatures] = useState<Nature[]>([]);
@@ -39,28 +44,31 @@ export function Filters({
     let cancelled = false;
     (async () => {
       try {
-        const [s, e, p, n] = await Promise.all([
-          api.masterData.list('scenarios'),
+        const [c, e, p, n] = await Promise.all([
+          api.consolidations.list(),
           api.masterData.list('entities'),
           api.masterData.list('periods'),
           api.masterData.list('natures'),
         ]);
         if (cancelled) return;
-        setScenarios(s as Scenario[]);
+        setConsolidations(c);
         setEntities(e as Entity[]);
         setPeriods(p as Period[]);
         setNatures(n as Nature[]);
+        onConsolidationsLoaded?.(c);
       } catch {
         if (cancelled) return;
-        setScenarios([]);
+        setConsolidations([]);
         setEntities([]);
         setPeriods([]);
         setNatures([]);
+        onConsolidationsLoaded?.([]);
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const exercisePeriods = periods.filter((p) => p.type === 'exercice');
@@ -71,14 +79,16 @@ export function Filters({
       <label className="field">
         <span>Définition de consolidation</span>
         <select
-          value={scenario}
-          onChange={(e) => onScenarioChange(e.target.value)}
+          value={consolidation ?? ''}
+          onChange={(e) =>
+            onConsolidationChange(e.target.value === '' ? undefined : Number(e.target.value))
+          }
           disabled={disabled}
         >
-          <option value="">Tous</option>
-          {scenarios.map((s) => (
-            <option key={s.code} value={s.code}>
-              {formatOptionLabel(s.code, s.libelle)}
+          <option value="">Toutes</option>
+          {consolidations.map((c) => (
+            <option key={c.id} value={c.id}>
+              {formatOptionLabel(String(c.id), c.libelle)}
             </option>
           ))}
         </select>

@@ -32,7 +32,7 @@ import { usePersistentState } from '../utils/usePersistentState';
 // Colonnes dans l'ordre canonique du schéma (cf. DIM_COLS côté back).
 // Les 8 premières + amount sont obligatoires ; les autres sont optionnelles.
 const REQUIRED_DIMS = [
-  'scenario',
+  'phase',
   'entity',
   'entry_period',
   'period',
@@ -51,7 +51,7 @@ type ColName = (typeof ALL_COLS)[number];
 // Champs factorisables dans l'en-tête commun (généralement constants sur un
 // lot de saisies : on les saisit une fois, ils pré-remplissent chaque ligne).
 const COMMON_COLS: readonly ColName[] = [
-  'scenario',
+  'phase',
   'entity',
   'entry_period',
   'period',
@@ -74,7 +74,7 @@ const VARIABLE_COLS: readonly ColName[] = [
 // du registre des dimensions côté serveur ; en mode dégradé on retombe sur ces
 // libellés courts).
 const SHORT_LABELS: Record<ColName, string> = {
-  scenario: 'Scénario',
+  phase: 'Phase',
   entity: 'Entité',
   entry_period: 'Exercice',
   period: 'Période',
@@ -111,7 +111,7 @@ function emptyDraftRow(seed: Partial<Record<ColName, string>> = {}): DraftRow {
 // Valeurs réutilisables d'une ligne de saisie → EntryInput pour l'API.
 function toEntryInput(values: Record<ColName, string>): EntryInput {
   return {
-    scenario: values.scenario ?? '',
+    phase: values.phase ?? '',
     entity: values.entity ?? '',
     entry_period: values.entry_period ?? '',
     period: values.period ?? '',
@@ -454,7 +454,7 @@ type ManualRow = Record<string, unknown>;
 function manualRowToInput(row: ManualRow): EntryInput {
   const s = (k: string) => (row[k] == null ? '' : String(row[k]));
   return {
-    scenario: s('scenario'),
+    phase: s('phase'),
     entity: s('entity'),
     entry_period: s('entry_period'),
     period: s('period'),
@@ -695,10 +695,10 @@ function EditModal({
 
 export function SaisiePage() {
   // Pré-remplissage de l'en-tête commun : on réutilise les filtres partagés
-  // avec la page Écritures (clés identiques) pour que scenario/entity/période
+  // avec la page Écritures (clés identiques) pour que phase/entity/période
   // soient cohérents entre les deux pages. Currency et nature sont propres à
   // la saisie (la page Écritures ne filtre pas sur ces dimensions).
-  const [scenario, setScenario] = usePersistentState('ecritures.scenario', '');
+  const [phase, setPhase] = usePersistentState('ecritures.phase', '');
   const [entity, setEntity] = usePersistentState('ecritures.entity', '');
   const [entryPeriod, setEntryPeriod] = usePersistentState('ecritures.entryPeriod', '');
   const [period, setPeriod] = usePersistentState('ecritures.period', '');
@@ -712,22 +712,22 @@ export function SaisiePage() {
       ColName,
       string
     >;
-    base.scenario = scenario;
+    base.phase = phase;
     base.entity = entity;
     base.entry_period = entryPeriod;
     base.period = period;
     base.currency = currency;
     base.nature = nature;
     return base;
-  }, [scenario, entity, entryPeriod, period, currency, nature]);
+  }, [phase, entity, entryPeriod, period, currency, nature]);
 
   // Setter unique pour l'en-tête commun (préserve la persistence de chaque
   // champ via son usePersistentState dédié).
   const onCommonChange = useCallback(
     (col: ColName, v: string) => {
       switch (col) {
-        case 'scenario':
-          setScenario(v);
+        case 'phase':
+          setPhase(v);
           break;
         case 'entity':
           setEntity(v);
@@ -749,7 +749,7 @@ export function SaisiePage() {
           break;
       }
     },
-    [setScenario, setEntity, setEntryPeriod, setPeriod, setCurrency, setNature],
+    [setPhase, setEntity, setEntryPeriod, setPeriod, setCurrency, setNature],
   );
 
   // Chargement du graphe de références pour alimenter les listes déroulantes

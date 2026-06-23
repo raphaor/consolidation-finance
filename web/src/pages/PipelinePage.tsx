@@ -1,12 +1,12 @@
-// Page « Pipeline » : sélection d'un scénario v2, affichage des paramètres
+// Page « Pipeline » : sélection d'une consolidation, affichage des paramètres
 // dépliés en lecture seule, et exécution du pipeline (POST /api/run).
 //
-// La sélection alimente `api.run(scenario)`. Sans sélection, le serveur
-// choisit le premier scénario `'ouvert'` (rétro-compatibilité dev).
+// La sélection alimente `api.run(consolidationId)`. Sans sélection, le serveur
+// choisit la première consolidation `'ouvert'` (rétro-compatibilité dev).
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
-import type { LevelCount, PipelineCounts, ScenarioSummary } from '../types';
+import type { ConsolidationSummary, LevelCount, PipelineCounts } from '../types';
 import { formatInt, formatOptionLabel } from '../utils/format';
 
 type RunStatus =
@@ -39,17 +39,21 @@ const STEPS: Step[] = [
   },
 ];
 
-// Lignes paramètres affichées en lecture seule sous le dropdown scénario.
-function paramRows(s: ScenarioSummary): { label: string; value: string }[] {
+// Lignes paramètres affichées en lecture seule sous le dropdown consolidation.
+function paramRows(s: ConsolidationSummary): { label: string; value: string }[] {
+  const dash = (x: string | null) => (x === null || x === '' ? '—' : x);
   return [
-    { label: 'Phase', value: s.category ?? '—' },
-    { label: 'Période d\'entrée', value: s.entry_period ?? '—' },
-    { label: 'Devise présentation', value: s.presentation_currency ?? '—' },
-    { label: 'Variante', value: s.variant ?? '—' },
-    { label: 'Jeu de taux', value: s.rate_set ?? '—' },
-    { label: 'Ruleset', value: s.ruleset_code ?? '—' },
-    { label: 'Conso d\'à-nouveau', value: s.a_nouveau_scenario ?? '—' },
-    { label: 'Statut', value: s.statut ?? '—' },
+    { label: 'Phase', value: dash(s.phase) },
+    { label: 'Exercice', value: dash(s.exercice) },
+    { label: 'Devise présentation', value: dash(s.presentation_currency) },
+    { label: 'Variante', value: dash(s.variant) },
+    { label: 'Jeu de périmètre', value: dash(s.perimeter_set) },
+    { label: 'Période de périmètre', value: dash(s.perimeter_period) },
+    { label: 'Jeu de taux', value: dash(s.rate_set) },
+    { label: 'Période des taux', value: dash(s.rate_period) },
+    { label: 'Ruleset', value: dash(s.ruleset_code) },
+    { label: 'Conso d\'à-nouveau', value: s.a_nouveau_consolidation_id != null ? String(s.a_nouveau_consolidation_id) : '—' },
+    { label: 'Statut', value: dash(s.statut) },
   ];
 }
 
@@ -59,8 +63,8 @@ export function PipelinePage() {
   const [status, setStatus] = useState<RunStatus>({ kind: 'idle' });
   const [loadingCounts, setLoadingCounts] = useState(false);
 
-  const [scenarios, setScenarios] = useState<ScenarioSummary[]>([]);
-  const [scenarioCode, setScenarioCode] = useState<string>('');
+  const [consolidations, setConsolidations] = useState<ConsolidationSummary[]>([]);
+  const [consolidationId, setConsolidationId] = useState<number | undefined>(undefined);
 
   const loadCounts = useCallback(async () => {
     setLoadingCounts(true);
@@ -73,28 +77,29 @@ export function PipelinePage() {
     }
   }, []);
 
-  // Chargement initial : compteurs + liste scénarios. Si aucun scénario n'est
-  // sélectionné, on pré-sélectionne le premier `'ouvert'` (même défaut que le
-  // serveur) pour que l'utilisateur voie immédiatement les paramètres.
+  // Chargement initial : compteurs + liste consolidations. Si aucune
+  // consolidation n'est sélectionnée, on pré-sélectionne la première `'ouvert'`
+  // (même défaut que le serveur) pour que l'utilisateur voie immédiatement les
+  // paramètres.
   useEffect(() => {
     void loadCounts();
     void (async () => {
       try {
-        const list = await api.scenarios.list();
-        setScenarios(list);
+        const list = await api.consolidations.list();
+        setConsolidations(list);
         if (list.length > 0) {
-          const ouvert = list.find((s) => s.statut === 'ouvert');
-          setScenarioCode((ouvert ?? list[0]).code);
+          const ouvert = list.find((c) => c.statut === 'ouvert');
+          setConsolidationId((ouvert ?? list[0]).id);
         }
       } catch {
-        setScenarios([]);
+        setConsolidations([]);
       }
     })();
   }, [loadCounts]);
 
   const selected = useMemo(
-    () => scenarios.find((s) => s.code === scenarioCode) ?? null,
-    [scenarios, scenarioCode],
+    () => consolidations.find((c) => c.id === consolidationId) ?? null,
+    [consolidations, consolidationId],
   );
 
   // Récupère le count d'une étape depuis /api/levels (snapshot courant),
@@ -109,7 +114,7 @@ export function PipelinePage() {
     setStatus({ kind: 'running', label: 'Exécution du pipeline…' });
     setResult(null);
     try {
-      const res = await api.run(scenarioCode);
+      const res = await api.run(consolidationId);
       setResult(res);
       setStatus({ kind: 'done' });
       void loadCounts();
@@ -185,8 +190,8 @@ export function PipelinePage() {
             type="button"
             className="btn btn--primary"
             onClick={run}
-            disabled={busy || scenarios.length === 0}
-            title={scenarios.length === 0 ? 'Aucun scénario disponible' : undefined}
+            disabled={busy || consolidations.length === 0}
+            title={consolidations.length === 0 ? 'Aucune consolidation disponible' : undefined}
           >
             {status.kind === 'running' && status.label.includes('pipeline')
               ? status.label
@@ -231,20 +236,22 @@ export function PipelinePage() {
       </div>
 
       <div className="scenario-picker">
-        <label className="scenario-picker__label" htmlFor="scenario-select">
+        <label className="scenario-picker__label" htmlFor="consolidation-select">
           Définition de consolidation
         </label>
         <select
-          id="scenario-select"
+          id="consolidation-select"
           className="scenario-picker__select"
-          value={scenarioCode}
-          onChange={(e) => setScenarioCode(e.target.value)}
-          disabled={busy || scenarios.length === 0}
+          value={consolidationId ?? ''}
+          onChange={(e) =>
+            setConsolidationId(e.target.value === '' ? undefined : Number(e.target.value))
+          }
+          disabled={busy || consolidations.length === 0}
         >
-          {scenarios.length === 0 && <option value="">—</option>}
-          {scenarios.map((s) => (
-            <option key={s.code} value={s.code}>
-              {formatOptionLabel(s.code, s.libelle)}
+          {consolidations.length === 0 && <option value="">—</option>}
+          {consolidations.map((c) => (
+            <option key={c.id} value={c.id}>
+              {formatOptionLabel(String(c.id), c.libelle)}
             </option>
           ))}
         </select>

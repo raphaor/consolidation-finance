@@ -1,11 +1,13 @@
 // Client API minimaliste — toutes les routes sont servies via le proxy Vite
 // `/api` -> http://localhost:3000 (voir vite.config.ts).
 //
-// Filtres optionnels (4, tous des strings, absents/vides = pas de filtre) :
-//   GET /api/bilan?level=...&scenario=...&entity=...&entry_period=...&period=...
-//   GET /api/compte-resultat?level=...&scenario=...&entity=...&entry_period=...&period=...
-//   GET /api/entries?level=...&scenario=...&entity=...&entry_period=...&period=...&limit=...&offset=...
-// - `scenario` -> scénario (REEL…)
+// Filtres optionnels (absents/vides = pas de filtre) :
+//   GET /api/bilan?level=...&consolidation=...&entity=...&entry_period=...&period=...
+//   GET /api/compte-resultat?level=...&consolidation=...&entity=...&entry_period=...&period=...
+//   GET /api/entries?level=...&consolidation=...&phase=...&entity=...&entry_period=...&period=...&limit=...&offset=...
+// - `consolidation` -> identifiant (number) de la consolidation (filtre des
+//   niveaux fact : corporate/converted/consolidated)
+// - `phase` -> phase (REEL…) pour le niveau raw (stg_entry) ; ignoré aux autres
 // - `entity` -> entité juridique (M, A, B…)
 // - `entry_period` -> exercice clôturé (2024)
 // - `period` -> période impactée par l'écriture (peut différer de entry_period)
@@ -28,7 +30,7 @@ import type {
   RuleSummary,
   RulesetDetail,
   RulesetSummary,
-  ScenarioSummary,
+  ConsolidationSummary,
   TableSchema,
   TableSummary,
   ValueList,
@@ -127,7 +129,7 @@ export const api = {
   // Colonnes dynamiques (dimensions built-in + custom + level + amount) →
   // chaque ligne est un objet générique ; la vue Écritures construit ses
   // colonnes depuis /api/meta/dimensions.
-  entries: (params: { level: string; limit?: number; offset?: number } & ReportFilters & { source?: string }) =>
+  entries: (params: { level: string; limit?: number; offset?: number; phase?: string } & ReportFilters & { source?: string }) =>
     getJson<Record<string, unknown>[]>(`/entries${buildQueryString(params)}`),
   // Mutations unitaires / batch sur stg_entry (saisie manuelle). Toute ligne
   // créée via create() est marquée `source = MANUAL` côté back ; edit/delete
@@ -140,9 +142,9 @@ export const api = {
     remove: (id: number) =>
       deleteJson<{ deleted: number; id: number }>(`/entries/${id}`),
   },
-  run: (scenario?: string) =>
-    scenario && scenario.trim() !== ''
-      ? postJsonRaw<PipelineCounts>('/run', { scenario })
+  run: (consolidationId?: number) =>
+    consolidationId !== undefined
+      ? postJsonRaw<PipelineCounts>('/run', { consolidation_id: consolidationId })
       : postJson<PipelineCounts>('/run'),
   reset: () => postJson<{ status: string; entries: number }>('/reset'),
   // Sauvegarde / restauration : paquet JSON complet de l'état (référentiels +
@@ -155,8 +157,8 @@ export const api = {
         bundle,
       ),
   },
-  scenarios: {
-    list: () => getJson<ScenarioSummary[]>('/scenarios'),
+  consolidations: {
+    list: () => getJson<ConsolidationSummary[]>('/consolidations'),
   },
   masterData: {
     // Liste des tables navigables (natives + `car_<code>` + `lst_<code>`).

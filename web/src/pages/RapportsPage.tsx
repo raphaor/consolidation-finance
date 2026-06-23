@@ -17,7 +17,10 @@ export function RapportsPage() {
   // account × flux × nature).
   const [detailed, setDetailed] = usePersistentState('rapports.detailed', false);
   const [level, setLevel] = usePersistentState<Level>('rapports.level', 'consolidated');
-  const [scenario, setScenario] = usePersistentState('rapports.scenario', '');
+  const [consolidation, setConsolidation] = usePersistentState<number | undefined>(
+    'rapports.consolidation',
+    undefined,
+  );
   const [entity, setEntity] = usePersistentState('rapports.entity', '');
   const [entryPeriod, setEntryPeriod] = usePersistentState('rapports.entryPeriod', '');
   const [period, setPeriod] = usePersistentState('rapports.period', '');
@@ -43,7 +46,7 @@ export function RapportsPage() {
     setError(null);
     try {
       const filters: ReportFilters = {
-        scenario: scenario || undefined,
+        consolidation,
         entity: entity || undefined,
         entry_period: entryPeriod || undefined,
         period: period || undefined,
@@ -62,7 +65,7 @@ export function RapportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [reportType, level, scenario, entity, entryPeriod, period, nature]);
+  }, [reportType, level, consolidation, entity, entryPeriod, period, nature]);
 
   useEffect(() => {
     void load();
@@ -114,12 +117,12 @@ export function RapportsPage() {
             />
           </label>
           <Filters
-            scenario={scenario}
+            consolidation={consolidation}
             entity={entity}
             entryPeriod={entryPeriod}
             period={period}
             nature={nature}
-            onScenarioChange={setScenario}
+            onConsolidationChange={setConsolidation}
             onEntityChange={setEntity}
             onEntryPeriodChange={setEntryPeriod}
             onPeriodChange={setPeriod}

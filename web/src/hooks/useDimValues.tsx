@@ -31,7 +31,7 @@ export type DimToTable = Record<string, { table: MasterTable; pkCol: string }>;
 // analysis2, custom) sont absentes → saisie texte. `partner` / `share` sont des
 // rôles sur la liste des entités.
 export const DIM_TO_TABLE_FALLBACK: DimToTable = {
-  scenario: { table: 'scenarios', pkCol: 'code' },
+  phase: { table: 'scenario_categories', pkCol: 'code' },
   entity: { table: 'entities', pkCol: 'code' },
   entry_period: { table: 'periods', pkCol: 'code' },
   period: { table: 'periods', pkCol: 'code' },

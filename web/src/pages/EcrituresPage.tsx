@@ -16,7 +16,7 @@ import {
 } from '@tanstack/react-table';
 import { api } from '../api';
 import { Filters } from '../components/Filters';
-import type { DimensionInfo } from '../types';
+import type { ConsolidationSummary, DimensionInfo } from '../types';
 import { LEVELS } from '../types';
 import { formatAmount, formatInt } from '../utils/format';
 import { usePersistentState } from '../utils/usePersistentState';
@@ -34,7 +34,13 @@ type EntryLevel = (typeof ENTRY_LEVELS)[number];
 export function EcrituresPage() {
   // Filtres persistés (survivent au changement d'onglet et au rechargement).
   const [level, setLevel] = usePersistentState<EntryLevel>('ecritures.level', 'consolidated');
-  const [scenario, setScenario] = usePersistentState('ecritures.scenario', '');
+  const [consolidation, setConsolidation] = usePersistentState<number | undefined>(
+    'ecritures.consolidation',
+    undefined,
+  );
+  // Liste des consolidations remontée par <Filters> : sert à dériver la phase de
+  // la consolidation sélectionnée pour filtrer le niveau raw par `phase=<phase>`.
+  const [consolidations, setConsolidations] = useState<ConsolidationSummary[]>([]);
   const [entity, setEntity] = usePersistentState('ecritures.entity', '');
   const [entryPeriod, setEntryPeriod] = usePersistentState('ecritures.entryPeriod', '');
   const [period, setPeriod] = usePersistentState('ecritures.period', '');
@@ -45,9 +51,15 @@ export function EcrituresPage() {
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
 
+  // Phase déduite de la consolidation sélectionnée (utilisé au niveau raw où le
+  // backend filtre stg_entry par `phase` et ignore `consolidation`).
+  const phase = useMemo(
+    () => consolidations.find((c) => c.id === consolidation)?.phase,
+    [consolidations, consolidation],
+  );
+
   // Liste des dimensions (built-in + custom) pour construire les colonnes.
-  // Les libellés (ex. « Définition de consolidation » pour scenario) viennent
-  // du registre serveur.
+  // Les libellés (ex. « Phase ») viennent du registre serveur.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -67,11 +79,15 @@ export function EcrituresPage() {
     setLoading(true);
     setError(null);
     try {
+      // raw (stg_entry) filtre par `phase` (la `consolidation` y est ignorée) ;
+      // les niveaux fact (corporate/converted/consolidated) filtrent par `consolidation=<id>`.
+      const isRaw = level === 'raw';
       const rows = await api.entries({
         level,
         limit: FETCH_LIMIT,
         offset: 0,
-        scenario: scenario || undefined,
+        consolidation: isRaw ? undefined : consolidation,
+        phase: isRaw ? (phase || undefined) : undefined,
         entity: entity || undefined,
         entry_period: entryPeriod || undefined,
         period: period || undefined,
@@ -84,7 +100,7 @@ export function EcrituresPage() {
     } finally {
       setLoading(false);
     }
-  }, [level, scenario, entity, entryPeriod, period, nature]);
+  }, [level, consolidation, phase, entity, entryPeriod, period, nature]);
 
   useEffect(() => {
     void load();
@@ -138,12 +154,13 @@ export function EcrituresPage() {
         <h1 className="page__title">Écritures</h1>
         <div className="page__actions">
           <Filters
-            scenario={scenario}
+            consolidation={consolidation}
             entity={entity}
             entryPeriod={entryPeriod}
             period={period}
             nature={nature}
-            onScenarioChange={setScenario}
+            onConsolidationChange={setConsolidation}
+            onConsolidationsLoaded={setConsolidations}
             onEntityChange={setEntity}
             onEntryPeriodChange={setEntryPeriod}
             onPeriodChange={setPeriod}

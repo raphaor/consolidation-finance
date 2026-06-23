@@ -69,7 +69,7 @@ const NULL_OPS = new Set(['IS NULL', 'IS NOT NULL']);
 // `engine/src/dimensions.rs::builtin_dims()`. Les dimensions custom (ajoutées
 // par l'utilisateur) ne seront pas présentes, mais l'éditeur reste utilisable.
 const BUILTIN_DIMS_FALLBACK: DimensionInfo[] = [
-  { name: 'scenario',     category: 'Fixed',      custom: false, label: 'Définition de consolidation', pilotable: false },
+  { name: 'phase',       category: 'Fixed',      custom: false, label: 'Phase',      pilotable: false },
   { name: 'entity',       category: 'Active',     custom: false, label: 'Entité',     pilotable: true  },
   { name: 'entry_period', category: 'Fixed',      custom: false, label: 'Exercice',   pilotable: false },
   { name: 'period',       category: 'Fixed',      custom: false, label: 'Période',    pilotable: false },

@@ -14,7 +14,7 @@ export interface BilanRow {
 
 export interface Entry {
   id: number;
-  scenario: string;
+  phase: string;
   entity: string;
   entry_period: string;
   period: string;
@@ -34,7 +34,7 @@ export interface Entry {
 // sont en `string` (le back parse le montant, tolère la virgule décimale).
 // Les champs optionnels (partner, share, analysis, analysis2) peuvent être ''.
 export interface EntryInput {
-  scenario: string;
+  phase: string;
   entity: string;
   entry_period: string;
   period: string;
@@ -59,32 +59,39 @@ export interface HealthStatus {
   status: string;
 }
 
-export interface Scenario {
-  code: string;
+export interface Consolidation {
+  id: number;
   libelle: string;
-  category: string | null;
-  entry_period: string | null;
-  presentation_currency: string | null;
-  variant: string | null;
+  phase: string;
+  exercice: string;
+  perimeter_set: string;
+  variant: string;
+  presentation_currency: string;
+  perimeter_period: string;
+  rate_set: string;
+  rate_period: string;
   ruleset_code: string | null;
-  rate_set: string | null;
-  statut: string | null;
-  a_nouveau_scenario: string | null;
+  a_nouveau_consolidation_id: number | null;
+  statut: string;
 }
 
-// Réponse de GET /api/scenarios — scénario v2 « déplié » pour le dropdown
-// PipelinePage (cf. SPEC_SCENARIO_V2_TECH §4.6).
-export interface ScenarioSummary {
-  code: string;
-  libelle: string | null;
-  category: string | null;
-  entry_period: string | null;
-  presentation_currency: string | null;
-  variant: string | null;
+// Réponse de GET /api/consolidations — consolidation « dépliée » pour le
+// dropdown PipelinePage et les filtres partagés (Filters). Même forme que
+// `Consolidation` (les champs sont tous renseignés côté serveur).
+export interface ConsolidationSummary {
+  id: number;
+  libelle: string;
+  phase: string;
+  exercice: string;
+  perimeter_set: string;
+  variant: string;
+  presentation_currency: string;
+  perimeter_period: string;
+  rate_set: string;
+  rate_period: string;
   ruleset_code: string | null;
-  rate_set: string | null;
-  statut: string | null;
-  a_nouveau_scenario: string | null;
+  a_nouveau_consolidation_id: number | null;
+  statut: string;
 }
 
 export interface Period {
@@ -111,7 +118,7 @@ export interface Nature {
 }
 
 export interface ReportFilters {
-  scenario?: string;
+  consolidation?: number;
   entity?: string;
   entry_period?: string;
   period?: string;
@@ -146,7 +153,7 @@ export type Level = (typeof LEVELS)[number];
 // `GET /api/md` côté backend. Les tables dynamiques (`car_<code>`,
 // `lst_<code>`) y sont ajoutées à l'exécution (cf. characteristics / value_lists).
 export const NATIVE_MASTER_TABLES = [
-  'scenarios',
+  'consolidations',
   'entities',
   'periods',
   'accounts',
@@ -182,6 +189,10 @@ export interface ColumnDef {
   optionsApi?: 'rulesets';
   nullable?: boolean;
   pk?: boolean;
+  // Clé primaire auto-générée par la base (ex : `consolidations.id`). Sur
+  // création, le champ est masqué et omis du payload (INSERT ... RETURNING id) ;
+  // sur édition, il est verrouillé (pk). Sur suppression, on identifie par ce pk.
+  auto?: boolean;
 }
 
 // ---------- Schéma dynamique (GET /api/md et GET /api/md/{table}/schema) ----------
@@ -260,52 +271,26 @@ export const MASTER_TABLES: TableDef[] = [
     ],
   },
   {
-    table: 'scenarios',
+    table: 'consolidations',
     label: 'Définitions de consolidation',
     columns: [
-      { name: 'code', label: 'Code', type: 'text', pk: true },
+      // `id` est auto-généré (INSERT ... RETURNING id) : masqué à la création,
+      // verrouillé (pk) à l'édition.
+      { name: 'id', label: 'ID', type: 'number', pk: true, auto: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
       {
-        name: 'category',
+        name: 'phase',
         label: 'Phase',
         type: 'select',
         nullable: true,
         optionsFrom: { table: 'scenario_categories', value: 'code', label: 'libelle' },
       },
       {
-        name: 'entry_period',
-        label: 'Période d\'entrée',
+        name: 'exercice',
+        label: 'Exercice',
         type: 'select',
         nullable: true,
         optionsFrom: { table: 'periods', value: 'code' },
-      },
-      {
-        name: 'presentation_currency',
-        label: 'Devise présentation',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'currencies', value: 'code_iso', label: 'libelle' },
-      },
-      {
-        name: 'variant',
-        label: 'Variante',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'variants', value: 'code', label: 'libelle' },
-      },
-      {
-        name: 'ruleset_code',
-        label: 'Jeu de règles',
-        type: 'select',
-        nullable: true,
-        optionsApi: 'rulesets',
-      },
-      {
-        name: 'rate_set',
-        label: 'Jeu de taux',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'rate_sets', value: 'code', label: 'libelle' },
       },
       {
         name: 'perimeter_set',
@@ -315,17 +300,59 @@ export const MASTER_TABLES: TableDef[] = [
         optionsFrom: { table: 'perimeter_sets', value: 'code', label: 'libelle' },
       },
       {
+        name: 'variant',
+        label: 'Variante',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'variants', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'presentation_currency',
+        label: 'Devise présentation',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'currencies', value: 'code_iso', label: 'libelle' },
+      },
+      {
+        name: 'perimeter_period',
+        label: 'Période de périmètre',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'periods', value: 'code' },
+      },
+      {
+        name: 'rate_set',
+        label: 'Jeu de taux',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'rate_sets', value: 'code', label: 'libelle' },
+      },
+      {
+        name: 'rate_period',
+        label: 'Période des taux',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'periods', value: 'code' },
+      },
+      {
+        name: 'ruleset_code',
+        label: 'Jeu de règles',
+        type: 'select',
+        nullable: true,
+        optionsApi: 'rulesets',
+      },
+      {
+        name: 'a_nouveau_consolidation_id',
+        label: 'Conso d\'à-nouveau',
+        type: 'select',
+        nullable: true,
+        optionsFrom: { table: 'consolidations', value: 'id', label: 'libelle' },
+      },
+      {
         name: 'statut',
         label: 'Statut',
         type: 'select',
         options: ['brouillon', 'ouvert', 'verrouillé'],
-      },
-      {
-        name: 'a_nouveau_scenario',
-        label: 'Conso d\'à-nouveau',
-        type: 'select',
-        nullable: true,
-        optionsFrom: { table: 'scenarios', value: 'code', label: 'libelle' },
       },
     ],
   },
@@ -607,7 +634,7 @@ export interface ScopeCond {
 //     colonne master data. Cf. `references::NATIVE_ENUMS`.
 // Cf. `docs/REGLES_CONSO.md` §4.1 et `rules.rs::parse_selection_cond`.
 export interface SelectionCond {
-  dim: string; // scenario, entity, account, flow, etc.
+  dim: string; // phase, entity, account, flow, etc.
   op: string;
   val: unknown;
   via?: string;
