@@ -237,6 +237,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         use_explicit_schema: false,
     },
     // 14. sat_exchange_rate (v2) : `rate_set` en 1ère colonne (PK étendue).
+    //      `taux_ouverture` = clôture N-1 portée par N (résout `close_n1`).
     CsvMapping {
         file: "rates.csv",
         table: "sat_exchange_rate",
@@ -246,6 +247,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
             "period",
             "taux_close",
             "taux_moyen",
+            "taux_ouverture",
         ],
         casts: &[],
         use_explicit_schema: false,

@@ -201,6 +201,7 @@ const TABLES: &[TableDef] = &[
     },
     // PK étendue v2 : (rate_set, currency_source, period). `rate_set` en 1ère
     // position pour cohérence avec la PK (cf. SPEC_SCENARIO_V2_TECH §1.3).
+    // `taux_ouverture` = clôture N-1 portée par N (résout `close_n1`).
     TableDef {
         api_name: "rates",
         label: "Taux de change",
@@ -211,6 +212,7 @@ const TABLES: &[TableDef] = &[
             "period",
             "taux_close",
             "taux_moyen",
+            "taux_ouverture",
         ],
         pk: &["rate_set", "currency_source", "period"],
     },

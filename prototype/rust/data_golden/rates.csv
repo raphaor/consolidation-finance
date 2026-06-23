@@ -1,5 +1,5 @@
-rate_set,currency_source,period,taux_close,taux_moyen
-RATES,USD,2023,0.92,
-RATES,USD,2024,0.90,0.95
-RATES,GBP,2023,1.15,
-RATES,GBP,2024,1.12,1.18
+rate_set,currency_source,period,taux_close,taux_moyen,taux_ouverture
+RATES,USD,2023,0.92,,
+RATES,USD,2024,0.90,0.95,0.92
+RATES,GBP,2023,1.15,,
+RATES,GBP,2024,1.12,1.18,1.15

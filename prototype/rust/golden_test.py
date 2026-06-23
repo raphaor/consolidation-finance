@@ -52,8 +52,9 @@ TOL = 0.01
 # Calculées à la main à partir des taux et du pipeline (A→B→C→D).
 #
 # Taux :
-#   USD : close_n1=0.92 (2023) | close_n=0.90 / avg=0.95 (2024)
-#   GBP : close_n1=1.15 (2023) | close_n=1.12 / avg=1.18 (2024)
+#   USD : close_n1 = taux_ouverture(2024) = 0.92 | close_n=0.90 / avg=0.95 (2024)
+#   GBP : close_n1 = taux_ouverture(2024) = 1.15 | close_n=1.12 / avg=1.18 (2024)
+#   (taux_ouverture de N = clôture N-1, porté par N — résout close_n1 sans période antérieure)
 #
 # Méthodes : M/G/S = globale ×1.0 ; P = proportionnelle ×0.6 ; E = équivalence (exclue)
 # =========================================================================

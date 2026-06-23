@@ -41,8 +41,10 @@ pub type LevelCounts = [usize; 3];
 /// du scénario choisi et de la config applicative. Utiliser
 /// [`ConvertParams::load_params`] pour les hydrater depuis la base.
 ///
-/// - `presentation_currency`, `current_period`, `prev_period`, `rate_set` :
-///   lus depuis `dim_scenario` (et `dim_period` pour `prev_period`).
+/// - `presentation_currency`, `current_period`, `rate_set` : lus depuis
+///   `dim_scenario`. Le taux N-1 (`close_n1`) vient de
+///   `sat_exchange_rate.taux_ouverture` (porté par N) — aucune période
+///   antérieure requise.
 /// - `pivot_currency` : lu depuis `app_config.pivot_currency` (singleton
 ///   d'instance — invariant pour toute la durée de vie d'une base).
 /// - `scenario_code` : informationnelle (le pipeline actuel ne filtre pas
@@ -55,10 +57,8 @@ pub struct ConvertParams {
     pub presentation_currency: String,
     /// Devise pivot applicative (tous les taux stockés convertissent vers elle).
     pub pivot_currency: String,
-    /// Exercice courant N (taux close_n / avg).
+    /// Exercice courant N (taux close_n / avg / ouverture).
     pub current_period: String,
-    /// Exercice précédent N-1 (taux close_n1), dérivé de `dim_period`.
-    pub prev_period: String,
     /// Jeu de taux à utiliser (clé dans `sat_exchange_rate`).
     pub rate_set: String,
     /// Code du scénario du run (filtrage de l'agrégation, isolation).
@@ -71,18 +71,15 @@ pub struct ConvertParams {
 impl ConvertParams {
     /// Charge les paramètres d'un run depuis `dim_scenario` + `app_config`.
     ///
-    /// Étapes :
-    /// 1. Lecture jointe `(presentation, pivot, entry_period, rate_set)` depuis
-    ///    `dim_scenario` + `app_config`. Le pivot par défaut est `'EUR'` si
-    ///    `app_config` est vide (robustesse — mais le seed l'insère toujours).
-    /// 2. Dérivation de `prev_period` depuis `dim_period` : la période de type
-    ///    `'exercice'` dont `date_fin` précède immédiatement celle de
-    ///    `entry_period`. **Erreur** si aucune N-1 n'est trouvée (un run
-    ///    nécessite N et N-1).
+    /// Lecture jointe `(presentation, pivot, entry_period, rate_set, a_nouveau)`
+    /// depuis `dim_scenario` + `app_config`. Le pivot par défaut est `'EUR'` si
+    /// `app_config` est vide (robustesse — mais le seed l'insère toujours).
+    /// Aucune période N-1 n'est requise : le taux `close_n1` est lu via
+    /// `sat_exchange_rate.taux_ouverture` porté par la période N.
     ///
-    /// Cf. `docs/SPEC_SCENARIO_V2.md` §5 (dérivation) et §6.
+    /// Cf. `docs/SPEC_SCENARIO_V2.md` §6.
     pub fn load_params(con: &duckdb::Connection, scenario_code: &str) -> duckdb::Result<Self> {
-        // 1. Lecture (presentation, pivot, entry_period, rate_set, a_nouveau).
+        // Lecture (presentation, pivot, entry_period, rate_set, a_nouveau).
         let (presentation_currency, pivot_currency, current_period, rate_set, a_nouveau_scenario): (
             String, String, String, String, Option<String>,
         ) = con.query_row(
@@ -105,25 +102,10 @@ impl ConvertParams {
             },
         )?;
 
-        // 2. Dérivation de prev_period depuis dim_period.
-        let prev_period: String = con.query_row(
-            "SELECT p2.code
-             FROM dim_period p1
-             JOIN dim_period p2
-               ON p2.date_fin < p1.date_debut
-              AND p2.type = 'exercice'
-             WHERE p1.code = ?
-             ORDER BY p2.date_fin DESC
-             LIMIT 1",
-            [&current_period],
-            |r| r.get::<_, String>(0),
-        )?;
-
         Ok(Self {
             presentation_currency,
             pivot_currency,
             current_period,
-            prev_period,
             rate_set,
             scenario_code: scenario_code.to_string(),
             a_nouveau_scenario,

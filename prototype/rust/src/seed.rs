@@ -245,23 +245,24 @@ const PERIMETER: &[((&str, &str, &str, &str), (Decimal, Decimal, bool, bool))] =
 ];
 
 /// Taux de change vers le pivot (EUR).
-///   - period '2023' : taux clôture N-1 (utilisé par close_n1)
-///   - period '2024' : taux clôture N (close_n) et taux moyen (avg)
-/// (rate_set, currency_source, period, taux_close, taux_moyen).
+///   - period '2024' : taux clôture N (close_n), taux moyen (avg) et taux
+///     d'ouverture (taux_ouverture = clôture N-1, résout `close_n1` sans période
+///     antérieure).
+/// (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture).
 ///
 /// Tous rattachés au jeu `'RATES'` (cf. `dim_rate_set`). La PK est désormais
 /// `(rate_set, currency_source, period)`.
-const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>))] = &[
-    (("RATES", "USD", "2023"), (Some(dec!(0.92)), None)),
+const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>, Option<Decimal>))] = &[
+    (("RATES", "USD", "2023"), (Some(dec!(0.92)), None, None)),
     (
         ("RATES", "USD", "2024"),
-        (Some(dec!(0.90)), Some(dec!(0.95))),
-    ), // close_n = 0.90, avg = 0.95
-    (("RATES", "GBP", "2023"), (Some(dec!(1.15)), None)),
+        (Some(dec!(0.90)), Some(dec!(0.95)), Some(dec!(0.92))),
+    ), // close_n = 0.90, avg = 0.95, ouverture = 0.92 (clôture 2023)
+    (("RATES", "GBP", "2023"), (Some(dec!(1.15)), None, None)),
     (
         ("RATES", "GBP", "2024"),
-        (Some(dec!(1.12)), Some(dec!(1.18))),
-    ), // close_n = 1.12, avg = 1.18
+        (Some(dec!(1.12)), Some(dec!(1.18)), Some(dec!(1.15))),
+    ), // close_n = 1.12, avg = 1.18, ouverture = 1.15 (clôture 2023)
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -902,9 +903,9 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     for (k, v) in RATES {
         con.execute(
             "INSERT INTO sat_exchange_rate \
-             (rate_set, currency_source, period, taux_close, taux_moyen) \
-             VALUES (?, ?, ?, ?, ?)",
-            params![k.0, k.1, k.2, v.0.map(Money), v.1.map(Money),],
+             (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![k.0, k.1, k.2, v.0.map(Money), v.1.map(Money), v.2.map(Money),],
         )?;
     }
 

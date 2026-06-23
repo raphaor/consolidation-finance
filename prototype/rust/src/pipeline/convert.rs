@@ -21,9 +21,9 @@
 //!
 //! Pour chaque ligne corporate en devise ≠ présentation :
 //!   1. taux du flux via le schéma de flux (`taux_conversion`) :
-//!        - `close_n1` → taux_close N-1 (cross-rate)
-//!        - `avg`      → taux_moyen N  (cross-rate)
-//!        - `close_n`  → taux_close N  (cross-rate)
+//!        - `close_n1` → taux_ouverture N (cross-rate) — clôture N-1 portée par N
+//!        - `avg`      → taux_moyen N     (cross-rate)
+//!        - `close_n`  → taux_close N     (cross-rate)
 //!   2. montant converti = `amount × taux_flux`
 //!   3. écart = `amount × (taux_report − taux_flux)`, posté sur `flux_ecart`.
 //!      `taux_report` = taux du **flux de report** du flux (la clôture où il se
@@ -52,7 +52,7 @@ use duckdb::Connection;
 /// les 12 colonnes built-in, le SQL produit reste structurellement identique
 /// au SQL statique historique (test golden inchangé).
 ///
-/// # Paramètres `?` (ordre, 10 au total)
+/// # Paramètres `?` (ordre, 9 au total)
 ///
 /// | # | Valeur                       | Rôle                                       |
 /// |---|------------------------------|--------------------------------------------|
@@ -60,12 +60,11 @@ use duckdb::Connection;
 /// | 2 | `pivot_currency`             | CTE `params.pivot`                         |
 /// | 3 | `rate_set`                   | CTE `params.rate_set`                      |
 /// | 4 | `current_period`             | CTE `params.cur_period`                    |
-/// | 5 | `prev_period`                | CTE `params.prev_period`                   |
-/// | 6 | `scenario_code`              | sous-requête `conv` : fact_entry corporate `WHERE scenario = ?` |
-/// | 7 | `scenario_code`              | sous-requête `conv` : stg_entry préfixe 2 `WHERE scenario = ?` |
-/// | 8 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
-/// | 9 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
-/// |10 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
+/// | 5 | `scenario_code`              | sous-requête `conv` : fact_entry corporate `WHERE scenario = ?` |
+/// | 6 | `scenario_code`              | sous-requête `conv` : stg_entry préfixe 2 `WHERE scenario = ?` |
+/// | 7 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
+/// | 8 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
+/// | 9 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
 ///
 /// Renvoie le nombre de lignes produites au niveau `converted`.
 pub fn step_c(con: &Connection, p: &ConvertParams) -> duckdb::Result<usize> {
@@ -117,8 +116,7 @@ WITH params AS (\n\
         ?::TEXT AS presentation,\n\
         ?::TEXT AS pivot,\n\
         ?::TEXT AS rate_set,\n\
-        ?::TEXT AS cur_period,\n\
-        ?::TEXT AS prev_period\n\
+        ?::TEXT AS cur_period\n\
 ),\n\
 conv AS (\n\
     SELECT\n\
@@ -133,7 +131,7 @@ conv AS (\n\
             ELSE\n\
                 (CASE\n\
                     WHEN f.currency = p.pivot THEN 1.0\n\
-                    WHEN vfb.taux_conversion = 'close_n1' THEN r_n1.taux_close\n\
+                    WHEN vfb.taux_conversion = 'close_n1' THEN r_n.taux_ouverture\n\
                     WHEN vfb.taux_conversion = 'avg'      THEN r_n.taux_moyen\n\
                     WHEN vfb.taux_conversion IN ('close_n', 'terminal')\n\
                         THEN r_n.taux_close\n\
@@ -141,7 +139,7 @@ conv AS (\n\
                 /\n\
                 (CASE\n\
                     WHEN p.presentation = p.pivot THEN 1.0\n\
-                    WHEN vfb.taux_conversion = 'close_n1' THEN r_pres_n1.taux_close\n\
+                    WHEN vfb.taux_conversion = 'close_n1' THEN r_pres_n.taux_ouverture\n\
                     WHEN vfb.taux_conversion = 'avg'      THEN r_pres_n.taux_moyen\n\
                     WHEN vfb.taux_conversion IN ('close_n', 'terminal')\n\
                         THEN r_pres_n.taux_close\n\
@@ -156,7 +154,7 @@ conv AS (\n\
             ELSE\n\
                 (CASE\n\
                     WHEN f.currency = p.pivot THEN 1.0\n\
-                    WHEN vfb_rep.taux_conversion = 'close_n1' THEN r_n1.taux_close\n\
+                    WHEN vfb_rep.taux_conversion = 'close_n1' THEN r_n.taux_ouverture\n\
                     WHEN vfb_rep.taux_conversion = 'avg'      THEN r_n.taux_moyen\n\
                     WHEN vfb_rep.taux_conversion IN ('close_n', 'terminal')\n\
                         THEN r_n.taux_close\n\
@@ -164,7 +162,7 @@ conv AS (\n\
                 /\n\
                 (CASE\n\
                     WHEN p.presentation = p.pivot THEN 1.0\n\
-                    WHEN vfb_rep.taux_conversion = 'close_n1' THEN r_pres_n1.taux_close\n\
+                    WHEN vfb_rep.taux_conversion = 'close_n1' THEN r_pres_n.taux_ouverture\n\
                     WHEN vfb_rep.taux_conversion = 'avg'      THEN r_pres_n.taux_moyen\n\
                     WHEN vfb_rep.taux_conversion IN ('close_n', 'terminal')\n\
                         THEN r_pres_n.taux_close\n\
@@ -189,24 +187,16 @@ conv AS (\n\
     LEFT JOIN v_flow_behavior vfb_rep\n\
            ON vfb_rep.account = f.account AND vfb_rep.flow = vfb.flux_de_report\n\
     CROSS JOIN params p\n\
-    -- Taux de la devise fonctionnelle vers le pivot (N et N-1)\n\
+    -- Taux de la devise fonctionnelle vers le pivot (N : close, moyen, ouverture)\n\
     LEFT JOIN sat_exchange_rate r_n\n\
            ON r_n.rate_set        = p.rate_set\n\
           AND r_n.currency_source = f.currency\n\
           AND r_n.period          = p.cur_period\n\
-    LEFT JOIN sat_exchange_rate r_n1\n\
-           ON r_n1.rate_set        = p.rate_set\n\
-          AND r_n1.currency_source = f.currency\n\
-          AND r_n1.period          = p.prev_period\n\
-    -- Taux de la devise de présentation vers le pivot (N et N-1)\n\
+    -- Taux de la devise de présentation vers le pivot (N : close, moyen, ouverture)\n\
     LEFT JOIN sat_exchange_rate r_pres_n\n\
            ON r_pres_n.rate_set        = p.rate_set\n\
           AND r_pres_n.currency_source = p.presentation\n\
           AND r_pres_n.period          = p.cur_period\n\
-    LEFT JOIN sat_exchange_rate r_pres_n1\n\
-           ON r_pres_n1.rate_set        = p.rate_set\n\
-          AND r_pres_n1.currency_source = p.presentation\n\
-          AND r_pres_n1.period          = p.prev_period\n\
 )\n\
 INSERT INTO fact_entry\n\
     ({insert_col_list}, level, amount)\n\
@@ -233,7 +223,6 @@ WHERE currency <> ?\n\
             p.pivot_currency,
             p.rate_set,
             p.current_period,
-            p.prev_period,
             p.scenario_code, // sous-requête conv : fact_entry corporate WHERE scenario = ?
             p.scenario_code, // sous-requête conv : stg_entry préfixe 2 WHERE scenario = ?
             p.presentation_currency,

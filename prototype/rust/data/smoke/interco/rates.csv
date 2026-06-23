@@ -1,3 +1,3 @@
-rate_set,currency_source,period,taux_close,taux_moyen
-SMOKE_RATES_IC,USD,2024,2.0,
-SMOKE_RATES_IC,USD,2025,2.5,2.2
+rate_set,currency_source,period,taux_close,taux_moyen,taux_ouverture
+SMOKE_RATES_IC,USD,2024,2.0,,
+SMOKE_RATES_IC,USD,2025,2.5,2.2,2.0

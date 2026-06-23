@@ -98,7 +98,9 @@ CREATE TABLE dim_variant (
 /// Le scénario agrège toutes les références nécessaires à un run : catégorie,
 /// période d'entrée, devise de présentation, variante, ruleset (nullable) et
 /// jeu de taux. Le pivot, lui, est applicatif (`app_config.pivot_currency`).
-/// `prev_period` n'est pas stocké : dérivé à l'exécution depuis `dim_period`.
+/// Le taux N-1 (`close_n1`) est lu via `sat_exchange_rate.taux_ouverture` porté
+/// par la période N — aucune période antérieure requise (1ʳᵉ consolidation
+/// possible, avec ou sans à-nouveau).
 /// Cf. SPEC_SCENARIO_V2.md §5.
 pub const DDL_DIM_SCENARIO: &str = "\
 CREATE TABLE dim_scenario (
@@ -303,6 +305,7 @@ CREATE TABLE sat_exchange_rate (
     period          TEXT,
     taux_close      DECIMAL(18,8),
     taux_moyen      DECIMAL(18,8),
+    taux_ouverture  DECIMAL(18,8), -- taux d'ouverture de N (= clôture N-1). Porté par N : résout `close_n1` sans période antérieure ni à-nouveau (1ʳᵉ consolidation possible).
     PRIMARY KEY (rate_set, currency_source, period)
 );";
 

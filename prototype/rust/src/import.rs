@@ -248,14 +248,29 @@ async fn import_rates(
     std::fs::write(&tmp, &bytes)
         .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
+    // `taux_ouverture` est optionnel dans le CSV importé (rétro-compat) : on
+    // l'inclut dans l'INSERT/SELECT seulement s'il est présent, sinon NULL.
+    let has_ouverture = header.iter().any(|c| c == "taux_ouverture");
+    let (cols, select_cols, conflict_set) = if has_ouverture {
+        (
+            "rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture",
+            "rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture",
+            "taux_close = excluded.taux_close, \
+             taux_moyen = excluded.taux_moyen, \
+             taux_ouverture = excluded.taux_ouverture",
+        )
+    } else {
+        (
+            "rate_set, currency_source, period, taux_close, taux_moyen",
+            "rate_set, currency_source, period, taux_close, taux_moyen, NULL",
+            "taux_close = excluded.taux_close, taux_moyen = excluded.taux_moyen",
+        )
+    };
     let sql = format!(
-        "INSERT INTO sat_exchange_rate \
-         (rate_set, currency_source, period, taux_close, taux_moyen) \
-         SELECT rate_set, currency_source, period, taux_close, taux_moyen \
+        "INSERT INTO sat_exchange_rate ({cols}) \
+         SELECT {select_cols} \
          FROM read_csv_auto('{path}', header=true) \
-         ON CONFLICT(rate_set, currency_source, period) DO UPDATE SET \
-            taux_close = excluded.taux_close, \
-            taux_moyen = excluded.taux_moyen"
+         ON CONFLICT(rate_set, currency_source, period) DO UPDATE SET {conflict_set}"
     );
 
     let imported = {

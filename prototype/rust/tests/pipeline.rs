@@ -450,7 +450,7 @@ fn ecart_de_conversion_suit_le_taux_du_flux_de_report() {
     let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
     run_pipeline(&con, &params).expect("run_pipeline");
 
-    // A (USD), compte 100 (bilan), F00 : taux du flux = close_n1 (USD 2023 = 0.92).
+    // A (USD), compte 100 (bilan), F00 : taux du flux = close_n1 (taux_ouverture USD 2024 = 0.92).
     // F00 fonctionnel = 5000 USD ; devise de présentation EUR = pivot ⇒ cross = taux brut.
     let f00_func: f64 = con
         .query_row(
@@ -468,7 +468,7 @@ fn ecart_de_conversion_suit_le_taux_du_flux_de_report() {
     let f80_pres = amount_for(&con, "consolidated", "A", "100", "F80");
 
     // écart = montant × (taux_report − taux_flux) = 5000 × (avg 0.95 − close_n1 0.92) = +150.
-    // Régression (référence figée sur la clôture) : 5000 × (0.90 − 0.92) = −100.
+    // close_n1 = taux_ouverture(2024). Référence figée sur la clôture : 5000 × (0.90 − 0.92) = −100.
     let ecart_attendu = 5000.0 * (0.95 - 0.92);
     assert!(
         (f80_pres - ecart_attendu).abs() < TOL,
