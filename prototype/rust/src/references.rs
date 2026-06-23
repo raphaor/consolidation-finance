@@ -70,21 +70,28 @@ const fn rq(
 /// désormais une **référence directe** dynamique (cf. [`dynamic_references`] et
 /// `crate::custom_references`), donc absente de cette liste statique.
 pub const REFERENCES: &[Reference] = &[
-    // dim_scenario (v2)
-    r("dim_scenario", "category", "dim_scenario_category", "code"),
-    r("dim_scenario", "entry_period", "dim_period", "code"),
+    // dim_consolidation (ex dim_scenario) — objet composite (PK technique `id`).
+    r("dim_consolidation", "phase", "dim_scenario_category", "code"),
+    r("dim_consolidation", "exercice", "dim_period", "code"),
+    r("dim_consolidation", "perimeter_period", "dim_period", "code"),
+    r("dim_consolidation", "rate_period", "dim_period", "code"),
     r(
-        "dim_scenario",
+        "dim_consolidation",
         "presentation_currency",
         "dim_currency",
         "code_iso",
     ),
-    r("dim_scenario", "variant", "dim_variant", "code"),
-    r("dim_scenario", "ruleset_code", "dim_ruleset", "code"),
-    r("dim_scenario", "rate_set", "dim_rate_set", "code"),
-    r("dim_scenario", "perimeter_set", "dim_perimeter_set", "code"),
-    // Conso d'à-nouveau : auto-référence vers un autre scénario (N-1 figé).
-    r("dim_scenario", "a_nouveau_scenario", "dim_scenario", "code"),
+    r("dim_consolidation", "variant", "dim_variant", "code"),
+    r("dim_consolidation", "ruleset_code", "dim_ruleset", "code"),
+    r("dim_consolidation", "rate_set", "dim_rate_set", "code"),
+    r("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code"),
+    // Conso d'à-nouveau : auto-référence vers une autre consolidation (N-1 figé).
+    r(
+        "dim_consolidation",
+        "a_nouveau_consolidation_id",
+        "dim_consolidation",
+        "id",
+    ),
     // dim_entity
     rq(
         "dim_entity",
@@ -124,10 +131,10 @@ pub const REFERENCES: &[Reference] = &[
     r("sat_flow_scheme_item", "flux_ecart", "dim_flow", "code"),
     r("sat_flow_scheme_item", "flux_de_report", "dim_flow", "code"),
     r("sat_flow_scheme_item", "flux_a_nouveau", "dim_flow", "code"),
-    // Écritures (stg_entry — mêmes cibles que fact_entry).
+    // Écritures — stg_entry (saisie brute, au grain remontée via `phase`).
     // `analysis` / `analysis2` et les dimensions custom sont libres (pas de ref).
     // `partner` / `share` sont nullables ; les autres dimensions sont obligatoires.
-    rq("stg_entry", "scenario", "dim_scenario", "code"),
+    rq("stg_entry", "phase", "dim_scenario_category", "code"),
     rq("stg_entry", "entity", "dim_entity", "code"),
     rq("stg_entry", "entry_period", "dim_period", "code"),
     rq("stg_entry", "period", "dim_period", "code"),
@@ -137,6 +144,20 @@ pub const REFERENCES: &[Reference] = &[
     rq("stg_entry", "nature", "dim_nature", "code"),
     r("stg_entry", "partner", "dim_entity", "code"),
     r("stg_entry", "share", "dim_entity", "code"),
+    // Écritures — fact_entry (mêmes dimensions propagées que stg_entry, plus la
+    // colonne technique `consolidation_id` qui isole chaque run). `phase` y est
+    // propagée depuis la remontée ; `consolidation_id` référence la conso du run.
+    rq("fact_entry", "phase", "dim_scenario_category", "code"),
+    rq("fact_entry", "entity", "dim_entity", "code"),
+    rq("fact_entry", "entry_period", "dim_period", "code"),
+    rq("fact_entry", "period", "dim_period", "code"),
+    rq("fact_entry", "account", "dim_account", "code"),
+    rq("fact_entry", "flow", "dim_flow", "code"),
+    rq("fact_entry", "currency", "dim_currency", "code_iso"),
+    rq("fact_entry", "nature", "dim_nature", "code"),
+    r("fact_entry", "partner", "dim_entity", "code"),
+    r("fact_entry", "share", "dim_entity", "code"),
+    rq("fact_entry", "consolidation_id", "dim_consolidation", "id"),
     // Jeux de règles
     rq("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code"),
     rq("dim_ruleset_item", "rule_code", "dim_rule", "code"),
@@ -370,20 +391,22 @@ pub fn all_references(con: &Connection) -> Vec<OwnedReference> {
 ///
 /// `host_dimension` est le nom logique de la dimension d'écriture (ex. `account`),
 /// pas le nom de table (`dim_account`). Les cibles (`target_dimension`) peuvent
-/// être des dimensions d'écriture (`currency`, `entity`, `scenario`, `period`) ou
+/// être des dimensions d'écriture (`currency`, `entity`, `period`) ou
 /// des master data secondaires (`sous_classe`, `flow_scheme`,
 /// `scenario_category`, `variant`, `ruleset`, `rate_set`, `perimeter_set` —
 /// résolues par [`secondary_master_data`]).
 pub const NATIVE_MASTER_REFS: &[(&str, &str, &str)] = &[
-    // dim_scenario (8 FK natives)
-    ("scenario", "category", "scenario_category"),
-    ("scenario", "entry_period", "period"),
-    ("scenario", "presentation_currency", "currency"),
-    ("scenario", "variant", "variant"),
-    ("scenario", "ruleset_code", "ruleset"),
-    ("scenario", "rate_set", "rate_set"),
-    ("scenario", "perimeter_set", "perimeter_set"),
-    ("scenario", "a_nouveau_scenario", "scenario"),
+    // dim_consolidation (10 FK natives) — host logique `consolidation`.
+    ("consolidation", "phase", "scenario_category"),
+    ("consolidation", "exercice", "period"),
+    ("consolidation", "perimeter_period", "period"),
+    ("consolidation", "rate_period", "period"),
+    ("consolidation", "presentation_currency", "currency"),
+    ("consolidation", "variant", "variant"),
+    ("consolidation", "ruleset_code", "ruleset"),
+    ("consolidation", "rate_set", "rate_set"),
+    ("consolidation", "perimeter_set", "perimeter_set"),
+    ("consolidation", "a_nouveau_consolidation_id", "consolidation"),
     // dim_entity (2 FK natives)
     ("entity", "devise_fonctionnelle", "currency"),
     ("entity", "entite_parent", "entity"),

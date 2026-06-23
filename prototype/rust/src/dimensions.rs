@@ -76,10 +76,10 @@ pub fn builtin_dims() -> Vec<DimDef> {
     vec![
         // Fixed
         DimDef {
-            name: "scenario".into(),
+            name: "phase".into(),
             category: DimCategory::Fixed,
             custom: false,
-            label: "Définition de consolidation".into(),
+            label: "Phase".into(),
         },
         // Active
         DimDef {

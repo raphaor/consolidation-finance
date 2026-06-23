@@ -52,19 +52,27 @@ use duckdb::Connection;
 /// les 12 colonnes built-in, le SQL produit reste structurellement identique
 /// au SQL statique historique (test golden inchangé).
 ///
-/// # Paramètres `?` (ordre, 9 au total)
+/// # Paramètres `?` (ordre, 12 au total)
 ///
-/// | # | Valeur                       | Rôle                                       |
-/// |---|------------------------------|--------------------------------------------|
-/// | 1 | `presentation_currency`      | CTE `params.presentation`                  |
-/// | 2 | `pivot_currency`             | CTE `params.pivot`                         |
-/// | 3 | `rate_set`                   | CTE `params.rate_set`                      |
-/// | 4 | `current_period`             | CTE `params.cur_period`                    |
-/// | 5 | `scenario_code`              | sous-requête `conv` : fact_entry corporate `WHERE scenario = ?` |
-/// | 6 | `scenario_code`              | sous-requête `conv` : stg_entry préfixe 2 `WHERE scenario = ?` |
-/// | 7 | `presentation_currency`      | `final_cols_convert` (colonne `currency`)  |
-/// | 8 | `presentation_currency`      | `final_cols_ecart` (colonne `currency`)    |
-/// | 9 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
+/// Les `?` sont liés dans l'ordre d'apparition **dans le texte SQL**. NB : dans
+/// chaque branche finale, le `?` de la devise (issu de `final_cols_*`, qui remplace
+/// `currency`) précède le `? AS consolidation_id` (la liste des colonnes propagées
+/// est énumérée avant la consolidation technique).
+///
+/// | #  | Valeur                       | Rôle                                       |
+/// |----|------------------------------|--------------------------------------------|
+/// | 1  | `presentation_currency`      | CTE `params.presentation`                  |
+/// | 2  | `pivot_currency`             | CTE `params.pivot`                         |
+/// | 3  | `rate_set`                   | CTE `params.rate_set`                      |
+/// | 4  | `rate_period`                | CTE `params.cur_period`                    |
+/// | 5  | `consolidation_id`           | `conv` : fact_entry corporate `WHERE consolidation_id = ?` |
+/// | 6  | `phase`                      | `conv` : stg_entry préfixe 2 `WHERE phase = ?` |
+/// | 7  | `exercice`                   | `conv` : stg_entry préfixe 2 `AND entry_period = ?` |
+/// | 8  | `presentation_currency`      | branche converti : `final_cols_convert` (colonne `currency`) |
+/// | 9  | `consolidation_id`           | branche converti : `? AS consolidation_id` |
+/// | 10 | `presentation_currency`      | branche écart : `final_cols_ecart` (colonne `currency`) |
+/// | 11 | `consolidation_id`           | branche écart : `? AS consolidation_id`    |
+/// | 12 | `presentation_currency`      | `WHERE currency <> ?` (filtre écart)       |
 ///
 /// Renvoie le nombre de lignes produites au niveau `converted`.
 pub fn step_c(con: &Connection, p: &ConvertParams) -> duckdb::Result<usize> {
@@ -170,13 +178,13 @@ conv AS (\n\
         END AS taux_report\n\
     FROM (\n\
         SELECT {insert_col_list}, amount FROM fact_entry\n\
-        WHERE level = 'corporate' AND scenario = ?\n\
+        WHERE level = 'corporate' AND consolidation_id = ?\n\
         UNION ALL\n\
         -- Staging préfixe 2 : écritures en devise FONCTIONNELLE injectées au\n\
         -- converti, qui subissent la conversion (montant + écarts F80/F81) sans\n\
         -- apparaître au corporate. Cf. docs/A_NOUVEAU.md §4 bis.\n\
         SELECT {insert_col_list}, amount FROM stg_entry\n\
-        WHERE substr(nature, 1, 1) = '2' AND scenario = ?\n\
+        WHERE substr(nature, 1, 1) = '2' AND phase = ? AND entry_period = ?\n\
     ) f\n\
     -- Comportement du flux résolu PAR COMPTE (taux de conversion + flux d'écart)\n\
     -- via le schéma de flux du compte. Cf. v_flow_behavior (Q32).\n\
@@ -199,9 +207,10 @@ conv AS (\n\
           AND r_pres_n.period          = p.cur_period\n\
 )\n\
 INSERT INTO fact_entry\n\
-    ({insert_col_list}, level, amount)\n\
+    ({insert_col_list}, consolidation_id, level, amount)\n\
 -- Montants convertis (tous flux constitutifs, exprimés en devise de présentation)\n\
 SELECT {final_cols_convert},\n\
+       ? AS consolidation_id,\n\
        'converted' AS level,\n\
        amount * taux_flux AS amount\n\
 FROM conv\n\
@@ -209,6 +218,7 @@ UNION ALL\n\
 -- Lignes d'écart (devise ≠ présentation, flux porteur d'un flux_ecart, écart ≠ 0)\n\
 -- L'écart F80/F81 hérite de la nature — et du partner — du flux parent.\n\
 SELECT {final_cols_ecart},\n\
+       ? AS consolidation_id,\n\
        'converted' AS level,\n\
        amount * (taux_report - taux_flux) AS amount\n\
 FROM conv\n\
@@ -222,12 +232,15 @@ WHERE currency <> ?\n\
             p.presentation_currency,
             p.pivot_currency,
             p.rate_set,
-            p.current_period,
-            p.scenario_code, // sous-requête conv : fact_entry corporate WHERE scenario = ?
-            p.scenario_code, // sous-requête conv : stg_entry préfixe 2 WHERE scenario = ?
-            p.presentation_currency,
-            p.presentation_currency,
-            p.presentation_currency,
+            p.rate_period,
+            p.consolidation_id, // conv : fact_entry corporate WHERE consolidation_id = ?
+            p.phase,            // conv : stg_entry préfixe 2 WHERE phase = ?
+            p.exercice,         // conv : stg_entry préfixe 2 AND entry_period = ?
+            p.presentation_currency, // branche converti : final_cols_convert (currency)
+            p.consolidation_id, // branche converti : ? AS consolidation_id
+            p.presentation_currency, // branche écart : final_cols_ecart (currency)
+            p.consolidation_id, // branche écart : ? AS consolidation_id
+            p.presentation_currency, // WHERE currency <> ?
         ],
     )?;
     count_level(con, "converted")

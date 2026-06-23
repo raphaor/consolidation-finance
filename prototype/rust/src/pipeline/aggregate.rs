@@ -14,12 +14,14 @@
 //! par l'étape A. Les préfixes `2`, `3`, `4` sont injectés directement à leur
 //! niveau cible par le module `staging`. Voir `docs/FLUX_CONSO.md` « Staging ».
 //!
-//! **Isolation par scénario + filtre de scope** (cf. docs/A_NOUVEAU.md §4 bis.2) :
-//! l'agrégation ne reprend que les écritures du **scénario du run** et des
-//! **entités présentes dans le périmètre** (`sat_perimeter`, toutes méthodes ;
-//! entrantes/sortantes incluses via l'INNER JOIN). Les autres scénarios (ex.
-//! snapshot d'à-nouveau figé) et les entités hors scope ne polluent pas le
-//! corporate du run courant.
+//! **Isolation par consolidation + filtre de scope** (cf. docs/A_NOUVEAU.md
+//! §4 bis.2) : l'agrégation ne reprend que les écritures de la **remontée du
+//! run** (`stg_entry.phase = p.phase AND stg_entry.entry_period = p.exercice`)
+//! et des **entités présentes dans le périmètre** (`sat_perimeter`, toutes
+//! méthodes ; entrantes/sortantes incluses via l'INNER JOIN). Les autres
+//! remontées et les entités hors scope ne polluent pas le corporate du run
+//! courant. Les lignes agrégées sont taguées avec `p.consolidation_id` (isolation
+//! des résultats du run dans `fact_entry`).
 //!
 //! Aucun filtre sur les flux : la saisie (mode écriture ou formulaire bilan)
 //! est agrégée telle quelle. En mode écriture, les liasses ne contiennent que
@@ -30,7 +32,7 @@
 
 use super::count_level;
 use crate::dimensions;
-use duckdb::Connection;
+use duckdb::{params, Connection};
 
 /// Exécute l'étape A : agrège les écritures brutes au niveau corporate.
 ///
@@ -40,16 +42,17 @@ use duckdb::Connection;
 /// built-in, le SQL produit est identique au SQL statique historique (test
 /// golden inchangé).
 ///
-/// `scenario` = code du scénario du run : seules ses écritures sont agrégées
-/// (isolation des autres scénarios, ex. snapshot d'à-nouveau figé).
+/// `p` = paramètres du run (`ConvertParams`) : la remontée est sélectionnée par
+/// `(p.phase, p.exercice)`, le périmètre par `(p.perimeter_set, p.perimeter_period)`,
+/// et les lignes agrégées sont isolées dans `fact_entry` via `p.consolidation_id`.
 ///
 /// Renvoie le nombre de lignes produites au niveau `corporate`.
-pub fn step_a(con: &Connection, scenario: &str) -> duckdb::Result<usize> {
+pub fn step_a(con: &Connection, p: &super::ConvertParams) -> duckdb::Result<usize> {
     let dims = dimensions::load_all(con)?;
     let cols = dimensions::propagated_cols(&dims);
     let col_list = cols.join(", ");
     // Colonnes préfixées `s.` pour lever l'ambiguïté avec la jointure
-    // `sat_perimeter` (qui porte aussi entity/scenario/period).
+    // `sat_perimeter per` (qui porte aussi entity/period).
     let s_cols = cols
         .iter()
         .map(|c| format!("s.{c}"))
@@ -58,21 +61,31 @@ pub fn step_a(con: &Connection, scenario: &str) -> duckdb::Result<usize> {
 
     let sql = format!(
         "INSERT INTO fact_entry\n\
-         ({col_list}, level, amount)\n\
+         ({col_list}, consolidation_id, level, amount)\n\
          SELECT\n\
              {s_cols},\n\
+             ? AS consolidation_id,\n\
              'corporate' AS level,\n\
              SUM(s.amount) AS amount\n\
          FROM stg_entry s\n\
-         JOIN dim_scenario sc ON sc.code = s.scenario\n\
-         JOIN sat_perimeter p\n\
-           ON p.perimeter_set = sc.perimeter_set\n\
-          AND p.entity        = s.entity\n\
-          AND p.period        = s.entry_period\n\
+         JOIN sat_perimeter per\n\
+           ON per.perimeter_set = ?\n\
+          AND per.entity        = s.entity\n\
+          AND per.period        = ?\n\
          WHERE substr(s.nature, 1, 1) IN ('0', '1')\n\
-           AND s.scenario = ?\n\
+           AND s.phase = ?\n\
+           AND s.entry_period = ?\n\
          GROUP BY {s_cols};"
     );
-    con.execute(&sql, [scenario])?;
+    con.execute(
+        &sql,
+        params![
+            p.consolidation_id,
+            p.perimeter_set,
+            p.perimeter_period,
+            p.phase,
+            p.exercice,
+        ],
+    )?;
     count_level(con, "corporate")
 }

@@ -31,13 +31,24 @@ use duckdb::Connection;
 //  Helpers locaux (SQL) — propres au fichier de test.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Résout l'id de la consolidation REEL seedée (id déterministe 1, mais résolu
+/// par requête pour rester robuste).
+fn reel_id(con: &Connection) -> i64 {
+    con.query_row(
+        "SELECT id FROM dim_consolidation WHERE phase='REEL' AND exercice='2024'",
+        [],
+        |r| r.get(0),
+    )
+    .expect("REEL consolidation")
+}
+
 /// Ouvre une connexion en mémoire, crée le schéma, charge le seed, lance le
 /// pipeline. Renvoie la connexion prête à être interrogée.
 fn setup() -> Connection {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    let params = ConvertParams::load_params(&con, reel_id(&con)).expect("load_params");
     run_pipeline(&con, &params).expect("run_pipeline");
     con
 }
@@ -447,7 +458,7 @@ fn ecart_de_conversion_suit_le_taux_du_flux_de_report() {
     )
     .expect("bascule taux du flux de report");
 
-    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    let params = ConvertParams::load_params(&con, reel_id(&con)).expect("load_params");
     run_pipeline(&con, &params).expect("run_pipeline");
 
     // A (USD), compte 100 (bilan), F00 : taux du flux = close_n1 (taux_ouverture USD 2024 = 0.92).
@@ -510,7 +521,7 @@ fn pipeline_reproductible_apres_reset() {
         .expect("DELETE fact_entry");
 
     // Re-run.
-    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    let params = ConvertParams::load_params(&con, reel_id(&con)).expect("load_params");
     run_pipeline(&con, &params).expect("re-run pipeline");
 
     let after: Vec<f64> = accounts.iter().map(|a| f99_consolidated(&con, a)).collect();
@@ -589,7 +600,7 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     // (nature 0LIASS).
     con.execute_batch(
         "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+            (phase, entity, entry_period, period, account, flow, currency, nature, level, amount)
          VALUES
             ('REEL','M','2024','2024','100','F20','EUR','0LIASS','converted',50.00),
             ('REEL','M','2024','2024','100','F10','EUR','0LIASS','converted',30.00);",
@@ -630,7 +641,7 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     //                                                  → doit être PRÉSERVÉ.
     con.execute_batch(
         "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+            (phase, entity, entry_period, period, account, flow, currency, nature, level, amount)
          VALUES
             ('REEL','M','2024','2024','100','F99','EUR','0LIASS','converted',999.00),
             ('REEL','M','2024','2024','200','F99','EUR','0LIASS','converted',777.00);",
@@ -684,7 +695,7 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     //     dans le grain, F99@100@1AJUST est un grain distinct de F99@100@0LIASS.
     con.execute_batch(
         "INSERT INTO fact_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature, level, amount)
+            (phase, entity, entry_period, period, account, flow, currency, nature, level, amount)
          VALUES
             ('REEL','M','2024','2024','100','F99','EUR','1AJUST','converted',555.00);",
     )
@@ -887,7 +898,7 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
     // périmètre REEL → le préfixe 3 (qui passe par step_d) trouve son pct.
     con.execute_batch(
         "INSERT INTO stg_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature, amount)
+            (phase, entity, entry_period, period, account, flow, currency, nature, amount)
          VALUES
             ('REEL','M','2024','2024','100','F20','EUR','2TEST',999.00),
             ('REEL','M','2024','2024','100','F20','EUR','3TEST',888.00),
@@ -897,7 +908,7 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
 
     run_pipeline(
         &con,
-        &ConvertParams::load_params(&con, "REEL").expect("load_params"),
+        &ConvertParams::load_params(&con, reel_id(&con)).expect("load_params"),
     )
     .expect("run_pipeline");
 

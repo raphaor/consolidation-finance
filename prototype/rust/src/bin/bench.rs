@@ -112,8 +112,8 @@ fn main() {
     );
 
     // --- 3. Exécution du pipeline mesuré ---
-    println!("\n▶ Exécution du pipeline A→B→C→D…");
-    let params = match ConvertParams::load_params(&con, "REEL") {
+    println!("\n▶ Exécution du pipeline A→C→D…");
+    let params = match ConvertParams::load_params(&con, 1) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("\n✗ ERREUR load_params : {e}");
@@ -170,13 +170,16 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
 
         INSERT INTO dim_perimeter_set VALUES ('PERIM_REEL', 'Périmètre réel 2024');
 
-        -- dim_scenario v2 : catégorie + période + devise + variante + ruleset + rate_set + perimeter_set.
-        INSERT INTO dim_scenario
-            (code, libelle, category, entry_period, presentation_currency,
-             variant, ruleset_code, rate_set, perimeter_set, statut) VALUES
-            ('REEL','Réel','REEL','2024','EUR','BASE',NULL,'RATES','PERIM_REEL','ouvert'),
-            ('BUDGET','Budget','BUDGET','2024','EUR','BASE',NULL,'RATES','PERIM_REEL','ouvert'),
-            ('PREV','Prévision','PREV','2024','EUR','BASE',NULL,'RATES','PERIM_REEL','ouvert');
+        -- dim_consolidation : objet composite (PK technique auto `id`). L'id est
+        -- alloué par nextval (déterministe 1 sur base fraîche) — `load_params(&con, 1)`
+        -- pointe donc sur cette consolidation. Les colonnes `perimeter_period` et
+        -- `rate_period` valent l'exercice ('2024').
+        INSERT INTO dim_consolidation
+            (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
+             perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut)
+        VALUES
+            (nextval('seq_consolidation'), 'Réel', 'REEL', '2024', 'PERIM_REEL', 'BASE', 'EUR',
+             '2024', 'RATES', '2024', NULL, NULL, 'ouvert');
 
         INSERT INTO dim_period VALUES
             ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
@@ -325,7 +328,7 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
     let sql = format!(
         "
         INSERT INTO stg_entry
-            (scenario, entity, entry_period, period, account, flow, currency, nature,
+            (phase, entity, entry_period, period, account, flow, currency, nature,
              partner, share, analysis, analysis2, amount)
         WITH gen AS (
             SELECT g.i,

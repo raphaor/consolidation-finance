@@ -34,81 +34,104 @@ use std::time::Instant;
 /// `[corporate, converted, consolidated]`.
 pub type LevelCounts = [usize; 3];
 
-/// Paramètres de la conversion multi-devises (étape C) et, plus généralement,
-/// d'un run de pipeline.
+/// Paramètres d'un run de pipeline : une **consolidation** (plus un scénario).
 ///
 /// Ces paramètres ne sont **plus** constructibles via `Default` : ils dépendent
-/// du scénario choisi et de la config applicative. Utiliser
+/// de la consolidation choisie et de la config applicative. Utiliser
 /// [`ConvertParams::load_params`] pour les hydrater depuis la base.
 ///
-/// - `presentation_currency`, `current_period`, `rate_set` : lus depuis
-///   `dim_scenario`. Le taux N-1 (`close_n1`) vient de
-///   `sat_exchange_rate.taux_ouverture` (porté par N) — aucune période
-///   antérieure requise.
+/// - `consolidation_id` : isole les résultats du run dans `fact_entry`.
+/// - `phase` + `exercice` : sélectionnent la **remontée** dans `stg_entry`
+///   (`WHERE phase = ? AND entry_period = ?`).
+/// - `perimeter_set` + `perimeter_period` : périmètre explicite (ex-`entry_period`
+///   implicite). `rate_set` + `rate_period` : table de taux explicite.
 /// - `pivot_currency` : lu depuis `app_config.pivot_currency` (singleton
 ///   d'instance — invariant pour toute la durée de vie d'une base).
-/// - `scenario_code` : informationnelle (le pipeline actuel ne filtre pas
-///   `stg_entry` par scénario ; ce champ est porté pour usage futur).
+/// - Le taux N-1 (`close_n1`) vient de `sat_exchange_rate.taux_ouverture` porté
+///   par `rate_period` — aucune période antérieure requise.
 ///
-/// Cf. `docs/SPEC_SCENARIO_V2.md` §6.
+/// Cf. `docs/MODELE_DONNEES.md` (consolidation v3).
 #[derive(Debug, Clone)]
 pub struct ConvertParams {
+    /// PK technique de la consolidation (isolation dans `fact_entry`).
+    pub consolidation_id: i64,
+    /// Phase de la remontée (ex `'REEL'`) — filtre `stg_entry.phase`.
+    pub phase: String,
+    /// Exercice N (filtre `stg_entry.entry_period` ; période d'ouverture/à-nouveau).
+    pub exercice: String,
     /// Devise de présentation (cible de la conversion).
     pub presentation_currency: String,
     /// Devise pivot applicative (tous les taux stockés convertissent vers elle).
     pub pivot_currency: String,
-    /// Exercice courant N (taux close_n / avg / ouverture).
-    pub current_period: String,
+    /// Jeu de périmètre du run (clé dans `sat_perimeter`).
+    pub perimeter_set: String,
+    /// Période du périmètre (défaut = exercice).
+    pub perimeter_period: String,
     /// Jeu de taux à utiliser (clé dans `sat_exchange_rate`).
     pub rate_set: String,
-    /// Code du scénario du run (filtrage de l'agrégation, isolation).
-    pub scenario_code: String,
-    /// Scénario d'à-nouveau (conso N-1 figée dont on reporte l'ouverture).
+    /// Période des taux (close_n / avg / ouverture) — défaut = exercice.
+    pub rate_period: String,
+    /// Consolidation d'à-nouveau (conso N-1 figée dont on reporte l'ouverture).
     /// `None` = pas d'à-nouveau (cf. docs/A_NOUVEAU.md §2.2 / §6).
-    pub a_nouveau_scenario: Option<String>,
+    pub a_nouveau_consolidation_id: Option<i64>,
 }
 
 impl ConvertParams {
-    /// Charge les paramètres d'un run depuis `dim_scenario` + `app_config`.
+    /// Charge les paramètres d'un run depuis `dim_consolidation` + `app_config`.
     ///
-    /// Lecture jointe `(presentation, pivot, entry_period, rate_set, a_nouveau)`
-    /// depuis `dim_scenario` + `app_config`. Le pivot par défaut est `'EUR'` si
-    /// `app_config` est vide (robustesse — mais le seed l'insère toujours).
-    /// Aucune période N-1 n'est requise : le taux `close_n1` est lu via
-    /// `sat_exchange_rate.taux_ouverture` porté par la période N.
-    ///
-    /// Cf. `docs/SPEC_SCENARIO_V2.md` §6.
-    pub fn load_params(con: &duckdb::Connection, scenario_code: &str) -> duckdb::Result<Self> {
-        // Lecture (presentation, pivot, entry_period, rate_set, a_nouveau).
-        let (presentation_currency, pivot_currency, current_period, rate_set, a_nouveau_scenario): (
-            String, String, String, String, Option<String>,
-        ) = con.query_row(
-            "SELECT s.presentation_currency,
-                    COALESCE((SELECT value FROM app_config WHERE key = 'pivot_currency'), 'EUR'),
-                    s.entry_period,
-                    s.rate_set,
-                    s.a_nouveau_scenario
-             FROM dim_scenario s
-             WHERE s.code = ?",
-            [scenario_code],
+    /// Identifie la consolidation par sa PK technique `id`. Le pivot par défaut
+    /// est `'EUR'` si `app_config` est vide (robustesse — mais le seed
+    /// l'insère toujours). Aucune période N-1 n'est requise : le taux `close_n1`
+    /// est lu via `sat_exchange_rate.taux_ouverture` porté par `rate_period`.
+    pub fn load_params(con: &duckdb::Connection, consolidation_id: i64) -> duckdb::Result<Self> {
+        let (
+            phase,
+            exercice,
+            presentation_currency,
+            perimeter_set,
+            perimeter_period,
+            rate_set,
+            rate_period,
+            a_nouveau_consolidation_id,
+        ): (String, String, String, String, String, String, String, Option<i64>) = con.query_row(
+            "SELECT c.phase, c.exercice, c.presentation_currency,
+                    c.perimeter_set, c.perimeter_period,
+                    c.rate_set, c.rate_period,
+                    c.a_nouveau_consolidation_id
+             FROM dim_consolidation c
+             WHERE c.id = ?",
+            [consolidation_id],
             |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
-                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, Option<i64>>(7)?,
                 ))
             },
         )?;
 
+        let pivot_currency: String = con.query_row(
+            "SELECT COALESCE((SELECT value FROM app_config WHERE key = 'pivot_currency'), 'EUR')",
+            [],
+            |r| r.get::<_, String>(0),
+        )?;
+
         Ok(Self {
+            consolidation_id,
+            phase,
+            exercice,
             presentation_currency,
             pivot_currency,
-            current_period,
+            perimeter_set,
+            perimeter_period,
             rate_set,
-            scenario_code: scenario_code.to_string(),
-            a_nouveau_scenario,
+            rate_period,
+            a_nouveau_consolidation_id,
         })
     }
 }
@@ -149,7 +172,7 @@ impl Step for AggregateStep {
         "corporate"
     }
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
-        aggregate::step_a(con, &params.scenario_code).map(|_| ())
+        aggregate::step_a(con, params).map(|_| ())
     }
 }
 
@@ -184,7 +207,7 @@ impl Step for ConsolidateStep {
         "4"
     }
     fn run(&self, con: &Connection, params: &ConvertParams) -> duckdb::Result<()> {
-        consolidate::step_d(con, &params.scenario_code).map(|_| ())
+        consolidate::step_d(con, params).map(|_| ())
     }
 }
 
@@ -254,7 +277,7 @@ fn run_steps(
         let t = Instant::now();
         step.run(con, params)?;
         if !step.staging_prefix().is_empty() {
-            staging::inject_by_prefix(con, step.output_level(), step.staging_prefix())?;
+            staging::inject_by_prefix(con, params, step.output_level(), step.staging_prefix())?;
         }
         // À-nouveau : colle le solde de clôture du snapshot N-1 sur le flux
         // d'ouverture (F00) au niveau produit (corporate / consolidated), AVANT la

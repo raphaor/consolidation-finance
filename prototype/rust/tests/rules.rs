@@ -36,8 +36,21 @@ fn engine() -> Connection {
     con
 }
 
-/// Injecte une ligne source dans `fact_entry`. Scénario/exercice/période/devise
-/// fixés (REEL/2024/2024/EUR) pour matcher le périmètre seedé.
+/// Résout l'id d'une consolidation par (phase, exercice).
+fn cid(con: &Connection, phase: &str, exercice: &str) -> i64 {
+    con.query_row(
+        "SELECT id FROM dim_consolidation WHERE phase = ? AND exercice = ?",
+        [phase, exercice],
+        |r| r.get(0),
+    )
+    .expect("consolidation")
+}
+
+/// Injecte une ligne source dans `fact_entry`. Phase/exercice/période/devise
+/// fixés (REEL/2024/2024/EUR) pour matcher le périmètre seedé. Le
+/// `consolidation_id` pointe vers la consolidation REEL seedée (id déterministe)
+/// — nécessaire pour que les JOINs de périmètre (et N-1 via à-nouveau) résolvent
+/// le bon `perimeter_set` depuis `dim_consolidation`.
 #[allow(clippy::too_many_arguments)]
 fn put(
     con: &Connection,
@@ -51,9 +64,10 @@ fn put(
 ) {
     con.execute(
         "INSERT INTO fact_entry \
-            (scenario, entity, entry_period, period, account, flow, currency, \
+            (consolidation_id, phase, entity, entry_period, period, account, flow, currency, \
              nature, partner, share, analysis, analysis2, level, amount) \
-         VALUES ('REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?)",
+         SELECT (SELECT id FROM dim_consolidation WHERE phase='REEL' AND exercice='2024'), \
+                'REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?",
         duckdb::params![entity, account, flow, nature, partner, level, amount],
     )
     .unwrap_or_else(|e| panic!("put({entity},{account},{flow}): {e}"));
@@ -80,7 +94,7 @@ fn run_one(con: &Connection, rule_code: &str) -> usize {
         duckdb::params![rule_code],
     )
     .expect("create ruleset item");
-    run_ruleset(con, "RS").expect("run_ruleset").total_generated
+    run_ruleset(con, "RS", None).expect("run_ruleset").total_generated
 }
 
 /// SUM(amount) sur `fact_entry` filtré par une clause SQL libre.
@@ -653,8 +667,8 @@ fn set_pct_n(con: &Connection, entity: &str, pct: f64) {
     .unwrap_or_else(|e| panic!("set_pct_n({entity}): {e}"));
 }
 
-/// Branche un scénario d'à-nouveau `REEL_N1` (périmètre `PSET_N1`, exercice
-/// 2023) sur `REEL`, et seede le périmètre N-1 : M=1.0, B=`pct_b_n1`.
+/// Branche une consolidation d'à-nouveau `REEL_N1` (périmètre `PSET_N1`,
+/// exercice 2023) sur `REEL`, et seede le périmètre N-1 : M=1.0, B=`pct_b_n1`.
 fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
     con.execute(
         "INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PSET_N1', 'Périmètre N-1')",
@@ -662,15 +676,20 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
     )
     .expect("perimeter_set N-1");
     con.execute(
-        "INSERT INTO dim_scenario (code, libelle, category, entry_period, \
-            presentation_currency, variant, rate_set, perimeter_set, statut) \
-         VALUES ('REEL_N1', 'Réel 2023', 'REEL', '2023', 'EUR', 'BASE', 'RATES', 'PSET_N1', 'verrouillé')",
+        "INSERT INTO dim_consolidation \
+            (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
+             perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
+         VALUES (nextval('seq_consolidation'), 'Réel 2023', 'REEL', '2023', 'PSET_N1', 'BASE', 'EUR', \
+                 '2023', 'RATES', '2023', NULL, NULL, 'verrouillé')",
         [],
     )
-    .expect("scénario à-nouveau");
+    .expect("consolidation à-nouveau");
+    // Rattache REEL_N1 à REEL (a_nouveau_consolidation_id).
+    let reel_id = cid(con, "REEL", "2024");
+    let reel_n1_id = cid(con, "REEL", "2023");
     con.execute(
-        "UPDATE dim_scenario SET a_nouveau_scenario = 'REEL_N1' WHERE code = 'REEL'",
-        [],
+        "UPDATE dim_consolidation SET a_nouveau_consolidation_id = ? WHERE id = ?",
+        duckdb::params![reel_n1_id, reel_id],
     )
     .expect("lien à-nouveau");
     // Périmètre N-1 : M intégrée à 1.0, B à `pct_b_n1`.
@@ -733,7 +752,7 @@ fn coefficient_elim_ic_corp_n_n1_var() {
 #[test]
 fn coefficient_elim_ic_corp_sans_a_nouveau_n1_nul() {
     let con = engine();
-    // Pas de setup_a_nouveau_perimeter : REEL.a_nouveau_scenario reste NULL.
+    // Pas de setup_a_nouveau_perimeter : REEL.a_nouveau_consolidation_id reste NULL.
     set_pct_n(&con, "B", 0.5);
     put(&con, "M", "700", "F20", Some("B"), "0LIASS", 1000.0, "corporate");
     create_rule(

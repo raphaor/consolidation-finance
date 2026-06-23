@@ -88,10 +88,10 @@ struct PipelineResult {
     corporate: usize,
     converted: usize,
     consolidated: usize,
-    /// Code du scénario utilisé pour le run (explicite dans le body ou
-    /// premier scénario `'ouvert'` trouvé).
-    scenario: String,
-    /// Ruleset exécuté après le pipeline (NULL si le scénario n'en référence pas).
+    /// Identifiant (`id`) de la consolidation utilisée pour le run (explicite
+    /// dans le body ou première consolidation `'ouvert'` trouvée).
+    consolidation: i64,
+    /// Ruleset exécuté après le pipeline (NULL si la consolidation n'en référence pas).
     ruleset: Option<String>,
     /// Rapport du ruleset, présent si `ruleset` est `Some`.
     ruleset_report: Option<RulesetReport>,
@@ -113,7 +113,7 @@ struct BilanQuery {
     #[serde(default = "default_level")]
     level: String,
     #[serde(default)]
-    scenario: Option<String>,
+    consolidation: Option<i64>,
     #[serde(default)]
     entity: Option<String>,
     #[serde(default)]
@@ -132,8 +132,13 @@ struct EntriesQuery {
     limit: i64,
     #[serde(default)]
     offset: i64,
+    /// Filtre par consolidation (PK `dim_consolidation.id`) pour les niveaux
+    /// `fact_entry` (corporate / converted / consolidated).
     #[serde(default)]
-    scenario: Option<String>,
+    consolidation: Option<i64>,
+    /// Filtre par phase pour le niveau `raw` (`stg_entry.phase`).
+    #[serde(default)]
+    phase: Option<String>,
     #[serde(default)]
     entity: Option<String>,
     #[serde(default)]
@@ -159,11 +164,14 @@ fn default_limit() -> i64 {
 }
 
 /// Construit le fragment SQL et les paramètres pour les filtres optionnels
-/// `scenario`, `entity`, `entry_period` (exercice clôturé), `period`
-/// (période impactée par l'écriture) et `nature`. Renvoie une chaîne
-/// préfixée par " AND ..." prête à concaténer après un WHERE existant.
+/// `consolidation` (PK de la conso, isolation d'un run dans `fact_entry`),
+/// `entity`, `entry_period` (exercice clôturé), `period` (période impactée par
+/// l'écriture) et `nature`. Renvoie une chaîne préfixée par " AND ..." prête à
+/// concaténer après un WHERE existant. Le filtre `consolidation` ne s'applique
+/// qu'aux niveaux `fact_entry` (le niveau `raw` / `stg_entry` filtre sur `phase`,
+/// géré séparément par l'appelant).
 fn build_filters(
-    scenario: &Option<String>,
+    consolidation: &Option<i64>,
     entity: &Option<String>,
     entry_period: &Option<String>,
     period: &Option<String>,
@@ -171,9 +179,9 @@ fn build_filters(
 ) -> (String, Vec<DbValue>) {
     let mut sql = String::new();
     let mut params = Vec::new();
-    if let Some(s) = scenario {
-        sql.push_str(" AND scenario = ?");
-        params.push(DbValue::Text(s.clone()));
+    if let Some(c) = consolidation {
+        sql.push_str(" AND consolidation_id = ?");
+        params.push(DbValue::BigInt(*c));
     }
     if let Some(e) = entity {
         sql.push_str(" AND entity = ?");
@@ -260,7 +268,7 @@ async fn get_bilan(
             .map(|c| format!(" AND e.{c} IS NULL"))
             .collect();
         let (fsql, fparams) = build_filters(
-            &q.scenario,
+            &q.consolidation,
             &q.entity,
             &q.entry_period,
             &q.period,
@@ -313,7 +321,7 @@ async fn get_compte_resultat(
             .map(|c| format!(" AND e.{c} IS NULL"))
             .collect();
         let (fsql, fparams) = build_filters(
-            &q.scenario,
+            &q.consolidation,
             &q.entity,
             &q.entry_period,
             &q.period,
@@ -372,14 +380,21 @@ async fn get_entries(
         // Colonnes propagées (built-in + custom) depuis le registre.
         let dims = dimensions::load_all(&con).map_err(db_err)?;
         let col_list = dimensions::propagated_cols(&dims).join(", ");
-        let (fsql, fparams) = build_filters(
-            &q.scenario,
-            &q.entity,
-            &q.entry_period,
-            &q.period,
-            &q.nature,
-        );
         let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
+            // Niveau raw (stg_entry) : le filtre de remontée porte sur `phase`
+            // (et non consolidation_id, absent de stg_entry). Les autres filtres
+            // (entity/entry_period/period/nature) sont communs.
+            let (mut fsql, mut fparams) = build_filters(
+                &None,
+                &q.entity,
+                &q.entry_period,
+                &q.period,
+                &q.nature,
+            );
+            if let Some(ph) = &q.phase {
+                fsql.push_str(" AND phase = ?");
+                fparams.push(DbValue::Text(ph.clone()));
+            }
             // Filtre source (raw uniquement) : n'a pas de sens aux autres
             // niveaux car `source` n'est pas propagée par le pipeline.
             let source_clause = match &q.source {
@@ -391,7 +406,7 @@ async fn get_entries(
                 None => (String::new(), Vec::new()),
             };
             // Le WHERE sur stg_entry est composé à partir des filtres standards
-            // (préfixés " AND ..." par build_filters) et du filtre source.
+            // (préfixés " AND ..." par build_filters + phase) et du filtre source.
             let has_filters = !fsql.is_empty() || !source_clause.0.is_empty();
             let where_stg = if has_filters {
                 format!("WHERE {}", {
@@ -416,12 +431,18 @@ async fn get_entries(
                  ORDER BY id
                  LIMIT ? OFFSET ?"
             );
-            let mut params = fparams;
-            params.extend(source_clause.1);
-            params.push(DbValue::BigInt(q.limit));
-            params.push(DbValue::BigInt(q.offset));
-            (sql, params)
+            fparams.extend(source_clause.1);
+            fparams.push(DbValue::BigInt(q.limit));
+            fparams.push(DbValue::BigInt(q.offset));
+            (sql, fparams)
         } else {
+            let (fsql, fparams) = build_filters(
+                &q.consolidation,
+                &q.entity,
+                &q.entry_period,
+                &q.period,
+                &q.nature,
+            );
             let sql = format!(
                 "SELECT id, {col_list}, NULL AS source, level, amount
                  FROM fact_entry
@@ -442,61 +463,68 @@ async fn get_entries(
 
 /// Corps accepté par `POST /api/run`.
 ///
-/// `scenario` est optionnel : s'il est absent (body `{}` ou `{}`), le handler
-/// sélectionne le premier scénario de statut `'ouvert'`. C'est l'amorti de
-/// rétro-compatibilité pendant le développement.
+/// `consolidation_id` est optionnel : s'il est absent (body `{}`), le handler
+/// sélectionne la première consolidation de statut `'ouvert'`. C'est l'amorti
+/// de rétro-compatibilité pendant le développement.
 #[derive(Deserialize, Default)]
 struct RunBody {
     #[serde(default)]
-    scenario: Option<String>,
+    consolidation_id: Option<i64>,
 }
 
-/// GET /api/scenarios — liste des scénarios avec leurs paramètres dépliés.
+/// GET /api/consolidations — liste des consolidations avec leurs paramètres dépliés.
 ///
-/// Sert le dropdown UI de `PipelinePage`. Une entrée par scénario ; les FK
-/// (category, variant, rate_set, ruleset_code) sont ramenées telles quelles
-/// (leurs libellés sont récupérés côté UI via les tables master data).
+/// Sert le dropdown UI de `PipelinePage`. Une entrée par consolidation ; les FK
+/// (phase, variant, rate_set, ruleset_code) sont ramenées telles quelles (leurs
+/// libellés sont récupérés côté UI via les tables master data).
 #[derive(Serialize)]
-struct ScenarioSummary {
-    code: String,
+struct ConsolidationSummary {
+    id: i64,
     libelle: Option<String>,
-    category: Option<String>,
-    entry_period: Option<String>,
-    presentation_currency: Option<String>,
+    phase: Option<String>,
+    exercice: Option<String>,
+    perimeter_set: Option<String>,
     variant: Option<String>,
-    ruleset_code: Option<String>,
+    presentation_currency: Option<String>,
+    perimeter_period: Option<String>,
     rate_set: Option<String>,
+    rate_period: Option<String>,
+    ruleset_code: Option<String>,
+    a_nouveau_consolidation_id: Option<i64>,
     statut: Option<String>,
-    a_nouveau_scenario: Option<String>,
 }
 
-/// GET /api/scenarios — liste de tous les scénarios avec leurs paramètres.
-async fn list_scenarios(
+/// GET /api/consolidations — liste de toutes les consolidations avec leurs paramètres.
+async fn list_consolidations(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<ScenarioSummary>>, AppError> {
+) -> Result<Json<Vec<ConsolidationSummary>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
         let mut stmt = con
             .prepare(
-                "SELECT code, libelle, category, entry_period, presentation_currency,
-                        variant, ruleset_code, rate_set, statut, a_nouveau_scenario
-                 FROM dim_scenario
-                 ORDER BY code",
+                "SELECT id, libelle, phase, exercice, perimeter_set, variant,
+                        presentation_currency, perimeter_period, rate_set, rate_period,
+                        ruleset_code, a_nouveau_consolidation_id, statut
+                 FROM dim_consolidation
+                 ORDER BY id",
             )
             .map_err(db_err)?;
         let iter = stmt
             .query_map([], |row| {
-                Ok(ScenarioSummary {
-                    code: row.get(0)?,
+                Ok(ConsolidationSummary {
+                    id: row.get(0)?,
                     libelle: row.get(1)?,
-                    category: row.get(2)?,
-                    entry_period: row.get(3)?,
-                    presentation_currency: row.get(4)?,
+                    phase: row.get(2)?,
+                    exercice: row.get(3)?,
+                    perimeter_set: row.get(4)?,
                     variant: row.get(5)?,
-                    ruleset_code: row.get(6)?,
-                    rate_set: row.get(7)?,
-                    statut: row.get(8)?,
-                    a_nouveau_scenario: row.get(9)?,
+                    presentation_currency: row.get(6)?,
+                    perimeter_period: row.get(7)?,
+                    rate_set: row.get(8)?,
+                    rate_period: row.get(9)?,
+                    ruleset_code: row.get(10)?,
+                    a_nouveau_consolidation_id: row.get(11)?,
+                    statut: row.get(12)?,
                 })
             })
             .map_err(db_err)?;
@@ -509,65 +537,67 @@ async fn list_scenarios(
     Ok(Json(rows))
 }
 
-/// POST /api/run — déclenche le pipeline 4 étapes (sur le scénario du body,
-/// sinon le 1er scénario `'ouvert'`) et, si le scénario référence un ruleset,
-/// exécute celui-ci après le pipeline.
+/// POST /api/run — déclenche le pipeline 3 étapes (sur la consolidation du body,
+/// sinon la 1ère consolidation `'ouvert'`) et, si la consolidation référence un
+/// ruleset, exécute celui-ci après le pipeline.
 ///
-/// Workflow (cf. SPEC_SCENARIO_V2.md §7) :
-/// 1. Résolution du code scénario (body ou défaut `'ouvert'`).
-/// 2. `ConvertParams::load_params(con, scenario_code)`.
-/// 3. `DELETE FROM fact_entry WHERE scenario = ?` (reset du scénario courant ;
-///    les autres scénarios — snapshot d'à-nouveau figé — sont préservés).
+/// Workflow :
+/// 1. Résolution de l'id consolidation (body ou défaut `'ouvert'`).
+/// 2. `ConvertParams::load_params(con, consolidation_id)`.
+/// 3. `DELETE FROM fact_entry WHERE consolidation_id = ?` (reset de la conso
+///    courante ; les autres consolidations — snapshot d'à-nouveau figé — sont
+///    préservées).
 /// 4. `run_pipeline(con, &params)`.
-/// 5. Si `scenario.ruleset_code` non NULL : `run_ruleset(con, ruleset_code)`.
-/// 6. Retourne `{ counts, scenario, ruleset?, ruleset_report? }`.
+/// 5. Si `consolidation.ruleset_code` non NULL : `run_ruleset(con, ruleset_code)`.
+/// 6. Retourne `{ counts, consolidation, ruleset?, ruleset_report? }`.
 async fn run_pipeline_handler(
     State(state): State<Arc<AppState>>,
     body: Option<Json<RunBody>>,
 ) -> Result<Json<PipelineResult>, AppError> {
     let result = {
         let con = lock_con(&state)?;
-        // 1. Résolution du scénario : explicite dans le body, sinon 1er 'ouvert'.
-        let scenario_code: String = match body.and_then(|b| b.0.scenario) {
-            Some(s) if !s.trim().is_empty() => s.trim().to_string(),
-            _ => con
+        // 1. Résolution de la consolidation : explicite dans le body, sinon 1ère 'ouvert'.
+        let consolidation_id: i64 = match body.and_then(|b| b.0.consolidation_id) {
+            Some(id) => id,
+            None => con
                 .query_row(
-                    "SELECT code FROM dim_scenario \
+                    "SELECT id FROM dim_consolidation \
                      WHERE statut = 'ouvert' OR statut IS NULL \
-                     ORDER BY code LIMIT 1",
+                     ORDER BY id LIMIT 1",
                     [],
-                    |r| r.get::<_, String>(0),
+                    |r| r.get::<_, i64>(0),
                 )
                 .map_err(|e| {
                     AppError::bad_request(format!(
-                        "aucun scénario 'ouvert' trouvé (précisez {{\"scenario\":\"...\"}}) : {e}"
+                        "aucune consolidation 'ouvert' trouvée (précisez {{\"consolidation_id\":N}}) : {e}"
                     ))
                 })?,
         };
 
-        // 2. Chargement des params depuis dim_scenario + app_config.
-        let params = ConvertParams::load_params(&con, &scenario_code).map_err(db_err)?;
+        // 2. Chargement des params depuis dim_consolidation + app_config.
+        let params = ConvertParams::load_params(&con, consolidation_id).map_err(db_err)?;
 
-        // 3. Lecture du ruleset_code (NULL si le scénario n'en référence pas).
+        // 3. Lecture du ruleset_code (NULL si la consolidation n'en référence pas).
         let ruleset_code: Option<String> = con
             .query_row(
-                "SELECT ruleset_code FROM dim_scenario WHERE code = ?",
-                [&scenario_code],
+                "SELECT ruleset_code FROM dim_consolidation WHERE id = ?",
+                [consolidation_id],
                 |r| r.get::<_, Option<String>>(0),
             )
             .map_err(db_err)?;
 
-        // 4. Vider les résultats du pipeline du SCÉNARIO COURANT avant de relancer
-        //    (isolation par scénario : les autres scénarios — ex. snapshot
-        //    d'à-nouveau figé — sont préservés). Cf. docs/A_NOUVEAU.md §2.3 / §3.
+        // 4. Vider les résultats du pipeline de la CONSOLIDATION COURANTE avant
+        //    de relancer (isolation par consolidation_id : les autres
+        //    consolidations — ex. snapshot d'à-nouveau figé — sont préservées).
+        //    Cf. docs/A_NOUVEAU.md §2.3 / §3.
         con.execute(
-            "DELETE FROM fact_entry WHERE scenario = ?",
-            [&scenario_code],
+            "DELETE FROM fact_entry WHERE consolidation_id = ?",
+            [consolidation_id],
         )
         .map_err(db_err)?;
 
-        // 5. Pipeline. Si le scénario référence un ruleset, on **intercale** ses
-        //    règles au niveau qu'elles ciblent (hook post-étape) : une règle
+        // 5. Pipeline. Si la consolidation référence un ruleset, on **intercale**
+        //    ses règles au niveau qu'elles ciblent (hook post-étape) : une règle
         //    `converted` est injectée juste après l'étape C, puis consolidée par
         //    l'étape D — propagation identique à une écriture manuelle. Sinon,
         //    pipeline natif seul.
@@ -575,7 +605,12 @@ async fn run_pipeline_handler(
         let counts = match &ruleset_code {
             Some(code) => {
                 let mut hook = |c: &Connection, level: &str| -> duckdb::Result<()> {
-                    rule_results.extend(run_ruleset_at_level(c, code, level)?);
+                    rule_results.extend(run_ruleset_at_level(
+                        c,
+                        code,
+                        level,
+                        Some(consolidation_id),
+                    )?);
                     Ok(())
                 };
                 run_pipeline_with_hook(&con, &params, &mut hook)
@@ -587,16 +622,16 @@ async fn run_pipeline_handler(
 
         // 5b. À-nouveau : contrôle de cohérence **non bloquant** (cf.
         //     docs/A_NOUVEAU.md §5.1, A5 : statut `ouvert` toléré → on alerte).
-        if let Some(a_nouveau) = params.a_nouveau_scenario.as_deref() {
+        if let Some(a_nouveau_id) = params.a_nouveau_consolidation_id {
             match conso_engine::validate::check_a_nouveau_coherence(
                 &con,
-                &scenario_code,
-                a_nouveau,
-                &params.current_period,
+                consolidation_id,
+                a_nouveau_id,
+                &params.exercice,
             ) {
                 Ok(anomalies) if !anomalies.is_empty() => {
                     eprintln!(
-                        "⚠ À-nouveau ({scenario_code} ← {a_nouveau}) : {} incohérence(s) de périmètre :",
+                        "⚠ À-nouveau (conso {consolidation_id} ← {a_nouveau_id}) : {} incohérence(s) de périmètre :",
                         anomalies.len()
                     );
                     for a in &anomalies {
@@ -619,7 +654,7 @@ async fn run_pipeline_handler(
             corporate: counts[0],
             converted: counts[1],
             consolidated: counts[2],
-            scenario: scenario_code,
+            consolidation: consolidation_id,
             ruleset: ruleset_code,
             ruleset_report,
         }
@@ -1306,24 +1341,24 @@ async fn main() {
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
-        // On sélectionne le 1er scénario 'ouvert' (post-SPEC_SCENARIO_V2 : plus
-        // de ConvertParams::default(), les params viennent du scénario).
-        let initial_scenario: Option<String> = con
+        // On sélectionne la 1ère consolidation 'ouvert' (les params viennent de
+        // dim_consolidation).
+        let initial_consolidation: Option<i64> = con
             .query_row(
-                "SELECT code FROM dim_scenario \
+                "SELECT id FROM dim_consolidation \
                  WHERE statut = 'ouvert' OR statut IS NULL \
-                 ORDER BY code LIMIT 1",
+                 ORDER BY id LIMIT 1",
                 [],
-                |r| r.get::<_, String>(0),
+                |r| r.get::<_, i64>(0),
             )
             .ok();
-        match initial_scenario {
-            Some(code) => match ConvertParams::load_params(&con, &code) {
+        match initial_consolidation {
+            Some(id) => match ConvertParams::load_params(&con, id) {
                 Ok(params) => match run_pipeline(&con, &params) {
                     Ok(report) => {
                         let counts = report.counts();
                         println!(
-                            "   Pipeline initial (scénario {code}) : corporate={}, converted={}, consolidated={}",
+                            "   Pipeline initial (consolidation {id}) : corporate={}, converted={}, consolidated={}",
                             counts[0], counts[1], counts[2]
                         );
                     }
@@ -1335,12 +1370,12 @@ async fn main() {
                 },
                 Err(e) => {
                     eprintln!(
-                        "⚠ load_params initial échoué pour {code} (le serveur démarre quand même) : {e}"
+                        "⚠ load_params initial échoué pour la consolidation {id} (le serveur démarre quand même) : {e}"
                     );
                 }
             },
             None => {
-                eprintln!("⚠ Aucun scénario 'ouvert' trouvé — pipeline initial sauté.");
+                eprintln!("⚠ Aucune consolidation 'ouvert' trouvée — pipeline initial sauté.");
             }
         }
     }
@@ -1378,7 +1413,7 @@ async fn main() {
         )
         .route("/api/run", post(run_pipeline_handler))
         .route("/api/reset", post(reset_handler))
-        .route("/api/scenarios", get(list_scenarios))
+        .route("/api/consolidations", get(list_consolidations))
         // Dimensions — registre central (built-in + custom)
         .route(
             "/api/meta/dimensions",

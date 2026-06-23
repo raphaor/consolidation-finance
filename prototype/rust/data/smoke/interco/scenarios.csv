@@ -1,2 +1,0 @@
-code,libelle,category,entry_period,presentation_currency,variant,ruleset_code,rate_set,perimeter_set,statut,a_nouveau_scenario
-SMOKE_IC,Smoke Interco,REEL,2025,EUR,BASE,RS_INTERCO,SMOKE_RATES_IC,SMOKE_PERIM_IC,ouvert,

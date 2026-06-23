@@ -235,13 +235,16 @@ pub struct CoherenceAnomaly {
 /// Liste vide = cohérent. Le contrôle est **non bloquant** (avertissement) ;
 /// l'appelant décide quoi en faire (cf. A5 : statut `ouvert` toléré).
 ///
-/// - `scenario` : run courant ; `a_nouveau` : snapshot ; `period` : entry_period
-///   courant (clé de `sat_perimeter`).
+/// - `consolidation_id` : run courant (résout son `perimeter_set` via
+///   `dim_consolidation`) ;
+/// - `a_nouveau_consolidation_id` : snapshot N-1 figé (filtre les clôtures
+///   `fact_entry` au niveau consolidated) ;
+/// - `exercice` : période du périmètre courant (clé de `sat_perimeter`).
 pub fn check_a_nouveau_coherence(
     con: &Connection,
-    scenario: &str,
-    a_nouveau: &str,
-    period: &str,
+    consolidation_id: i64,
+    a_nouveau_consolidation_id: i64,
+    exercice: &str,
 ) -> duckdb::Result<Vec<CoherenceAnomaly>> {
     let mut out = Vec::new();
 
@@ -253,22 +256,25 @@ pub fn check_a_nouveau_coherence(
                 COALESCE(p.entree, FALSE) AS entree,
                 EXISTS (
                     SELECT 1 FROM fact_entry s
-                    WHERE s.scenario = ? AND s.level = 'consolidated'
+                    WHERE s.consolidation_id = ? AND s.level = 'consolidated'
                       AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
                       AND s.entity = p.entity
                 ) AS was_consolidated
          FROM sat_perimeter p
-         WHERE p.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = ?)
+         WHERE p.perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = ?)
            AND p.period = ?
          ORDER BY p.entity",
     )?;
-    let rows = stmt.query_map([a_nouveau, scenario, period], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, bool>(1)?,
-            r.get::<_, bool>(2)?,
-        ))
-    })?;
+    let rows = stmt.query_map(
+        duckdb::params![a_nouveau_consolidation_id, consolidation_id, exercice],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, bool>(1)?,
+                r.get::<_, bool>(2)?,
+            ))
+        },
+    )?;
     for r in rows {
         let (entity, entree, was_consolidated) = r?;
         if entree == was_consolidated {
@@ -288,16 +294,19 @@ pub fn check_a_nouveau_coherence(
     // 2. Orphelins : entités consolidées en N-1 mais absentes du périmètre courant.
     let mut stmt2 = con.prepare(
         "SELECT DISTINCT s.entity FROM fact_entry s
-         WHERE s.scenario = ? AND s.level = 'consolidated'
+         WHERE s.consolidation_id = ? AND s.level = 'consolidated'
            AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
            AND s.entity NOT IN (
                SELECT entity FROM sat_perimeter
-               WHERE perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = ?)
+               WHERE perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = ?)
                  AND period = ?
            )
          ORDER BY s.entity",
     )?;
-    let rows2 = stmt2.query_map([a_nouveau, scenario, period], |r| r.get::<_, String>(0))?;
+    let rows2 = stmt2.query_map(
+        duckdb::params![a_nouveau_consolidation_id, consolidation_id, exercice],
+        |r| r.get::<_, String>(0),
+    )?;
     for r in rows2 {
         out.push(CoherenceAnomaly {
             kind: "snapshot_orphelin",

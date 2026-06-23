@@ -1,5 +1,5 @@
-scenario,entity,entry_period,period,account,flow,currency,nature,partner,share,analysis,analysis2,amount
-SMOKE_CI,A,2024,2024,467,F00,USD,0LIASS,,,,1000
-SMOKE_CI,A,2024,2024,467,F20,USD,0LIASS,,,,100
-SMOKE_CI,A,2024,2024,468,F00,USD,0LIASS,,,,1000
-SMOKE_CI,A,2024,2024,468,F20,USD,0LIASS,,,,100
+phase,entity,entry_period,period,account,flow,currency,nature,partner,share,analysis,analysis2,amount
+REEL,A,2024,2024,467,F00,USD,0LIASS,,,,1000
+REEL,A,2024,2024,467,F20,USD,0LIASS,,,,100
+REEL,A,2024,2024,468,F00,USD,0LIASS,,,,1000
+REEL,A,2024,2024,468,F20,USD,0LIASS,,,,100

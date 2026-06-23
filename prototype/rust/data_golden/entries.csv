@@ -1,4 +1,4 @@
-scenario,entity,entry_period,period,account,flow,currency,nature,partner,share,analysis,analysis2,amount
+phase,entity,entry_period,period,account,flow,currency,nature,partner,share,analysis,analysis2,amount
 REEL,M,2024,2024,100,F00,EUR,0LIASS,,,,GOLD-M-001,10000
 REEL,M,2024,2024,100,F20,EUR,0LIASS,,,,GOLD-M-002,1000
 REEL,M,2024,2024,100,F99,EUR,0LIASS,,,,GOLD-M-003,11000

@@ -43,7 +43,7 @@ const TABLES: &[&str] = &[
     "dim_rule",
     "dim_ruleset",
     "dim_ruleset_item",
-    "dim_scenario",
+    "dim_consolidation",
     "dim_entity",
     "dim_period",
     "dim_sous_classe",
@@ -84,7 +84,7 @@ async fn export_all(State(state): State<Arc<AppState>>) -> Result<Json<JsonValue
         let mut meta = Map::new();
         meta.insert(
             "format".to_string(),
-            JsonValue::String("conso-export-v1".to_string()),
+            JsonValue::String("conso-export-v2".to_string()),
         );
         obj.insert("_meta".to_string(), JsonValue::Object(meta));
 

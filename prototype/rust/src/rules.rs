@@ -49,7 +49,7 @@ use crate::characteristics;
 use crate::dimensions;
 use crate::pipeline::materialize_closures::materialize_closures;
 use crate::references;
-use duckdb::{params_from_iter, types::Value as DbValue, Connection};
+use duckdb::{params, params_from_iter, types::Value as DbValue, Connection};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeSet;
@@ -491,9 +491,9 @@ enum Coefficient {
     /// l'étape D le re-multiplie par `INTEG_EN` → `Min(INTEG_EN, INTEG_PA)`.
     ElimIcCorpN,
     /// Élimination interco corporate N-1 : `Min(1, INTEG_PA_N-1 / INTEG_EN_N-1)`.
-    /// Les taux N-1 sont lus dans `sat_perimeter` du scénario d'à-nouveau
-    /// (`dim_scenario.a_nouveau_scenario` → son `perimeter_set` à son
-    /// `entry_period`). Pas d'à-nouveau → taux N-1 = 0.
+    /// Les taux N-1 sont lus dans `sat_perimeter` de la consolidation d'à-nouveau
+    /// (`dim_consolidation.a_nouveau_consolidation_id` → son `perimeter_set` à
+    /// son `exercice`). Pas d'à-nouveau → taux N-1 = 0.
     ElimIcCorpN1,
     /// Variation d'élimination interco corporate : `ElimIcCorpN - ElimIcCorpN1`.
     ElimIcCorpVar,
@@ -1097,6 +1097,11 @@ fn exec_operation(
         let expr = dest_expr(dim, &op.destination, &mut params);
         select_parts.push(format!("{expr} AS {dim}"));
     }
+    // `consolidation_id` : colonne technique (hors dimensions propagées) recopiée
+    // depuis le snapshot pour que les écritures de règle restent isolées dans le
+    // run courant (le snapshot est filtré par consolidation_id).
+    insert_parts.push("consolidation_id");
+    select_parts.push("e.consolidation_id AS consolidation_id".to_string());
     insert_parts.push("level");
     insert_parts.push("amount");
     select_parts.push("? AS level".to_string());
@@ -1121,7 +1126,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_ent\n  \
                 ON p_ent.entity = e.entity\n \
-                AND p_ent.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = e.scenario)\n \
+                AND p_ent.perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = e.consolidation_id)\n \
                 AND p_ent.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "entity") {
@@ -1135,7 +1140,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_part\n  \
                 ON p_part.entity = e.partner\n \
-                AND p_part.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = e.scenario)\n \
+                AND p_part.perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = e.consolidation_id)\n \
                 AND p_part.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "partner") {
@@ -1149,7 +1154,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_share\n  \
                 ON p_share.entity = e.share\n \
-                AND p_share.perimeter_set = (SELECT perimeter_set FROM dim_scenario WHERE code = e.scenario)\n \
+                AND p_share.perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = e.consolidation_id)\n \
                 AND p_share.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "share") {
@@ -1161,19 +1166,19 @@ fn exec_operation(
     }
 
     // JOINs de périmètre **N-1** (coefficients d'élimination IC N-1 / Var). Le
-    // taux N-1 est lu dans le `sat_perimeter` du scénario d'à-nouveau du run
-    // courant : `dim_scenario.a_nouveau_scenario` → son `perimeter_set` à son
-    // `entry_period`. Même source que le carry d'à-nouveau (cf.
-    // `pipeline/a_nouveau.rs`) — pas de duplication, cohérence N-1 garantie.
+    // taux N-1 est lu dans le `sat_perimeter` de la consolidation d'à-nouveau du
+    // run courant : `dim_consolidation.a_nouveau_consolidation_id` → son
+    // `perimeter_set` à son `exercice`. Même source que le carry d'à-nouveau
+    // (cf. `pipeline/a_nouveau.rs`) — pas de duplication, cohérence N-1 garantie.
     //
     // LEFT JOIN volontaire : une entité / un partenaire absent du périmètre N-1
     // (entrant) n'a pas de ligne → `pct_integration` NULL → COALESCE 0 dans
     // l'expression du coefficient (entrant traité comme intégralement nouveau,
-    // `Var = N`). Aucun `?` : sous-requêtes scalaires sur `e.scenario` —
-    // n'affectent pas l'ordre des paramètres.
+    // `Var = N`). Aucun `?` : sous-requêtes scalaires sur `e.consolidation_id`
+    // — n'affectent pas l'ordre des paramètres.
     //
-    // Si le scénario n'a pas d'à-nouveau, les sous-requêtes renvoient NULL → la
-    // condition de JOIN est fausse → taux N-1 = 0 (dégradation documentée).
+    // Si la consolidation n'a pas d'à-nouveau, les sous-requêtes renvoient NULL
+    // → la condition de JOIN est fausse → taux N-1 = 0 (dégradation documentée).
     for (alias, key_col) in [("p_ent_n1", "entity"), ("p_part_n1", "partner")] {
         let needed = if alias == "p_ent_n1" {
             need_p_ent_n1
@@ -1185,13 +1190,13 @@ fn exec_operation(
                 "\nLEFT JOIN sat_perimeter {alias}\n  \
                     ON {alias}.entity = e.{key_col}\n \
                     AND {alias}.perimeter_set = (\
-                        SELECT s_an.perimeter_set FROM dim_scenario s_cur \
-                        JOIN dim_scenario s_an ON s_an.code = s_cur.a_nouveau_scenario \
-                        WHERE s_cur.code = e.scenario)\n \
+                        SELECT s_an.perimeter_set FROM dim_consolidation s_cur \
+                        JOIN dim_consolidation s_an ON s_an.id = s_cur.a_nouveau_consolidation_id \
+                        WHERE s_cur.id = e.consolidation_id)\n \
                     AND {alias}.period = (\
-                        SELECT s_an.entry_period FROM dim_scenario s_cur \
-                        JOIN dim_scenario s_an ON s_an.code = s_cur.a_nouveau_scenario \
-                        WHERE s_cur.code = e.scenario)"
+                        SELECT s_an.exercice FROM dim_consolidation s_cur \
+                        JOIN dim_consolidation s_an ON s_an.id = s_cur.a_nouveau_consolidation_id \
+                        WHERE s_cur.id = e.consolidation_id)"
             ));
         }
     }
@@ -1467,7 +1472,11 @@ fn duckdb_synthesis_error(msg: String) -> duckdb::Error {
 ///
 /// Les snapshots empêchent qu'une opération lise les lignes générées par une
 /// opération précédente (idempotence de la règle).
-pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport, duckdb::Error> {
+pub fn run_ruleset(
+    con: &Connection,
+    ruleset_code: &str,
+    consolidation_id: Option<i64>,
+) -> Result<RulesetReport, duckdb::Error> {
     // Contexte dynamique : whitelists calculées depuis le registre des dimensions.
     let ctx = RuleContext::from_registry(con)?;
 
@@ -1504,13 +1513,25 @@ pub fn run_ruleset(con: &Connection, ruleset_code: &str) -> Result<RulesetReport
             .map(|op| op.level.as_str())
             .collect();
 
-        // Snapshots (un par niveau).
+        // Snapshots (un par niveau). Filtrés par `consolidation_id` quand fourni
+        // (isolation du run courant ; `None` = lecture globale, pour les tests).
         for lvl in &levels {
-            let sql = format!(
-                "CREATE TEMP TABLE _rule_snap_{lvl} AS \
-                 SELECT * FROM fact_entry WHERE level = ?"
-            );
-            con.execute(&sql, [lvl.to_string()])?;
+            let sql = if consolidation_id.is_some() {
+                format!(
+                    "CREATE TEMP TABLE _rule_snap_{lvl} AS \
+                     SELECT * FROM fact_entry WHERE level = ? AND consolidation_id = ?"
+                )
+            } else {
+                format!(
+                    "CREATE TEMP TABLE _rule_snap_{lvl} AS \
+                     SELECT * FROM fact_entry WHERE level = ?"
+                )
+            };
+            if let Some(cid) = consolidation_id {
+                con.execute(&sql, params![lvl.to_string(), cid])?;
+            } else {
+                con.execute(&sql, [lvl.to_string()])?;
+            }
         }
 
         // Exécution des opérations. On agrège le nombre de lignes générées
@@ -1565,6 +1586,7 @@ pub fn run_ruleset_at_level(
     con: &Connection,
     ruleset_code: &str,
     level: &str,
+    consolidation_id: Option<i64>,
 ) -> Result<Vec<RuleResult>, duckdb::Error> {
     let ctx = RuleContext::from_registry(con)?;
     let rules: Vec<(String, String)> = {
@@ -1592,13 +1614,25 @@ pub fn run_ruleset_at_level(
         if !has_ops_here {
             continue;
         }
-        // Snapshot du niveau (isolation des opérations de la règle).
-        con.execute(
-            &format!(
-                "CREATE TEMP TABLE _rule_snap_{level} AS SELECT * FROM fact_entry WHERE level = ?"
-            ),
-            [level],
-        )?;
+        // Snapshot du niveau (isolation des opérations de la règle), filtré par
+        // `consolidation_id` quand fourni (isolation du run courant).
+        if let Some(cid) = consolidation_id {
+            con.execute(
+                &format!(
+                    "CREATE TEMP TABLE _rule_snap_{level} AS \
+                     SELECT * FROM fact_entry WHERE level = ? AND consolidation_id = ?"
+                ),
+                params![level, cid],
+            )?;
+        } else {
+            con.execute(
+                &format!(
+                    "CREATE TEMP TABLE _rule_snap_{level} AS \
+                     SELECT * FROM fact_entry WHERE level = ?"
+                ),
+                [level],
+            )?;
+        }
         let mut n = 0usize;
         for op in definition.operations.iter().filter(|op| op.level == level) {
             n += exec_operation(con, rule_code, op, &definition.scope, &ctx)?;
@@ -1640,7 +1674,7 @@ mod tests {
     fn ctx_fixture() -> RuleContext {
         RuleContext {
             selection_dims: vec![
-                "scenario".into(),
+                "phase".into(),
                 "entity".into(),
                 "entry_period".into(),
                 "period".into(),

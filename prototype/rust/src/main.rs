@@ -104,8 +104,17 @@ fn main() {
     println!("   {n_stg} écritures brutes chargées dans stg_entry.");
 
     // 3. Pipeline 4 étapes
-    println!("\n▶ Exécution du pipeline (A→B→C→D)…");
-    let params = match ConvertParams::load_params(&con, "REEL") {
+    println!("\n▶ Exécution du pipeline (A→C→D)…");
+    // La 1ʳᵉ consolidation du CSV (REEL) reçoit l'id 1 (DEFAULT nextval sur une
+    // base fraîche). On la résout explicitement par requête pour rester robuste.
+    let consolidation_id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_consolidation ORDER BY id LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(1);
+    let params = match ConvertParams::load_params(&con, consolidation_id) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("\n✗ ERREUR load_params : {e}");

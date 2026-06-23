@@ -38,14 +38,24 @@ const RATE_SETS: &[(&str, &str)] = &[("RATES", "Taux réels")];
 /// Jeux de périmètre : (code, libelle). Symétrique de `RATE_SETS` (Q35).
 const PERIMETER_SETS: &[(&str, &str)] = &[("PERIM_REEL", "Périmètre réel 2024")];
 
-/// Scénarios de test : (code, libelle, category, entry_period,
-/// presentation_currency, variant, ruleset_code, rate_set, perimeter_set, statut).
+/// Consolidations de test : (libelle, phase, exercice, perimeter_set, variant,
+/// presentation_currency, perimeter_period, rate_set, rate_period, ruleset_code,
+/// statut). `a_nouveau_consolidation_id` est NULL pour le seed.
 ///
-/// Le scénario `REEL` agrège toutes les références nécessaires à un run. Avec
-/// `pivot = EUR` et `presentation_currency = EUR`, la conversion se comporte
-/// comme avant (cross-rate = taux direct). `ruleset_code = NULL` : pas de
-/// règles appliquées sur le scénario de base.
-const SCENARIOS: &[(
+/// L'id est alloué par `nextval('seq_consolidation')` dans l'INSERT : sur une
+/// base fraîchement créée, la 1ʳᵉ consolidation reçoit donc l'id déterministe 1
+/// (et avance la séquence, de sorte que les éventuels INSERT ultérieurs en
+/// DEFAULT nextval — tests créant une consolidation CUR/REEL_N1 — ne collent pas
+/// cet id).
+///
+/// La consolidation `REEL` agrège toutes les références nécessaires à un run.
+/// Avec `pivot = EUR` et `presentation_currency = EUR`, la conversion se
+/// comporte comme avant (cross-rate = taux direct). `ruleset_code = NULL` : pas
+/// de règles appliquées sur la consolidation de base.
+const CONSOLIDATIONS: &[(
+    &str,
+    &str,
+    &str,
     &str,
     &str,
     &str,
@@ -54,18 +64,17 @@ const SCENARIOS: &[(
     &str,
     Option<&str>,
     &str,
-    &str,
-    &str,
 )] = &[(
-    "REEL",
     "Réel 2024",
     "REEL",
     "2024",
-    "EUR",
-    "BASE",
-    None,
-    "RATES",
     "PERIM_REEL",
+    "BASE",
+    "EUR",
+    "2024",
+    "RATES",
+    "2024",
+    None,
     "ouvert",
 )];
 
@@ -276,11 +285,12 @@ const RATES: &[((&str, &str, &str), (Option<Decimal>, Option<Decimal>, Option<De
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Ligne de saisie brute :
-/// (scenario, entity, entry_period, period, account, flow, currency, nature,
+/// (phase, entity, entry_period, period, account, flow, currency, nature,
 ///  partner, share, analysis, source, amount).
-/// Le 12e champ est la **référence source** (`S-M-001`…), métadonnée non-
-/// dimensionnelle insérée dans `stg_entry.source` (et NON dans `analysis2`, qui
-/// est une dimension analytique : l'y mettre ferait de chaque ligne un « dont »).
+/// Le 1er champ est la **phase** de la remontée (ex. 'REEL'). Le 12e champ est
+/// la **référence source** (`S-M-001`…), métadonnée non-dimensionnelle insérée
+/// dans `stg_entry.source` (et NON dans `analysis2`, qui est une dimension
+/// analytique : l'y mettre ferait de chaque ligne un « dont »).
 type RawRow = (
     &'static str,
     &'static str,
@@ -816,13 +826,16 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
 
     // --- Dimensions ---
-    for s in SCENARIOS {
+    for c in CONSOLIDATIONS {
+        // `id` alloué par nextval : déterministe (1 sur base fraîche) et avance
+        // la séquence (évite tout collision avec un INSERT ultérieur).
         con.execute(
-            "INSERT INTO dim_scenario
-                (code, libelle, category, entry_period, presentation_currency,
-                 variant, ruleset_code, rate_set, perimeter_set, statut)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params![s.0, s.1, s.2, s.3, s.4, s.5, s.6, s.7, s.8, s.9],
+            "INSERT INTO dim_consolidation
+                (id, libelle, phase, exercice, perimeter_set, variant,
+                 presentation_currency, perimeter_period, rate_set, rate_period,
+                 ruleset_code, a_nouveau_consolidation_id, statut)
+             VALUES (nextval('seq_consolidation'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+            params![c.0, c.1, c.2, c.3, c.4, c.5, c.6, c.7, c.8, c.9, c.10],
         )?;
     }
     for e in ENTITIES {
@@ -912,10 +925,11 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     // --- Staging (saisie brute) ---
     for row in RAW {
         // `analysis2` reste NULL (dimension analytique) ; la réf. source (row.11)
-        // va dans la colonne non-dimensionnelle `source`.
+        // va dans la colonne non-dimensionnelle `source`. Le 1er champ (row.0)
+        // est la `phase` de la remontée (ex. 'REEL').
         con.execute(
             "INSERT INTO stg_entry \
-                (scenario, entity, entry_period, period, account, flow, currency, \
+                (phase, entity, entry_period, period, account, flow, currency, \
                  nature, partner, share, analysis, analysis2, source, amount) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
             params![
@@ -946,8 +960,9 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
 /// Reproduit la fixture canonique de `tests/rules.rs::elim_700_json` : élimine
 /// l'interco du compte 700 entre entités en méthode `globale` (op 1 extourne
 /// partner hérité, op 2 pose la contrepartie partner vidé, le tout en nature
-/// `2ELI`). Le scénario `REEL` référence `RS_INTERCO` (cf. `scenarios.csv`), et
-/// `entries.csv` contient la ligne interco M→A sur 700 que la règle matche.
+/// `2ELI`). La consolidation `REEL` référence `RS_INTERCO` (cf.
+/// `consolidations.csv`), et `entries.csv` contient la ligne interco M→A sur 700
+/// que la règle matche.
 ///
 /// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
 /// `POST /api/reset`), pas par [`seed_all`] (les tests créent leurs propres

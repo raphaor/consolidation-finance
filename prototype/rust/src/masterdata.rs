@@ -35,16 +35,21 @@ struct TableDef {
     sql_name: &'static str,
     columns: &'static [&'static str],
     pk: &'static [&'static str],
+    /// `true` si la PK est auto-générée (ex. `INTEGER DEFAULT nextval(...)`).
+    /// Dans ce cas, le `create` omet la colonne PK de l'INSERT et récupère l'id
+    /// généré via `INSERT ... RETURNING <pk>`.
+    auto_pk: bool,
 }
 
 const TABLES: &[TableDef] = &[
-    // --- Catalogues v2 (dépendances amont de dim_scenario) ---
+    // --- Catalogues v2 (dépendances amont de dim_consolidation) ---
     TableDef {
         api_name: "scenario_categories",
         label: "Phases",
         sql_name: "dim_scenario_category",
         columns: &["code", "libelle"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "variants",
@@ -52,6 +57,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_variant",
         columns: &["code", "libelle"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "rate_sets",
@@ -59,6 +65,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_rate_set",
         columns: &["code", "libelle"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "perimeter_sets",
@@ -66,27 +73,32 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_perimeter_set",
         columns: &["code", "libelle"],
         pk: &["code"],
+        auto_pk: false,
     },
-    // --- Scénario v2 : category/entry_period/presentation_currency/variant/
-    //     ruleset_code(nullable)/rate_set/statut (cf. SPEC_SCENARIO_V2_TECH §1.2) ---
+    // --- Consolidation (ex scenarios) : objet composite, PK technique auto `id`.
+    //     Clé naturelle à 5 éléments (phase, exercice, perimeter_set, variant,
+    //     presentation_currency) matérialisée par une contrainte UNIQUE.
     TableDef {
-        api_name: "scenarios",
+        api_name: "consolidations",
         label: "Définitions de consolidation",
-        sql_name: "dim_scenario",
+        sql_name: "dim_consolidation",
         columns: &[
-            "code",
+            "id",
             "libelle",
-            "category",
-            "entry_period",
-            "presentation_currency",
-            "variant",
-            "ruleset_code",
-            "rate_set",
+            "phase",
+            "exercice",
             "perimeter_set",
+            "variant",
+            "presentation_currency",
+            "perimeter_period",
+            "rate_set",
+            "rate_period",
+            "ruleset_code",
+            "a_nouveau_consolidation_id",
             "statut",
-            "a_nouveau_scenario",
         ],
-        pk: &["code"],
+        pk: &["id"],
+        auto_pk: true,
     },
     TableDef {
         api_name: "entities",
@@ -100,6 +112,7 @@ const TABLES: &[TableDef] = &[
             "statut",
         ],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "periods",
@@ -114,6 +127,7 @@ const TABLES: &[TableDef] = &[
             "statut",
         ],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "accounts",
@@ -126,6 +140,7 @@ const TABLES: &[TableDef] = &[
         // `flow_scheme` (nullable) sélectionne le schéma de flux du compte (Q32).
         columns: &["code", "libelle", "classe", "sous_classe", "flow_scheme"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "sous_classes",
@@ -133,6 +148,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_sous_classe",
         columns: &["code", "libelle", "classe"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "flows",
@@ -140,6 +156,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_flow",
         columns: &["code", "libelle"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "flow_schemes",
@@ -147,6 +164,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_flow_scheme",
         columns: &["code", "libelle"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "flow_scheme_items",
@@ -161,6 +179,7 @@ const TABLES: &[TableDef] = &[
             "flux_a_nouveau",
         ],
         pk: &["scheme", "flow"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "currencies",
@@ -168,6 +187,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_currency",
         columns: &["code_iso", "libelle", "decimales"],
         pk: &["code_iso"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "natures",
@@ -175,6 +195,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_nature",
         columns: &["code", "libelle", "rules"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "methods",
@@ -182,6 +203,7 @@ const TABLES: &[TableDef] = &[
         sql_name: "dim_method",
         columns: &["code", "libelle", "consolidated"],
         pk: &["code"],
+        auto_pk: false,
     },
     TableDef {
         api_name: "perimeter",
@@ -198,6 +220,7 @@ const TABLES: &[TableDef] = &[
             "sortie",
         ],
         pk: &["perimeter_set", "entity", "period"],
+        auto_pk: false,
     },
     // PK étendue v2 : (rate_set, currency_source, period). `rate_set` en 1ère
     // position pour cohérence avec la PK (cf. SPEC_SCENARIO_V2_TECH §1.3).
@@ -215,6 +238,7 @@ const TABLES: &[TableDef] = &[
             "taux_ouverture",
         ],
         pk: &["rate_set", "currency_source", "period"],
+        auto_pk: false,
     },
 ];
 
@@ -351,6 +375,9 @@ struct OwnedTableDef {
     sql_name: String,
     columns: Vec<String>,
     pk: Vec<String>,
+    /// `true` si la PK est auto-générée (colonne omise de l'INSERT, id récupéré
+    /// via `RETURNING`). Porté depuis la [`TableDef`] native.
+    auto_pk: bool,
 }
 
 /// Résout une table demandée par son nom d'API (`/api/md/{table}`) en une
@@ -384,6 +411,7 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
             sql_name: def.sql_name.to_string(),
             columns: cols,
             pk: def.pk.iter().map(|s| s.to_string()).collect(),
+            auto_pk: def.auto_pk,
         }));
     }
 
@@ -401,6 +429,7 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
                 sql_name: format!("car_{code}"),
                 columns: cols,
                 pk: vec!["code".to_string()],
+                auto_pk: false,
             }));
         }
         return Ok(None);
@@ -416,6 +445,7 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
                 sql_name: format!("lst_{code}"),
                 columns: vec!["code".to_string(), "libelle".to_string()],
                 pk: vec!["code".to_string()],
+                auto_pk: false,
             }));
         }
         return Ok(None);
@@ -591,31 +621,69 @@ async fn create(
         let def = resolve_table(&con, &table)?
             .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
         reject_unknown_fields(&def, &obj)?;
-        let pk_vals = pk_from_body(&def, &JsonValue::Object(obj.clone()))?;
-        if fetch_one(&def, &pk_vals, &con)?.is_some() {
-            return Err(AppError::conflict("déjà existant"));
-        }
         validate_references(&def, &obj, &con)?;
-        let mut cols = Vec::new();
-        let mut vals: Vec<DbValue> = Vec::new();
-        for col in &def.columns {
-            if let Some(v) = obj.get(col.as_str()) {
-                cols.push(quote_ident(col));
-                vals.push(json_to_db_value(v));
+
+        // PK auto-générée (ex. dim_consolidation.id) : on omet la colonne PK de
+        // l'INSERT et on récupère l'id généré via `RETURNING <pk>` pour relire la
+        // ligne créée. Pas de contrôle d'existence préalable (la PK est allouée).
+        if def.auto_pk {
+            let pk_col = def
+                .pk
+                .first()
+                .ok_or_else(|| AppError::bad_request("auto_pk sans colonne PK définie"))?;
+            let mut cols = Vec::new();
+            let mut vals: Vec<DbValue> = Vec::new();
+            for col in &def.columns {
+                if col == pk_col {
+                    continue; // PK auto : générée par la base, omise de l'INSERT.
+                }
+                if let Some(v) = obj.get(col.as_str()) {
+                    cols.push(quote_ident(col));
+                    vals.push(json_to_db_value(v));
+                }
             }
+            if cols.is_empty() {
+                return Err(AppError::bad_request("aucune colonne fournie"));
+            }
+            let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({}) RETURNING {}",
+                def.sql_name,
+                cols.join(", "),
+                placeholders,
+                quote_ident(pk_col)
+            );
+            let generated_id: i64 =
+                con.query_row(&sql, params_from_iter(vals), |row| row.get(0))
+                    .map_err(db_err)?;
+            let pk_vals = vec![(pk_col.clone(), JsonValue::Number(generated_id.into()))];
+            fetch_one(&def, &pk_vals, &con)?
+        } else {
+            let pk_vals = pk_from_body(&def, &JsonValue::Object(obj.clone()))?;
+            if fetch_one(&def, &pk_vals, &con)?.is_some() {
+                return Err(AppError::conflict("déjà existant"));
+            }
+            let mut cols = Vec::new();
+            let mut vals: Vec<DbValue> = Vec::new();
+            for col in &def.columns {
+                if let Some(v) = obj.get(col.as_str()) {
+                    cols.push(quote_ident(col));
+                    vals.push(json_to_db_value(v));
+                }
+            }
+            if cols.is_empty() {
+                return Err(AppError::bad_request("aucune colonne fournie"));
+            }
+            let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "INSERT INTO {} ({}) VALUES ({})",
+                def.sql_name,
+                cols.join(", "),
+                placeholders
+            );
+            con.execute(&sql, params_from_iter(vals)).map_err(db_err)?;
+            fetch_one(&def, &pk_vals, &con)?
         }
-        if cols.is_empty() {
-            return Err(AppError::bad_request("aucune colonne fournie"));
-        }
-        let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        let sql = format!(
-            "INSERT INTO {} ({}) VALUES ({})",
-            def.sql_name,
-            cols.join(", "),
-            placeholders
-        );
-        con.execute(&sql, params_from_iter(vals)).map_err(db_err)?;
-        fetch_one(&def, &pk_vals, &con)?
     };
     match result {
         Some(row) => Ok((StatusCode::CREATED, Json(row))),
@@ -873,10 +941,11 @@ async fn table_schema(
 /// Ligne renvoyée par `GET /api/meta/references` : une référence du graphe.
 ///
 /// `table` (source) et `target_table` sont traduits en nom d'API master data
-/// quand la table en a un (ex. `dim_scenario` → `scenarios`, `sat_perimeter` →
-/// `perimeter`) ; sinon le nom SQL est conservé (ex. `stg_entry` qui n'est pas
-/// une table master data CRUD, ou `dim_ruleset` / `dim_rule`). Le front filtre
-/// donc sur `stg_entry` / `perimeter` pour dériver le mapping dimension → table.
+/// quand la table en a un (ex. `dim_consolidation` → `consolidations`,
+/// `sat_perimeter` → `perimeter`) ; sinon le nom SQL est conservé (ex.
+/// `stg_entry` qui n'est pas une table master data CRUD, ou `dim_ruleset` /
+/// `dim_rule`). Le front filtre donc sur `stg_entry` / `perimeter` pour dériver
+/// le mapping dimension → table.
 #[derive(serde::Serialize)]
 struct ReferenceDto {
     table: String,

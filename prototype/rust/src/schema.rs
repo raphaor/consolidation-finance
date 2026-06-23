@@ -32,6 +32,11 @@ pub const DDL_SEQ_ENTRY: &str = "CREATE SEQUENCE IF NOT EXISTS seq_entry START 1
 /// /api/entries`.
 pub const DDL_SEQ_STG_ENTRY: &str = "CREATE SEQUENCE IF NOT EXISTS seq_stg_entry START 1;";
 
+/// Séquence d'identifiants auto-incrémentés pour `dim_consolidation` (PK
+/// technique — l'identité métier est la clé naturelle à 5 éléments). Remplace
+/// l'ancien `code` textuel de `dim_scenario`.
+pub const DDL_SEQ_CONSOLIDATION: &str = "CREATE SEQUENCE IF NOT EXISTS seq_consolidation START 1;";
+
 // --- Config applicative (singleton d'instance) --------------------------------
 
 /// 0. app_config : configuration de l'instance (clé/valeur).
@@ -93,28 +98,36 @@ CREATE TABLE dim_variant (
 
 // --- Dimensions (master data) -------------------------------------------------
 
-/// 1. dim_scenario v2 : scénario de consolidation, objet composite.
+/// 1. dim_consolidation (ex dim_scenario) : définition de consolidation, objet composite.
 ///
-/// Le scénario agrège toutes les références nécessaires à un run : catégorie,
-/// période d'entrée, devise de présentation, variante, ruleset (nullable) et
-/// jeu de taux. Le pivot, lui, est applicatif (`app_config.pivot_currency`).
-/// Le taux N-1 (`close_n1`) est lu via `sat_exchange_rate.taux_ouverture` porté
-/// par la période N — aucune période antérieure requise (1ʳᵉ consolidation
-/// possible, avec ou sans à-nouveau).
-/// Cf. SPEC_SCENARIO_V2.md §5.
-pub const DDL_DIM_SCENARIO: &str = "\
-CREATE TABLE dim_scenario (
-    code                  TEXT PRIMARY KEY,
-    libelle               TEXT,
-    category              TEXT,   -- FK dim_scenario_category ('REEL', 'BUDGET'…)
-    entry_period          TEXT,   -- FK dim_period ('2024')
-    presentation_currency TEXT,   -- FK dim_currency ('EUR')
-    variant               TEXT,   -- FK dim_variant ('BASE')
-    ruleset_code          TEXT,   -- FK dim_ruleset (NULL = pas de règles)
-    rate_set              TEXT,   -- FK dim_rate_set
-    perimeter_set         TEXT,   -- FK dim_perimeter_set : jeu de périmètre du run (cf. Q35)
-    statut                TEXT,   -- 'ouvert' / 'verrouillé'
-    a_nouveau_scenario    TEXT    -- FK dim_scenario : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2
+/// Une consolidation est définie par sa **clé naturelle à 5 éléments** —
+/// (phase, exercice, jeu de périmètre, variante, devise de présentation) —
+/// matérialisée par une contrainte UNIQUE. `id` est une PK technique auto
+/// (l'ancien `code` textuel disparaît). Les saisies ne référencent pas la
+/// consolidation : elles sont au grain **remontée** (phase + exercice) via
+/// `stg_entry.phase`. `fact_entry` référence la consolidation par `consolidation_id`.
+///
+/// `perimeter_period` et `rate_period` rendent explicites les périodes du
+/// périmètre et des taux (défaut = exercice). Le taux N-1 (`close_n1`) vient de
+/// `sat_exchange_rate.taux_ouverture` porté par la période de taux.
+pub const DDL_DIM_CONSOLIDATION: &str = "\
+CREATE TABLE dim_consolidation (
+    id                          INTEGER DEFAULT nextval('seq_consolidation') PRIMARY KEY,
+    libelle                     TEXT,
+    -- Clé naturelle (identité métier) :
+    phase                       TEXT,   -- FK dim_scenario_category ('REEL', 'BUDGET'…)
+    exercice                    TEXT,   -- FK dim_period ('2024') — sélectionne la remontée
+    perimeter_set               TEXT,   -- FK dim_perimeter_set
+    variant                     TEXT,   -- FK dim_variant ('BASE')
+    presentation_currency       TEXT,   -- FK dim_currency ('EUR')
+    -- Hors clé (paramètres de traitement) :
+    perimeter_period            TEXT,   -- FK dim_period (défaut = exercice)
+    rate_set                    TEXT,   -- FK dim_rate_set
+    rate_period                 TEXT,   -- FK dim_period (défaut = exercice)
+    ruleset_code                TEXT,   -- FK dim_ruleset (NULL = pas de règles)
+    a_nouveau_consolidation_id  INTEGER, -- FK dim_consolidation : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2
+    statut                      TEXT,   -- 'brouillon' / 'ouvert' / 'verrouillé'
+    UNIQUE (phase, exercice, perimeter_set, variant, presentation_currency)
 );";
 
 /// 2. dim_entity : entité du groupe (hiérarchie, devise fonctionnelle).
@@ -426,9 +439,12 @@ CREATE TABLE IF NOT EXISTS dim_value_list (
 
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
-/// 9. stg_entry : saisie brute — mêmes dimensions que fact_entry sans `level`,
-/// **plus** une colonne `source` non-dimensionnelle (métadonnée de provenance,
-/// NON propagée par le pipeline).
+/// 9. stg_entry : saisie brute — au grain **remontée** (phase + entry_period).
+/// `phase` remplace l'ancien `scenario` : les saisies ne référencent plus une
+/// consolidation mais la remontée (phase + exercice), partagée entre toutes les
+/// consolidations qui la consomment. Mêmes autres dimensions que `fact_entry`
+/// sans `level`/`consolidation_id`, **plus** une colonne `source` non-
+/// dimensionnelle (métadonnée de provenance, NON propagée par le pipeline).
 ///
 /// `id` (PK auto-incrémentée via `seq_stg_entry`) : rend chaque ligne stable
 /// pour l'édition/suppression unitaire via l'API REST. Les imports CSV ne
@@ -436,7 +452,7 @@ CREATE TABLE IF NOT EXISTS dim_value_list (
 pub const DDL_STG_ENTRY: &str = "\
 CREATE TABLE stg_entry (
     id           INTEGER DEFAULT nextval('seq_stg_entry') PRIMARY KEY,
-    scenario     TEXT,
+    phase        TEXT,
     entity       TEXT,
     entry_period TEXT,
     period       TEXT,
@@ -456,24 +472,27 @@ CREATE TABLE stg_entry (
 
 // --- Table de faits : écritures aux 4 niveaux de stockage ---------------------
 
-/// 10. fact_entry : table de faits — écritures consolidées aux 4 niveaux.
+/// 10. fact_entry : table de faits — écritures consolidées aux 3 niveaux.
+/// `consolidation_id` (FK dim_consolidation) isole les résultats d'un run (une
+/// consolidation). `phase` est la dimension propagée issue de la remontée.
 pub const DDL_FACT_ENTRY: &str = "\
 CREATE TABLE fact_entry (
-    id           INTEGER DEFAULT nextval('seq_entry'),
-    scenario     TEXT,
-    entity       TEXT,
-    entry_period TEXT,
-    period       TEXT,
-    account      TEXT,
-    flow         TEXT,
-    currency     TEXT,
-    nature       TEXT NOT NULL,
-    partner      TEXT,
-    share        TEXT,
-    analysis     TEXT,
-    analysis2    TEXT,
-    level        TEXT CHECK (level IN ('corporate', 'converted', 'consolidated')),
-    amount       DECIMAL(18,2),
+    id               INTEGER DEFAULT nextval('seq_entry'),
+    consolidation_id INTEGER,
+    phase            TEXT,
+    entity           TEXT,
+    entry_period     TEXT,
+    period           TEXT,
+    account          TEXT,
+    flow             TEXT,
+    currency         TEXT,
+    nature           TEXT NOT NULL,
+    partner          TEXT,
+    share            TEXT,
+    analysis         TEXT,
+    analysis2        TEXT,
+    level            TEXT CHECK (level IN ('corporate', 'converted', 'consolidated')),
+    amount           DECIMAL(18,2),
     PRIMARY KEY (id)
 );";
 
@@ -490,16 +509,17 @@ CREATE TABLE fact_entry (
 /// Ordre des nouvelles tables (SPEC_SCENARIO_V2.md §8.1) :
 /// - `app_config` et `dim_rate_set` **avant** `sat_exchange_rate` (FK logique).
 /// - `dim_scenario_category`, `dim_variant`, `dim_ruleset` **avant**
-///   `dim_scenario`.
+///   `dim_consolidation`.
 pub const ALL_DDL: &[&str] = &[
     DDL_SEQ_ENTRY,
     DDL_SEQ_STG_ENTRY,
+    DDL_SEQ_CONSOLIDATION,
     DDL_APP_CONFIG,
     DDL_DIM_SCENARIO_CATEGORY,
     DDL_DIM_RATE_SET,
     DDL_DIM_PERIMETER_SET,
     DDL_DIM_VARIANT,
-    DDL_DIM_SCENARIO,
+    DDL_DIM_CONSOLIDATION,
     DDL_DIM_ENTITY,
     DDL_DIM_PERIOD,
     DDL_DIM_ACCOUNT,
@@ -549,12 +569,13 @@ pub const ALL_DROP: &[&str] = &[
     "DROP TABLE IF EXISTS dim_account;",
     "DROP TABLE IF EXISTS dim_period;",
     "DROP TABLE IF EXISTS dim_entity;",
-    "DROP TABLE IF EXISTS dim_scenario;",
+    "DROP TABLE IF EXISTS dim_consolidation;",
     "DROP TABLE IF EXISTS dim_variant;",
     "DROP TABLE IF EXISTS dim_perimeter_set;",
     "DROP TABLE IF EXISTS dim_rate_set;",
     "DROP TABLE IF EXISTS dim_scenario_category;",
     "DROP TABLE IF EXISTS app_config;",
+    "DROP SEQUENCE IF EXISTS seq_consolidation;",
     "DROP SEQUENCE IF EXISTS seq_stg_entry;",
     "DROP SEQUENCE IF EXISTS seq_entry;",
 ];

@@ -31,7 +31,8 @@ fn main() {
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
-    let params = ConvertParams::load_params(&con, "REEL").expect("load_params");
+    // La consolidation REEL seedée porte l'id 1 (seed explicite déterministe).
+    let params = ConvertParams::load_params(&con, 1).expect("load_params");
     run_pipeline(&con, &params).expect("run_pipeline");
 
     // --- Export CSV (un onglet plat : colonne `level` = stg / corporate / … ) ---

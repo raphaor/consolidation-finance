@@ -11,7 +11,7 @@
 //! | `scenario_categories.csv`   | `dim_scenario_category`  | lecture directe                    |
 //! | `variants.csv`              | `dim_variant`            | lecture directe                    |
 //! | `rate_sets.csv`             | `dim_rate_set`           | lecture directe                    |
-//! | `scenarios.csv`             | `dim_scenario`           | 9 colonnes v2                      |
+//! | `consolidations.csv`        | `dim_consolidation`      | PK auto `id` (colonnes sans id)    |
 //! | `entities.csv`              | `dim_entity`             | lecture directe                    |
 //! | `periods.csv`               | `dim_period`             | lecture directe                    |
 //! | `sous_classes.csv`          | `dim_sous_classe`        | lecture directe                    |
@@ -22,13 +22,13 @@
 //! | `methods.csv`               | `dim_method`             | CAST `consolidated` AS BOOLEAN     |
 //! | `perimeter.csv`             | `sat_perimeter`          | CAST `entree`/`sortie` AS BOOLEAN  |
 //! | `rates.csv`                 | `sat_exchange_rate`      | `rate_set` en 1ère colonne (v2)    |
-//! | `entries.csv`               | `stg_entry`              | lecture directe                    |
+//! | `entries.csv`               | `stg_entry`              | 1ère colonne `phase`               |
 //!
 //! Les cellules vides sont lues comme NULL par `read_csv_auto`.
 //!
 //! L'ordre d'insertion respecte les FK logiques (cf. schema.rs commentaire
 //! `ALL_DDL`) : `app_config` et `dim_rate_set` avant `sat_exchange_rate` ;
-//! `dim_scenario_category`, `dim_variant` avant `dim_scenario`.
+//! `dim_scenario_category`, `dim_variant` avant `dim_consolidation`.
 //!
 //! # Registre déclaratif
 //!
@@ -65,7 +65,7 @@ struct CsvMapping {
 ///
 /// L'ordre suit les dépendances FK logiques (cf. `ALL_DDL` dans schema.rs) :
 /// `app_config` et `dim_rate_set` avant `sat_exchange_rate` ;
-/// `dim_scenario_category`, `dim_variant` avant `dim_scenario`.
+/// `dim_scenario_category`, `dim_variant` avant `dim_consolidation`.
 static CSV_MAPPINGS: &[CsvMapping] = &[
     // 1. app_config : singleton clé/valeur (ex: pivot_currency=EUR).
     CsvMapping {
@@ -75,7 +75,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 2. dim_scenario_category : catégorie du scénario (REEL, BUDGET, ...).
+    // 2. dim_scenario_category : phase de la remontée (REEL, BUDGET, ...).
     CsvMapping {
         file: "scenario_categories.csv",
         table: "dim_scenario_category",
@@ -83,7 +83,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 3. dim_variant : variante du scénario (réel, budget, ...).
+    // 3. dim_variant : variante de la consolidation (réel, budget, ...).
     CsvMapping {
         file: "variants.csv",
         table: "dim_variant",
@@ -107,23 +107,27 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 5. dim_scenario (v2) : 9 colonnes — category, entry_period,
-    //    presentation_currency, variant, ruleset_code (nullable), rate_set, statut.
+    // 5. dim_consolidation (ex dim_scenario) : PK technique auto `id`, omise du
+    //    mapping (laissée au DEFAULT nextval). Colonnes hors-id : phase, exercice,
+    //    perimeter_set, variant, presentation_currency, perimeter_period, rate_set,
+    //    rate_period, ruleset_code (nullable), a_nouveau_consolidation_id (nullable),
+    //    statut.
     CsvMapping {
-        file: "scenarios.csv",
-        table: "dim_scenario",
+        file: "consolidations.csv",
+        table: "dim_consolidation",
         columns: &[
-            "code",
             "libelle",
-            "category",
-            "entry_period",
-            "presentation_currency",
-            "variant",
-            "ruleset_code",
-            "rate_set",
+            "phase",
+            "exercice",
             "perimeter_set",
+            "variant",
+            "presentation_currency",
+            "perimeter_period",
+            "rate_set",
+            "rate_period",
+            "ruleset_code",
+            "a_nouveau_consolidation_id",
             "statut",
-            "a_nouveau_scenario",
         ],
         casts: &[],
         use_explicit_schema: false,
@@ -267,12 +271,13 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 15. stg_entry : saisie brute (liasses sociales) — 13 colonnes v2.
+    // 15. stg_entry : saisie brute (liasses sociales) — 13 colonnes. La 1ère est
+    //     `phase` (remontée), pas `scenario`.
     CsvMapping {
         file: "entries.csv",
         table: "stg_entry",
         columns: &[
-            "scenario",
+            "phase",
             "entity",
             "entry_period",
             "period",

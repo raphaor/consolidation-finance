@@ -2,7 +2,7 @@
 //!
 //! Deux endpoints :
 //! - `POST /api/import/entries` : ajoute (append) dans `stg_entry` au format
-//!   EDB (`Scenario, Entity, Entry_period, Period, Account, Flow, Currency,
+//!   EDB (`Phase, Entity, Entry_period, Period, Account, Flow, Currency,
 //!   Nature, Audit_id, Partner*, Share*, Analysis*, Amount`).
 //! - `POST /api/import/rates` : upsert dans `sat_exchange_rate`
 //!   (`currency_source, period, taux_close, taux_moyen`).
@@ -150,7 +150,7 @@ async fn import_entries(
     require_columns(
         &header,
         &[
-            "scenario",
+            "phase",
             "entity",
             "entry_period",
             "period",

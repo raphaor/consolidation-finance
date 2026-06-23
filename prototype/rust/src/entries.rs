@@ -36,7 +36,7 @@ pub const MANUAL_SOURCE: &str = "MANUAL";
 /// Colonnes dimensionnelles de `stg_entry` dans l'ordre canonique du schéma
 /// (hors `id`, `source`, `amount`). Sert à générer INSERT / UPDATE cohérents.
 const DIM_COLS: &[&str] = &[
-    "scenario",
+    "phase",
     "entity",
     "entry_period",
     "period",
@@ -54,7 +54,7 @@ const DIM_COLS: &[&str] = &[
 /// `required` du graphe `references_for("stg_entry")`, durci ici pour un
 /// message d'erreur explicite par champ manquant.
 const REQUIRED_COLS: &[&str] = &[
-    "scenario",
+    "phase",
     "entity",
     "entry_period",
     "period",
@@ -71,7 +71,7 @@ const REQUIRED_COLS: &[&str] = &[
 #[derive(Deserialize, Debug, Default, Clone)]
 pub struct EntryInput {
     #[serde(default)]
-    pub scenario: Option<String>,
+    pub phase: Option<String>,
     #[serde(default)]
     pub entity: Option<String>,
     #[serde(default)]
@@ -101,7 +101,7 @@ pub struct EntryInput {
 /// Récupère la valeur d'une colonne par nom dans un [`EntryInput`].
 fn col_value(row: &EntryInput, col: &str) -> Option<String> {
     match col {
-        "scenario" => row.scenario.clone(),
+        "phase" => row.phase.clone(),
         "entity" => row.entity.clone(),
         "entry_period" => row.entry_period.clone(),
         "period" => row.period.clone(),
@@ -140,7 +140,7 @@ fn row_params(row: &EntryInput, source: &str) -> Result<Vec<DbValue>, AppError> 
         }
     };
     let mut vals: Vec<DbValue> = vec![
-        text(&row.scenario),
+        text(&row.phase),
         text(&row.entity),
         text(&row.entry_period),
         text(&row.period),
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn row_params_complete_null_pour_vides() {
         let row = EntryInput {
-            scenario: Some("REEL".into()),
+            phase: Some("REEL".into()),
             entity: Some("M".into()),
             nature: Some("LIASSE".into()),
             amount: Some("100".into()),
@@ -459,7 +459,7 @@ mod tests {
         let v = row_params(&row, "MANUAL").unwrap();
         // 12 dims + source + amount = 14
         assert_eq!(v.len(), 14);
-        // scenario rempli
+        // phase rempli
         assert!(matches!(v[0], DbValue::Text(ref s) if s == "REEL"));
         // partner (index 8) vide → Null
         assert!(matches!(v[8], DbValue::Null));

@@ -28,9 +28,14 @@
 //! Le « grain » est l'ensemble des dimensions qui identifient un solde de clôture
 //! **unique**. La reconstruction agrège au grain ; l'écrasement est ciblé au grain.
 //!
-//! Grain actuel : **grain complet** (toutes les dimensions propagées) privé de
-//! `flow` (ex. `scenario, entity, entry_period, period, account, currency,
-//! nature, partner, share, analysis, analysis2` + customs).
+//! Grain actuel : **`consolidation_id`** (isolation d'un run) ++ **grain complet**
+//! (toutes les dimensions propagées) privé de `flow` (ex. `phase, entity,
+//! entry_period, period, account, currency, nature, partner, share, analysis,
+//! analysis2` + customs).
+//!
+//! `consolidation_id` est en tête du grain pour que les clôtures de consolidations
+//! différentes ne fusionnent jamais (un même grain dimensionnel appartient à un
+//! seul run).
 //!
 //! La dimension `flow` est **hors grain** : la clôture est identifiée par
 //! `fl.flux_de_report` (qui vaut F99 pour tous les constituants reportant à F99),
@@ -68,17 +73,20 @@ use duckdb::Connection;
 ///    par (clôture × grain).
 pub fn materialize_closures(con: &Connection, level: &str) -> duckdb::Result<usize> {
     let dims = dimensions::load_all(con)?;
-    // Grain de reconstruction = grain COMPLET (toutes les dimensions propagées),
-    // sans `flow` (la clôture est identifiée par `fl.flux_de_report`, pas par le
-    // flux source). Les dimensions analytiques (`partner`, `share`, `analysis`…)
-    // font partie du grain : chaque « dont » a sa propre clôture (ex. la F99 du
-    // partner B = Σ de ses constituants partner B), et la clôture principale
-    // (analytiques NULL) ne somme que les constituants principaux. Les totaux
-    // (bilan, compte de résultat) excluent ensuite les « dont » via `IS NULL`.
-    let grain_cols: Vec<&str> = dimensions::propagated_cols(&dims)
-        .into_iter()
-        .filter(|c| *c != "flow")
-        .collect();
+    // Grain de reconstruction = `consolidation_id` (isole les runs) ++ grain
+    // COMPLET (toutes les dimensions propagées), sans `flow` (la clôture est
+    // identifiée par `fl.flux_de_report`, pas par le flux source). Les dimensions
+    // analytiques (`partner`, `share`, `analysis`…) font partie du grain : chaque
+    // « dont » a sa propre clôture (ex. la F99 du partner B = Σ de ses
+    // constituants partner B), et la clôture principale (analytiques NULL) ne
+    // somme que les constituants principaux. Les totaux (bilan, compte de
+    // résultat) excluent ensuite les « dont » via `IS NULL`.
+    let mut grain_cols: Vec<&str> = vec!["consolidation_id"];
+    grain_cols.extend(
+        dimensions::propagated_cols(&dims)
+            .into_iter()
+            .filter(|c| *c != "flow"),
+    );
     let grain_list = grain_cols.join(", ");
     let e_grain_list = grain_cols
         .iter()
