@@ -1232,6 +1232,20 @@ fn build_ruleset_detail(con: &Connection, code: &str) -> Result<RulesetDetail, A
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print_help();
+        std::process::exit(0);
+    }
+    if let Err(msg) = validate_args(&args[1..]) {
+        eprintln!("conso-server: {msg}");
+        eprintln!();
+        eprintln!("Usage: conso-server [--help]");
+        eprintln!("Essayez 'conso-server --help' pour plus d'informations.");
+        std::process::exit(2);
+    }
+
     // --- Configuration via env (pas de clap pour un prototype) ---
     let port: u16 = std::env::var("CONSO_PORT")
         .ok()
@@ -1401,4 +1415,42 @@ async fn main() {
         "▶ conso-server en écoute sur http://localhost:{port} (frontend servi depuis {web_dir})"
     );
     axum::serve(listener, app).await.unwrap();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Aide (--help / -h) et validation des arguments
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn print_help() {
+    println!(
+        "conso-server — Serveur HTTP exposant le moteur de consolidation via une API REST.
+
+Sert aussi le frontend React buildé (SPA) si CONSO_WEB_DIR existe. Au démarrage,
+les CSV ne sont réimportés que si la base est vierge — sinon la base DuckDB
+existante est conservée (éditions UI préservées).
+
+USAGE
+    conso-server [--help]
+
+VARIABLES D'ENVIRONNEMENT
+    CONSO_PORT          Port d'écoute (défaut : 3000)
+    CONSO_DB_PATH       Fichier DuckDB (défaut : conso.duckdb)
+    CONSO_CSV_DIR       Répertoire des CSV à importer (défaut : data)
+    CONSO_WEB_DIR       Répertoire du frontend buildé (défaut : ../../web/dist)
+    CONSO_FORCE_RESEED  1 = forcer le rechargement CSV au démarrage (DROP + import + pipeline)
+
+EXEMPLE
+    CONSO_PORT=8080 CONSO_CSV_DIR=data conso-server"
+    );
+}
+
+fn validate_args(args: &[String]) -> Result<(), String> {
+    for a in args {
+        if a == "-h" || a == "--help" {
+            // déjà traité avant l'appel
+        } else {
+            return Err(format!("argument inconnu : '{a}'"));
+        }
+    }
+    Ok(())
 }

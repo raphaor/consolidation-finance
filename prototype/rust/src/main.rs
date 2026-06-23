@@ -22,6 +22,21 @@ use conso_engine::{
 use duckdb::Connection;
 
 fn main() {
+    // --- Parsing manuel des arguments (pas de clap pour un prototype) ---
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print_help();
+        std::process::exit(0);
+    }
+    if let Err(msg) = validate_args(&args[1..]) {
+        eprintln!("conso-engine: {msg}");
+        eprintln!();
+        eprintln!("Usage: conso-engine [--db <path>] [--csv-dir <dir>]");
+        eprintln!("Essayez 'conso-engine --help' pour plus d'informations.");
+        std::process::exit(2);
+    }
+
     let title = "  SCAFFOLD RUST — Moteur de consolidation (Rust + DuckDB sur ARM64)";
     let pad = 86usize.saturating_sub(title.len());
     let centered = format!("{}{}", title, " ".repeat(pad));
@@ -30,8 +45,6 @@ fn main() {
     println!("║{}║", centered);
     println!("╚{}╝", "═".repeat(86));
 
-    // --- Parsing manuel des arguments (pas de clap pour un prototype) ---
-    let args: Vec<String> = std::env::args().collect();
     let db_path = args
         .iter()
         .position(|a| a == "--db")
@@ -136,4 +149,46 @@ fn main() {
     println!("{}", "═".repeat(88));
 
     std::process::exit(if ok { 0 } else { 1 });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Aide (--help / -h) et validation des arguments
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn print_help() {
+    println!(
+        "conso-engine — Exécute le pipeline de consolidation en une fois (CLI one-shot).
+
+Enchaîne : création du schéma → import CSV → pipeline A→B→C→D → validation des clôtures.
+
+USAGE
+    conso-engine [--db <path>] [--csv-dir <dir>]
+
+ARGUMENTS
+    --db <path>       Fichier DuckDB utilisé (défaut : conso.duckdb)
+    --csv-dir <dir>   Répertoire contenant les CSV à importer (défaut : data)
+
+EXEMPLE
+    conso-engine --db ma_base.duckdb --csv-dir data"
+    );
+}
+
+fn validate_args(args: &[String]) -> Result<(), String> {
+    let value_flags = ["--db", "--csv-dir"];
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "-h" || a == "--help" {
+            // déjà traité avant l'appel
+        } else if value_flags.contains(&a.as_str()) {
+            if i + 1 >= args.len() || args[i + 1].starts_with("--") {
+                return Err(format!("l'argument '{a}' requiert une valeur"));
+            }
+            i += 1;
+        } else {
+            return Err(format!("argument inconnu : '{a}'"));
+        }
+        i += 1;
+    }
+    Ok(())
 }

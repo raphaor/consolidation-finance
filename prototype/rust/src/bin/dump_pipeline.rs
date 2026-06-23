@@ -14,6 +14,20 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print_help();
+        std::process::exit(0);
+    }
+    if let Err(msg) = validate_args(&args[1..]) {
+        eprintln!("dump_pipeline: {msg}");
+        eprintln!();
+        eprintln!("Usage: dump_pipeline");
+        eprintln!("Essayez 'dump_pipeline --help' pour plus d'informations.");
+        std::process::exit(2);
+    }
+
     let con = Connection::open_in_memory().expect("open_in_memory");
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
@@ -137,4 +151,38 @@ fn print_counts(con: &Connection, sql: &str) {
         println!("  {label:<22} {n:>4}");
     }
     println!("  {:<22} {:>4}", "TOTAL", total);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Aide (--help / -h) et validation des arguments
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn print_help() {
+    println!(
+        "dump_pipeline — Diagnostic du pipeline de consolidation.
+
+Rejoue seed_all + pipeline (scénario REEL) en mémoire, puis exporte stg_entry et
+fact_entry (tous niveaux : corporate / converted / consolidated) dans un CSV
+exploitable sous Excel, et affiche un résumé des décomptes sur la sortie standard.
+
+USAGE
+    dump_pipeline
+
+SORTIE
+    dump_pipeline.csv dans le répertoire courant
+
+ARGUMENTS
+    (aucun)"
+    );
+}
+
+fn validate_args(args: &[String]) -> Result<(), String> {
+    for a in args {
+        if a == "-h" || a == "--help" {
+            // déjà traité avant l'appel
+        } else {
+            return Err(format!("argument inconnu : '{a}'"));
+        }
+    }
+    Ok(())
 }

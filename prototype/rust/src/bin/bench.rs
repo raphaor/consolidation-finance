@@ -36,6 +36,19 @@ const ENTRY_PERIOD: &str = "2024";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print_help();
+        std::process::exit(0);
+    }
+    if let Err(msg) = validate_args(&args[1..]) {
+        eprintln!("conso-bench: {msg}");
+        eprintln!();
+        eprintln!("Usage: conso-bench [--rows <N>] [--db <path>]");
+        eprintln!("Essayez 'conso-bench --help' pour plus d'informations.");
+        std::process::exit(2);
+    }
+
     let rows: usize = arg_value(&args, "--rows")
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(1_000_000);
@@ -475,4 +488,48 @@ fn truncate(s: &str, n: usize) -> String {
     } else {
         format!("…{}", &s[s.len() - (n - 1)..])
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Aide (--help / -h) et validation des arguments
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn print_help() {
+    println!(
+        "conso-bench — Benchmark de performance du pipeline sur gros volumes.
+
+Génère un jeu réaliste (≈ 60 entités × 200 comptes, 5 devises, variations de
+périmètre), exécute le pipeline A→B→C→D sur une DuckDB fichier, puis valide les
+identités de clôture et les invariants F80/F81.
+
+USAGE
+    conso-bench [--rows <N>] [--db <path>]
+
+ARGUMENTS
+    --rows <N>     Nombre d'écritures brutes générées dans stg_entry (défaut : 1000000)
+    --db <path>    Fichier DuckDB (défaut : $TEMP/conso_bench.duckdb)
+
+EXEMPLE
+    conso-bench --rows 5000000"
+    );
+}
+
+fn validate_args(args: &[String]) -> Result<(), String> {
+    let value_flags = ["--rows", "--db"];
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "-h" || a == "--help" {
+            // déjà traité avant l'appel
+        } else if value_flags.contains(&a.as_str()) {
+            if i + 1 >= args.len() || args[i + 1].starts_with("--") {
+                return Err(format!("l'argument '{a}' requiert une valeur"));
+            }
+            i += 1;
+        } else {
+            return Err(format!("argument inconnu : '{a}'"));
+        }
+        i += 1;
+    }
+    Ok(())
 }
