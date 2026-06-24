@@ -15,6 +15,9 @@
 import type {
   BilanRow,
   Characteristic,
+  Coefficient,
+  CoefficientOperand,
+  CoefficientPreview,
   CustomReference,
   DataHealthReport,
   DimensionInfo,
@@ -219,6 +222,20 @@ export const api = {
     ) => putJson<RulesetDetail>(`/rulesets/${code}`, { code, ...body }),
     remove: (code: string) =>
       deleteJson<{ deleted: number }>(`/rulesets/${code}`),
+  },
+  // Coefficients (moteur de formules — volet 1). Bibliothèque de formules
+  // nommées (natives + utilisateur) consommées par le coefficient d'une règle.
+  // `preview` valide + évalue une formule sans la sauvegarder (preview live).
+  coefficients: {
+    list: () => getJson<Coefficient[]>('/coefficients'),
+    operands: () => getJson<CoefficientOperand[]>('/coefficients/operands'),
+    preview: (body: { expression: string; samples?: Record<string, number> }) =>
+      postJsonRaw<CoefficientPreview>('/coefficients/preview', body),
+    create: (body: { code: string; libelle?: string; expression: string }) =>
+      postJsonRaw<Coefficient>('/coefficients', body),
+    update: (code: string, body: { libelle?: string; expression: string }) =>
+      putJson<Coefficient>(`/coefficients/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/coefficients/${code}`),
   },
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.

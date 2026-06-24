@@ -47,8 +47,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
-    characteristics, create_schema, custom_references, dimensions, entries, export, import,
-    load_all, masterdata, money::Money, run_pipeline, run_pipeline_with_hook,
+    characteristics, coefficients, create_schema, custom_references, dimensions, entries, export,
+    import, load_all, masterdata, money::Money, run_pipeline, run_pipeline_with_hook,
     seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
 };
 
@@ -1329,6 +1329,13 @@ async fn main() {
         if let Err(e) = custom_references::migrate_native(&con) {
             eprintln!("   ⚠ migrate_native (non bloquant) : {e}");
         }
+        // Migration idempotente : garantit la table `dim_coefficient` + les
+        // coefficients natifs sur une base existante (volet formules, Q43), sans
+        // reset. Sinon GET /api/coefficients et les règles qui les référencent
+        // échoueraient (table absente).
+        if let Err(e) = coefficients::ensure_schema(&con) {
+            eprintln!("   ⚠ ensure_schema coefficients (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");
@@ -1437,6 +1444,7 @@ async fn main() {
         .merge(characteristics::router())
         .merge(custom_references::router())
         .merge(value_lists::router())
+        .merge(coefficients::router())
         .merge(import::router())
         .merge(export::router())
         .fallback_service(serve_dir)

@@ -537,19 +537,33 @@ function RuleFormModal({
   const [customReferences, setCustomReferences] = useState<CustomReference[]>([]);
   // Enums natifs (CHECK du DDL) disponibles pour les sélections `attr`.
   const [nativeEnums, setNativeEnums] = useState<NativeEnum[]>([]);
+  // Codes de coefficient de la bibliothèque (moteur de formules, volet 1) —
+  // natifs + utilisateur ; `constant` (littéral inline) est ajouté à la fin.
+  // Repli sur COEFF_TYPES si l'API est injoignable (serveur obsolète).
+  const [coeffOptions, setCoeffOptions] = useState<{ code: string; label: string }[]>(
+    COEFF_TYPES.map((c) => ({ code: c, label: c })),
+  );
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const [cs, refs, enums] = await Promise.all([
+        const [cs, refs, enums, coeffs] = await Promise.all([
           api.characteristics.list(),
           api.customReferences.list(),
           api.nativeEnums(),
+          api.coefficients.list(),
         ]);
         if (!cancelled) {
           setCharacteristics(cs);
           setCustomReferences(refs);
           setNativeEnums(enums);
+          setCoeffOptions([
+            ...coeffs.map((c) => ({
+              code: c.code,
+              label: c.libelle ? `${c.code} — ${c.libelle}` : c.code,
+            })),
+            { code: 'constant', label: 'constant (littéral)' },
+          ]);
         }
       } catch {
         if (!cancelled) {
@@ -896,9 +910,9 @@ function RuleFormModal({
                         })
                       }
                     >
-                      {COEFF_TYPES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
+                      {coeffOptions.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.label}
                         </option>
                       ))}
                     </select>

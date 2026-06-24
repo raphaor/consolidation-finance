@@ -437,6 +437,25 @@ CREATE TABLE IF NOT EXISTS dim_value_list (
     libelle TEXT
 );";
 
+/// 8l. dim_coefficient : bibliothèque de **coefficients** (moteur de formules,
+/// volet 1 — cf. `docs/FORMULES.md` §3, [Q43]).
+///
+/// Chaque coefficient est une **formule nommée** (`expression`, langage type
+/// Excel) compilée au grain d'une écriture de règle vers `(SQL, CoeffJoins)`
+/// (cf. `crate::coefficients`). `kind` distingue les coefficients **natifs**
+/// (`builtin`, seedés depuis `coefficients::BUILTINS`) des coefficients
+/// **utilisateur** (`user`). Comme les autres registres pilotables, la table
+/// **survit au reset** (CREATE IF NOT EXISTS, hors `ALL_DROP`) : les coefficients
+/// utilisateur sont des actifs persistants. Les natifs sont (re)seedés à chaque
+/// `create_schema` (idempotent, INSERT OR IGNORE).
+pub const DDL_DIM_COEFFICIENT: &str = "\
+CREATE TABLE IF NOT EXISTS dim_coefficient (
+    code       TEXT PRIMARY KEY,
+    libelle    TEXT,
+    expression TEXT NOT NULL,
+    kind       TEXT NOT NULL DEFAULT 'user'
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — au grain **remontée** (phase + entry_period).
@@ -541,6 +560,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_CHARACTERISTIC_ATTRIBUTE,
     DDL_DIM_CUSTOM_REFERENCE,
     DDL_DIM_VALUE_LIST,
+    DDL_DIM_COEFFICIENT,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];
@@ -621,6 +641,10 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
     //    Marquées `native=TRUE` et verrouillées contre édition via l'API.
     //    Idempotent : INSERT OR IGNORE préserve les customs utilisateur.
     crate::custom_references::seed_native(con)?;
+
+    // 8. (Re)seeder les coefficients natifs (moteur de formules, volet 1).
+    //    Idempotent (INSERT OR IGNORE) ; les coefficients utilisateur survivent.
+    crate::coefficients::seed_builtins(con)?;
 
     Ok(())
 }

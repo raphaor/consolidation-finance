@@ -776,6 +776,33 @@ export interface ValueList {
   value_table: string;
 }
 
+// ---------- Coefficients (moteur de formules — volet 1, GET /api/coefficients) ----------
+// Une formule nommée évaluée au grain d'une écriture de règle. `kind` distingue
+// les coefficients natifs ('builtin', verrouillés) des coefficients utilisateur
+// ('user', modifiables en place). Cf. docs/FORMULES.md §3.
+export interface Coefficient {
+  code: string;
+  libelle: string | null;
+  expression: string;
+  kind: 'builtin' | 'user';
+}
+
+// Opérande disponible (catalogue de périmètre) : `token` s'insère entre [ ] dans
+// une formule ; `label` est l'affichage du panneau de références.
+export interface CoefficientOperand {
+  token: string;
+  label: string;
+}
+
+// Réponse de la preview live (POST /api/coefficients/preview).
+export interface CoefficientPreview {
+  ok: boolean;
+  value?: number;
+  error?: string;
+  sql?: string;
+  operands: string[];
+}
+
 // ---------- Références (graphe de jointures, GET /api/meta/references) ----------
 // Source de vérité serveur (engine/src/references.rs). `table` est en nom SQL
 // (ex. stg_entry, sat_perimeter, dim_*) ; `target_table` est traduit en nom de

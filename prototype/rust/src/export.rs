@@ -81,6 +81,18 @@ async fn export_all(State(state): State<Arc<AppState>>) -> Result<Json<JsonValue
             obj.insert((*t).to_string(), JsonValue::Array(rows));
         }
 
+        // Coefficients : seuls les **utilisateur** sont exportés (les natifs sont
+        // re-seedés par `create_schema` à l'import → éviter le doublon de PK).
+        obj.insert(
+            "dim_coefficient".to_string(),
+            JsonValue::Array(run_query(
+                &con,
+                "SELECT code, libelle, expression, kind \
+                 FROM dim_coefficient WHERE kind = 'user' ORDER BY code",
+                Vec::new(),
+            )?),
+        );
+
         let mut meta = Map::new();
         meta.insert(
             "format".to_string(),
@@ -127,6 +139,12 @@ async fn import_all(
             let n = insert_table(&con, t, obj.get(*t))?;
             counts.insert((*t).to_string(), JsonValue::Number(n.into()));
         }
+
+        // 4. Coefficients utilisateur (les natifs ont été re-seedés par
+        //    create_schema ; le paquet ne contient que les `kind = 'user'`).
+        let n_coef = insert_table(&con, "dim_coefficient", obj.get("dim_coefficient"))?;
+        counts.insert("dim_coefficient".to_string(), JsonValue::Number(n_coef.into()));
+
         JsonValue::Object(counts)
     };
 

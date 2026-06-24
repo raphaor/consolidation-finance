@@ -40,8 +40,10 @@
 //! par `dim_flow.flux_de_report`.
 
 pub mod characteristics;
+pub mod coefficients;
 pub mod custom_references;
 pub mod entries;
+pub mod formula;
 pub mod dimensions;
 pub mod export;
 pub mod import;
