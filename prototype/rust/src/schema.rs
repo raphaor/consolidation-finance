@@ -456,6 +456,36 @@ CREATE TABLE IF NOT EXISTS dim_coefficient (
     kind       TEXT NOT NULL DEFAULT 'user'
 );";
 
+/// 8m. dim_aggregate : **postes** (briques agrégées) du moteur d'indicateurs
+/// (volet 2 — cf. `docs/FORMULES.md` §4, [Q43]).
+///
+/// Un poste est une **sélection nommée** sur `fact_entry` : `level` + `definition`
+/// JSON (`{level, selection:[…]}`), agrégée en un montant. Consommé par
+/// `crate::indicators` (compilé en `SUM(amount) FILTER (WHERE …)`). Survit au
+/// reset comme les autres registres pilotables (hors `ALL_DROP`). Pas de natifs.
+pub const DDL_DIM_AGGREGATE: &str = "\
+CREATE TABLE IF NOT EXISTS dim_aggregate (
+    code       TEXT PRIMARY KEY,
+    libelle    TEXT,
+    level      TEXT NOT NULL,
+    definition TEXT NOT NULL
+);";
+
+/// 8n. dim_indicator : **indicateurs / KPI** — formules combinant des postes.
+///
+/// `expression` (langage `formula.rs`) + `grain` (JSON : dimensions de
+/// restitution) + `format` (%, ratio, nombre…). Compilé en une requête au grain
+/// par `crate::indicators`. **Jamais** réinjecté dans `fact_entry` (couche
+/// dérivée). Survit au reset.
+pub const DDL_DIM_INDICATOR: &str = "\
+CREATE TABLE IF NOT EXISTS dim_indicator (
+    code       TEXT PRIMARY KEY,
+    libelle    TEXT,
+    expression TEXT NOT NULL,
+    grain      TEXT,
+    format     TEXT
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — au grain **remontée** (phase + entry_period).
@@ -561,6 +591,8 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_CUSTOM_REFERENCE,
     DDL_DIM_VALUE_LIST,
     DDL_DIM_COEFFICIENT,
+    DDL_DIM_AGGREGATE,
+    DDL_DIM_INDICATOR,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];

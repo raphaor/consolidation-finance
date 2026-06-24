@@ -7,6 +7,7 @@ import { useHealth } from './hooks/useHealth';
 import { CaracteristiquesPage } from './pages/CaracteristiquesPage';
 import { CoefficientsPage } from './pages/CoefficientsPage';
 import { EcrituresPage } from './pages/EcrituresPage';
+import { IndicatorsPage } from './pages/IndicatorsPage';
 import { ImportPage } from './pages/ImportPage';
 import { MasterDataPage } from './pages/MasterDataPage';
 import { PipelinePage } from './pages/PipelinePage';
@@ -30,6 +31,7 @@ export default function App() {
       {page === 'schemas' && <SchemasJeuxPage />}
       {page === 'caracteristiques' && <CaracteristiquesPage />}
       {page === 'coefficients' && <CoefficientsPage />}
+      {page === 'indicateurs' && <IndicatorsPage />}
       {page === 'regles' && <RulesPage />}
       {page === 'import' && <ImportPage />}
     </Layout>

@@ -14,6 +14,7 @@ export type PageId =
   | 'schemas'
   | 'caracteristiques'
   | 'coefficients'
+  | 'indicateurs'
   | 'regles'
   | 'import';
 
@@ -33,6 +34,7 @@ const TABS: { id: PageId; label: string }[] = [
   { id: 'schemas', label: 'Schémas & jeux' },
   { id: 'caracteristiques', label: 'Attributs de dimension' },
   { id: 'coefficients', label: 'Coefficients' },
+  { id: 'indicateurs', label: 'Indicateurs' },
   { id: 'regles', label: 'Règles' },
   { id: 'import', label: 'Import' },
 ];

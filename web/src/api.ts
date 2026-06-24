@@ -20,6 +20,10 @@ import type {
   CoefficientPreview,
   CustomReference,
   DataHealthReport,
+  Aggregate,
+  Indicator,
+  IndicatorOperand,
+  IndicatorPreview,
   DimensionInfo,
   EntryInput,
   HealthStatus,
@@ -236,6 +240,34 @@ export const api = {
     update: (code: string, body: { libelle?: string; expression: string }) =>
       putJson<Coefficient>(`/coefficients/${code}`, { code, ...body }),
     remove: (code: string) => deleteJson<{ deleted: string }>(`/coefficients/${code}`),
+  },
+  // Indicateurs / KPI (moteur de formules — volet 2). Postes (agrégats nommés)
+  // + indicateurs (formules combinant des postes), calculés au grain.
+  aggregates: {
+    list: () => getJson<Aggregate[]>('/aggregates'),
+    create: (body: { code: string; libelle?: string; level: string; definition: object }) =>
+      postJsonRaw<Aggregate>('/aggregates', body),
+    update: (code: string, body: { libelle?: string; level: string; definition: object }) =>
+      putJson<Aggregate>(`/aggregates/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/aggregates/${code}`),
+  },
+  indicators: {
+    list: () => getJson<Indicator[]>('/indicators'),
+    operands: () => getJson<IndicatorOperand[]>('/indicators/operands'),
+    preview: (body: { expression: string; grain?: string[]; consolidation_id: number }) =>
+      postJsonRaw<IndicatorPreview>('/indicators/preview', body),
+    create: (body: {
+      code: string;
+      libelle?: string;
+      expression: string;
+      grain?: string[];
+      format?: string;
+    }) => postJsonRaw<Indicator>('/indicators', body),
+    update: (
+      code: string,
+      body: { libelle?: string; expression: string; grain?: string[]; format?: string },
+    ) => putJson<Indicator>(`/indicators/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/indicators/${code}`),
   },
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.

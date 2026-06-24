@@ -48,7 +48,7 @@ use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult,
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, coefficients, create_schema, custom_references, dimensions, entries, export,
-    import, load_all, masterdata, money::Money, run_pipeline, run_pipeline_with_hook,
+    import, indicators, load_all, masterdata, money::Money, run_pipeline, run_pipeline_with_hook,
     seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
 };
 
@@ -1336,6 +1336,10 @@ async fn main() {
         if let Err(e) = coefficients::ensure_schema(&con) {
             eprintln!("   ⚠ ensure_schema coefficients (non bloquant) : {e}");
         }
+        // Idem volet 2 (indicateurs) : tables dim_aggregate / dim_indicator.
+        if let Err(e) = indicators::ensure_schema(&con) {
+            eprintln!("   ⚠ ensure_schema indicateurs (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");
@@ -1445,6 +1449,7 @@ async fn main() {
         .merge(custom_references::router())
         .merge(value_lists::router())
         .merge(coefficients::router())
+        .merge(indicators::router())
         .merge(import::router())
         .merge(export::router())
         .fallback_service(serve_dir)

@@ -44,6 +44,7 @@ pub mod coefficients;
 pub mod custom_references;
 pub mod entries;
 pub mod formula;
+pub mod indicators;
 pub mod dimensions;
 pub mod export;
 pub mod import;

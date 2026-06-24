@@ -803,6 +803,59 @@ export interface CoefficientPreview {
   operands: string[];
 }
 
+// ---------- Indicateurs / KPI (moteur de formules — volet 2) ----------
+// Un poste (dim_aggregate) = sélection nommée sur fact_entry agrégée en montant.
+// Un indicateur (dim_indicator) = formule combinant des postes, calculée au grain.
+// Cf. docs/FORMULES.md §4.
+export interface AggregateCond {
+  dim: string;
+  op: string;
+  val?: unknown;
+  via?: string; // caractéristique N1
+  ref?: string; // référence directe (patron B)
+  attr?: string; // enum natif (classe, sous_classe…)
+}
+
+export interface AggregateDef {
+  level: string;
+  selection: AggregateCond[];
+}
+
+export interface Aggregate {
+  code: string;
+  libelle: string | null;
+  level: string;
+  definition: AggregateDef;
+}
+
+export interface Indicator {
+  code: string;
+  libelle: string | null;
+  expression: string;
+  grain: string[];
+  format: string | null;
+}
+
+// Opérande référençable dans une formule d'indicateur (poste ou autre indicateur).
+export interface IndicatorOperand {
+  token: string;
+  label: string;
+  kind: 'poste' | 'indicateur';
+}
+
+// Une ligne de résultat de preview : valeurs de grain + valeur calculée.
+export interface IndicatorRow {
+  grain: Record<string, string | null>;
+  value: number | null;
+}
+
+export interface IndicatorPreview {
+  ok: boolean;
+  error?: string;
+  sql?: string;
+  rows: IndicatorRow[];
+}
+
 // ---------- Références (graphe de jointures, GET /api/meta/references) ----------
 // Source de vérité serveur (engine/src/references.rs). `table` est en nom SQL
 // (ex. stg_entry, sat_perimeter, dim_*) ; `target_table` est traduit en nom de
