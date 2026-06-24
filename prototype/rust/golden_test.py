@@ -46,10 +46,25 @@ TOL = 0.01
 # Le grain complet d'agrégation consolidé. On somme `amount` sur ce grain.
 
 # =========================================================================
-#  VALEURS ATTENDUES — NIVEAU CONSOLIDATED
+#  ⚠️ VALEURS GOLDEN À RECALCULER (post-Q41 + suppression du niveau reclassified)
+# =========================================================================
+# Ces valeurs ont été calculées à la main pour l'ancien modèle **4 niveaux**
+# (A→B→C→D avec `reclassified`) où la **sortie de périmètre** produisait F98 de
+# façon NATIVE à l'étape B. Depuis :
+#   - le niveau `reclassified` a été supprimé (pipeline 3 niveaux : corporate →
+#     converted → consolidated) ;
+#   - les variations de périmètre (entrée F01, sortie F98) sont **repensées en
+#     règles** (tests natifs `#[ignore]`) → la sortie de S n'est plus produite
+#     nativement : tout le bloc `S` ci-dessous et les invariants `reclassified`
+#     (2b, 3, 4, 6b, 7b, 8) sont **obsolètes** ;
+#   - le staging a changé de cible : préfixe `2` → converted (et non reclassified),
+#     `3`/`4` → consolidated (cf. src/pipeline/staging.rs).
+# → À recalculer contre le moteur 3-niveaux en marche (tâche runtime, recette E2E
+#   §4 du REFACTOR_CONSO_RESTE_A_FAIRE). Tant que ce n'est pas fait, ce golden
+#   master échouera volontairement sur S et les invariants reclassified.
 # =========================================================================
 # Chaque entrée : (entity, account, flow, nature) -> montant attendu.
-# Calculées à la main à partir des taux et du pipeline (A→B→C→D).
+# Calculées à la main à partir des taux et du pipeline (A→B→C→D, modèle pré-Q41).
 #
 # Taux :
 #   USD : close_n1 = taux_ouverture(2024) = 0.92 | close_n=0.90 / avg=0.95 (2024)
@@ -119,14 +134,14 @@ EXPECTED_CONSOLIDATED = {
     ("M", "100", "F00", "1AJUST"): 500,        # EUR, copie
     ("M", "100", "F99", "1AJUST"): 500,        # F00=500, pas de F20
 
-    # ── Staging : préfixes 2/3/4 (injection directe au niveau cible) ───
-    # 2MAN → reclassified (saute A+B) puis C+D ; EUR donc pas de FX
+    # ── Staging : préfixes 2/3/4 (injection au niveau cible, cf. staging.rs) ───
+    # 2MAN → converted (avant écarts) puis D ; EUR donc pas de FX
     ("M", "100", "F20", "2MAN"): 200,
     ("M", "100", "F99", "2MAN"): 200,          # F20 reconstitué
-    # 3MAN → converted (saute A+B+C) puis D
+    # 3MAN → consolidated, avant le × pct
     ("M", "100", "F20", "3MAN"): 300,
     ("M", "100", "F99", "3MAN"): 300,
-    # 4MAN → consolidated (saute tout), clôture reconstituée sur place
+    # 4MAN → consolidated, après le × pct (injecté tel quel), clôture reconstituée sur place
     ("M", "100", "F20", "4MAN"): 400,
     ("M", "100", "F99", "4MAN"): 400,
 }
@@ -161,10 +176,22 @@ def req(method, path, body=None, expect=None, timeout=30):
     return code, parsed
 
 
-def fetch_grains(level, scenario="REEL", entry_period="2024", limit=100000):
+def consolidation_id(phase="REEL", exercice="2024"):
+    """Résout l'id technique d'une consolidation par sa phase + son exercice
+    (clé naturelle, post-Q41 : plus de `code` textuel). Renvoie None si absente."""
+    _, rows = req("GET", "/api/consolidations", expect=200)
+    if not isinstance(rows, list):
+        return None
+    for c in rows:
+        if c.get("phase") == phase and str(c.get("exercice")) == str(exercice):
+            return c.get("id")
+    return None
+
+
+def fetch_grains(level, consolidation, entry_period="2024", limit=100000):
     """Récupère les écritures d'un niveau et agrège par grain
     (entity, account, flow, nature) → somme des montants."""
-    rows = _fetch_entries(level, scenario, entry_period, limit)
+    rows = _fetch_entries(level, consolidation, entry_period, limit)
     grains = {}
     for e in rows:
         key = (e["entity"], e["account"], e["flow"], e["nature"])
@@ -172,13 +199,14 @@ def fetch_grains(level, scenario="REEL", entry_period="2024", limit=100000):
     return grains
 
 
-def _fetch_entries(level, scenario, entry_period, limit):
-    """Pagine sur /api/entries pour récupérer TOUTES les écritures d'un niveau."""
+def _fetch_entries(level, consolidation, entry_period, limit):
+    """Pagine sur /api/entries pour récupérer TOUTES les écritures d'un niveau,
+    isolées par `consolidation` (id technique, filtre fact_entry post-Q41)."""
     out = []
     offset = 0
     page = min(limit, 5000)
     while True:
-        path = (f"/api/entries?level={level}&scenario={scenario}"
+        path = (f"/api/entries?level={level}&consolidation={consolidation}"
                 f"&entry_period={entry_period}&limit={page}&offset={offset}")
         _, rows = req("GET", path, expect=200)
         if not isinstance(rows, list):
@@ -235,9 +263,9 @@ def fmt(x):
 # =========================================================================
 #  Comparaison golden master
 # =========================================================================
-def compare_consolidated():
+def compare_consolidated(cid):
     print(bold("\n─ Montants consolidés (golden master) ─"))
-    actual = fetch_grains("consolidated")
+    actual = fetch_grains("consolidated", cid)
 
     expected = EXPECTED_CONSOLIDATED
     ek = set(expected)
@@ -284,13 +312,19 @@ def compare_consolidated():
 # =========================================================================
 #  Invariants structurels
 # =========================================================================
-def check_invariants():
+def check_invariants(cid):
     print(bold("\n─ Invariants structurels ─"))
 
-    corporate = _fetch_entries("corporate", "REEL", "2024", 100000)
-    reclassified = _fetch_entries("reclassified", "REEL", "2024", 100000)
-    converted = _fetch_entries("converted", "REEL", "2024", 100000)
-    consolidated = _fetch_entries("consolidated", "REEL", "2024", 100000)
+    corporate = _fetch_entries("corporate", cid, "2024", 100000)
+    converted = _fetch_entries("converted", cid, "2024", 100000)
+    consolidated = _fetch_entries("consolidated", cid, "2024", 100000)
+
+    # ⚠️ Niveau `reclassified` supprimé (pipeline 3 niveaux). Les invariants qui
+    # en dépendaient (2b ; 3 à reclassified ; 4 sortie F98 native ; 6b ; 7b) sont
+    # neutralisés : ils relèvent désormais des règles de périmètre (tests Rust
+    # `#[ignore]`). À réécrire lors de la recette périmètre-par-règles.
+    print(yellow("  ⏭  invariants reclassified (2b, 3@reclass, 4, 6b, 7b) — "
+                 "OBSOLÈTES (niveau supprimé, sortie périmètre → règles)"))
 
     def has(rows, **kw):
         return [r for r in rows if all(r.get(k) == v for k, v in kw.items())]
@@ -304,58 +338,31 @@ def check_invariants():
           len(e_cons) == 0,
           f"{len(e_cons)} ligne(s) E trouvée(s)")
 
-    # 2 — E est présente à corporate / reclassified / converted
+    # 2 — E est présente à corporate / converted (reclassified supprimé)
     check("2a. E présente à corporate", len(has(corporate, entity="E")) > 0)
-    check("2b. E présente à reclassified", len(has(reclassified, entity="E")) > 0)
     check("2c. E présente à converted", len(has(converted, entity="E")) > 0)
 
-    # 3 — S a F99=0 à reclassified et consolidated (la sortante ne fuit pas)
-    for lvl, rows in [("reclassified", reclassified),
-                      ("consolidated", consolidated)]:
-        s99 = [r for r in rows if r.get("entity") == "S"
-               and r.get("flow") == "F99" and r.get("nature") == "0LIASS"]
-        ok = len(s99) > 0 and all(approx(float(r["amount"]), 0.0) for r in s99)
-        check(f"3. S/0LIASS F99 = 0 à {lvl}", ok,
-              f"lignes = {[(r['account'], r['amount']) for r in s99]}")
-
-    # 4 — S a F98 = -Σ(constituants F00+F20) à reclassified, par compte.
-    #     NB : F98 hérite du analysis2 de la ligne source (grain d'agrégation
-    #     complet) → potentiellement plusieurs lignes F98 par compte ; on somme.
-    for acct in ("100", "700"):
-        rc = reclassified
-        f98 = [r for r in rc if r.get("entity") == "S" and r.get("account") == acct
-               and r.get("flow") == "F98" and r.get("nature") == "0LIASS"]
-        f00 = sum(float(r["amount"]) for r in rc
-                  if r.get("entity") == "S" and r.get("account") == acct
-                  and r.get("flow") == "F00" and r.get("nature") == "0LIASS")
-        f20 = sum(float(r["amount"]) for r in rc
-                  if r.get("entity") == "S" and r.get("account") == acct
-                  and r.get("flow") == "F20" and r.get("nature") == "0LIASS")
-        if f98:
-            got = sum(float(r["amount"]) for r in f98)
-            want = -(f00 + f20)
-            check(f"4. S/{acct} F98 = -(F00+F20) = {fmt(want)} à reclassified",
-                  approx(got, want),
-                  f"F98 = {fmt(got)} (attendu {fmt(want)})")
-        else:
-            check(f"4. S/{acct} F98 présent à reclassified", False, "absent")
+    # 3 — S a F99=0 à consolidated (la sortante ne fuit pas). NB : tant que la
+    #     sortie de périmètre n'est pas portée par une règle, cet invariant peut
+    #     échouer (S n'est plus extournée nativement).
+    s99 = [r for r in consolidated if r.get("entity") == "S"
+           and r.get("flow") == "F99" and r.get("nature") == "0LIASS"]
+    ok = len(s99) > 0 and all(approx(float(r["amount"]), 0.0) for r in s99)
+    check("3. S/0LIASS F99 = 0 à consolidated", ok,
+          f"lignes = {[(r['account'], r['amount']) for r in s99]}")
 
     # 5 — Préfixe 2 absent de corporate (staging skip A)
     check("5. préfixe 2 absent de corporate",
           len(natures_with_prefix(corporate, "2")) == 0,
           f"{len(natures_with_prefix(corporate, '2'))} ligne(s)")
 
-    # 6 — Préfixe 3 absent de corporate et reclassified (skip A+B)
+    # 6 — Préfixe 3 absent de corporate (skip A+C ; cible consolidated)
     check("6a. préfixe 3 absent de corporate",
           len(natures_with_prefix(corporate, "3")) == 0)
-    check("6b. préfixe 3 absent de reclassified",
-          len(natures_with_prefix(reclassified, "3")) == 0)
 
-    # 7 — Préfixe 4 absent de corporate / reclassified / converted (skip A+B+C)
+    # 7 — Préfixe 4 absent de corporate / converted (cible consolidated, après pct)
     check("7a. préfixe 4 absent de corporate",
           len(natures_with_prefix(corporate, "4")) == 0)
-    check("7b. préfixe 4 absent de reclassified",
-          len(natures_with_prefix(reclassified, "4")) == 0)
     check("7c. préfixe 4 absent de converted",
           len(natures_with_prefix(converted, "4")) == 0)
 
@@ -465,20 +472,23 @@ def run_tests():
           isinstance(body, dict) and body.get("entries", 0) > 0,
           f"body={body}")
 
-    # 3. Run pipeline
-    print(dim("\n3. Pipeline A→B→C→D"))
-    code, body = req("POST", "/api/run", expect=200)
+    # 3. Run pipeline (3 niveaux : corporate → converted → consolidated)
+    print(dim("\n3. Pipeline A→C→D"))
+    cid = consolidation_id(phase="REEL", exercice="2024")
+    check("consolidation REEL/2024 résolue", cid is not None,
+          "aucune consolidation (phase=REEL, exercice=2024) dans /api/consolidations")
+    code, body = req("POST", "/api/run", body={"consolidation_id": cid}, expect=200)
     check("run → 200", code == 200, f"body={body}")
     if isinstance(body, dict):
-        for lvl in ("corporate", "reclassified", "converted", "consolidated"):
+        for lvl in ("corporate", "converted", "consolidated"):
             n = body.get(lvl, 0)
             check(f"run produit {lvl} (>0)", n > 0, f"{lvl}={n}")
 
     # 4. Golden master — montants consolidés
-    compare_consolidated()
+    compare_consolidated(cid)
 
     # 5. Invariants structurels
-    check_invariants()
+    check_invariants(cid)
 
 
 def main():

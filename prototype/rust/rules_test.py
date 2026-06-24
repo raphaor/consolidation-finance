@@ -8,7 +8,11 @@ lance le pipeline natif, puis :
   1. Crée une règle d'élimination interco à 4 opérations (extourne +
      contrepartie × partner hérité / vidé).
   2. Crée un ruleset contenant cette règle.
-  3. POST /api/rules/run → exécute.
+  3. Rattache le ruleset à la consolidation (PUT consolidations.ruleset_code)
+     puis relance le pipeline : depuis Q41 l'exécution des règles n'a plus de
+     route standalone (`/api/rules/run` supprimée) — elle est intercalée dans
+     `POST /api/run` au niveau ciblé par chaque opération, et pilotée par
+     `dim_consolidation.ruleset_code`.
   4. Vérifie :
      - des lignes 2ELI sont apparues au niveau consolidated ;
      - le solde interco (partner NOT NULL) est extourné à 0 ;
@@ -115,13 +119,26 @@ def req(method, path, body=None, expect=None, timeout=30):
     return code, parsed
 
 
-def fetch_entries(level, scenario="REEL", entry_period="2024", limit=100000):
-    """Pagine sur /api/entries pour récupérer TOUTES les écritures d'un niveau."""
+def consolidation_id(phase="REEL", exercice="2024"):
+    """Résout l'id technique d'une consolidation par sa phase + son exercice
+    (clé naturelle, post-Q41 : plus de `code` textuel). Renvoie None si absente."""
+    _, rows = req("GET", "/api/consolidations", expect=200)
+    if not isinstance(rows, list):
+        return None
+    for c in rows:
+        if c.get("phase") == phase and str(c.get("exercice")) == str(exercice):
+            return c.get("id")
+    return None
+
+
+def fetch_entries(level, consolidation, entry_period="2024", limit=100000):
+    """Pagine sur /api/entries pour récupérer TOUTES les écritures d'un niveau,
+    isolées par `consolidation` (id technique, filtre fact_entry post-Q41)."""
     out = []
     offset = 0
     page = min(limit, 5000)
     while True:
-        path = (f"/api/entries?level={level}&scenario={scenario}"
+        path = (f"/api/entries?level={level}&consolidation={consolidation}"
                 f"&entry_period={entry_period}&limit={page}&offset={offset}")
         _, rows = req("GET", path, expect=200)
         if not isinstance(rows, list):
@@ -250,7 +267,12 @@ def run_tests():
     code, body = req("POST", "/api/reset", expect=200)
     check("reset → 200", code == 200, f"body={body}")
 
-    code, body = req("POST", "/api/run", expect=200)
+    cid = consolidation_id(phase="REEL", exercice="2024")
+    check("consolidation REEL/2024 résolue", cid is not None,
+          "aucune consolidation (phase=REEL, exercice=2024) dans /api/consolidations")
+
+    # Baseline : la conso golden n'a pas de ruleset_code → pipeline natif seul.
+    code, body = req("POST", "/api/run", body={"consolidation_id": cid}, expect=200)
     check("run → 200", code == 200, f"body={body}")
     check("run produit consolidated > 0",
           isinstance(body, dict) and body.get("consolidated", 0) > 0,
@@ -258,7 +280,7 @@ def run_tests():
 
     # ── 2. Baseline consolidée (avant règles) ───────────────────────
     print(dim("\n2. Baseline consolidée"))
-    before = fetch_entries("consolidated")
+    before = fetch_entries("consolidated", cid)
     total_before = total_amount(before)
     null_before, notnull_before = sum_by_partner(before)
     print(f"     total         = {fmt(total_before)}")
@@ -329,11 +351,25 @@ def run_tests():
     code, _ = req("DELETE", f"/api/rules/{ELIM_RULE_CODE}", expect=409)
     check("DELETE rule référencée → 409", code == 409)
 
-    # ── 6. Exécution du ruleset ─────────────────────────────────────
-    print(dim("\n6. POST /api/rules/run — exécution"))
-    code, report = req("POST", "/api/rules/run",
-                       body={"ruleset": ELIM_RULESET_CODE}, expect=200)
-    check("POST /api/rules/run → 200", code == 200, f"body={report}")
+    # ── 5b. Rattachement du ruleset à la consolidation ──────────────
+    # Post-Q41 : l'exécution des règles est pilotée par `ruleset_code` de la
+    # consolidation, appliquée au prochain `POST /api/run`. On pose donc
+    # ruleset_code = RS_INTERCO via le CRUD master data (PUT partiel).
+    print(dim("\n5b. PUT consolidations.ruleset_code = RS_INTERCO"))
+    code, updated = req("PUT", "/api/md/consolidations",
+                        body={"id": cid, "ruleset_code": ELIM_RULESET_CODE}, expect=200)
+    check("PUT ruleset_code → 200", code == 200, f"body={updated}")
+    check("conso référence bien le ruleset",
+          isinstance(updated, dict) and updated.get("ruleset_code") == ELIM_RULESET_CODE,
+          f"body={updated}")
+
+    # ── 6. Exécution du ruleset via le pipeline ─────────────────────
+    print(dim("\n6. POST /api/run — pipeline + ruleset intercalé"))
+    code, body = req("POST", "/api/run", body={"consolidation_id": cid}, expect=200)
+    check("POST /api/run → 200", code == 200, f"body={body}")
+    report = body.get("ruleset_report") if isinstance(body, dict) else None
+    check("la réponse contient un ruleset_report",
+          isinstance(report, dict), f"body={body}")
     check("report.ruleset = code attendu",
           isinstance(report, dict) and report.get("ruleset") == ELIM_RULESET_CODE,
           f"report={report}")
@@ -346,7 +382,7 @@ def run_tests():
 
     # ── 7. Vérifications post-exécution ─────────────────────────────
     print(dim("\n7. Vérifications post-exécution"))
-    after = fetch_entries("consolidated")
+    after = fetch_entries("consolidated", cid)
     total_after = total_amount(after)
     null_after, notnull_after = sum_by_partner(after)
 
@@ -429,10 +465,10 @@ def run_tests():
     # F99 autoritairement : un second run génère à nouveau les extournes
     # (puisque les sources 0LIASS sont toujours là). On vérifie simplement
     # que le serveur répond 200 et qu'on a toujours des 2ELI.
-    code, report2 = req("POST", "/api/rules/run",
-                        body={"ruleset": ELIM_RULESET_CODE}, expect=200)
+    code, body2 = req("POST", "/api/run",
+                      body={"consolidation_id": cid}, expect=200)
     check("second run → 200", code == 200)
-    after2 = fetch_entries("consolidated")
+    after2 = fetch_entries("consolidated", cid)
     lines_2eli_2 = filter_rows(after2, nature="2ELI")
     check("second run laisse des 2ELI au consolidé",
           len(lines_2eli_2) > 0,

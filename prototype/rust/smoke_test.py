@@ -81,6 +81,17 @@ def check(name, condition, detail=""):
     else:
         R.ko(name, detail)
 
+def consolidation_id(phase="REEL", exercice="2024"):
+    """Résout l'id technique d'une consolidation par sa phase + son exercice
+    (clé naturelle, post-Q41 : plus de `code` textuel). Renvoie None si absente."""
+    code, rows = req("GET", "/api/consolidations", expect=200)
+    if not isinstance(rows, list):
+        return None
+    for c in rows:
+        if c.get("phase") == phase and str(c.get("exercice")) == str(exercice):
+            return c.get("id")
+    return None
+
 # ── Le scénario de test ──────────────────────────────────────────────
 def run_tests():
     print(bold("\n═ conso-server — smoke test ═\n"))
@@ -104,38 +115,40 @@ def run_tests():
     check("reset vide consolidated", consolidated_before == 0,
           f"consolidated={consolidated_before}")
 
+    # Résolution de la consolidation cible (phase REEL, exercice 2024) → id technique.
+    cid = consolidation_id(phase="REEL", exercice="2024")
+    check("consolidation REEL/2024 résolue", cid is not None,
+          "aucune consolidation (phase=REEL, exercice=2024) dans /api/consolidations")
+
     # ── 3. Run pipeline ──────────────────────────────────────────────
     print(dim("\n3. Pipeline"))
-    code, body = req("POST", "/api/run", expect=200)
+    code, body = req("POST", "/api/run", body={"consolidation_id": cid}, expect=200)
     check("run → 200", code == 200)
 
     check("run génère corporate", isinstance(body, dict) and body.get("corporate", 0) > 0,
-          f"body={body}")
-    check("run génère reclassified", isinstance(body, dict) and body.get("reclassified", 0) > 0,
           f"body={body}")
     check("run génère converted", isinstance(body, dict) and body.get("converted", 0) > 0,
           f"body={body}")
     check("run génère consolidated", isinstance(body, dict) and body.get("consolidated", 0) > 0,
           f"body={body}")
 
-    # Vérif cohérence : converted >= reclassified >= corporate
+    # Vérif cohérence : converted >= corporate (3 niveaux depuis la suppression de reclassified)
     c = body.get("corporate", 0)
-    r = body.get("reclassified", 0)
     v = body.get("converted", 0)
-    check("pipeline croissant (corp ≤ reclass ≤ conv)", c <= r <= v,
-          f"{c} ≤ {r} ≤ {v}")
+    check("pipeline croissant (corp ≤ conv)", c <= v,
+          f"{c} ≤ {v}")
 
     # ── 4. Levels après run ──────────────────────────────────────────
     print(dim("\n4. Levels"))
     code, levels = req("GET", "/api/levels", expect=200)
     check("levels → 200", code == 200)
     levels_dict = {l["level"]: l["count"] for l in levels} if isinstance(levels, list) else {}
-    check("levels contient 4 niveaux", len(levels_dict) == 4,
+    check("levels contient 3 niveaux", len(levels_dict) == 3,
           f"levels={levels_dict}")
 
     # ── 5. Bilan ─────────────────────────────────────────────────────
     print(dim("\n5. Bilan"))
-    code, bilan = req("GET", "/api/bilan?scenario=REEL&period=2024", expect=200)
+    code, bilan = req("GET", f"/api/bilan?consolidation={cid}&period=2024", expect=200)
     check("bilan → 200", code == 200)
     check("bilan non vide", isinstance(bilan, list) and len(bilan) > 0,
           f"bilan={bilan}")
@@ -151,7 +164,7 @@ def run_tests():
 
     # ── 6. Compte de résultat ────────────────────────────────────────
     print(dim("\n6. Compte de résultat"))
-    code, cr = req("GET", "/api/compte-resultat?scenario=REEL&period=2024", expect=200)
+    code, cr = req("GET", f"/api/compte-resultat?consolidation={cid}&period=2024", expect=200)
     check("CR → 200", code == 200)
     check("CR non vide", isinstance(cr, list) and len(cr) > 0,
           f"cr={cr}")
@@ -171,14 +184,14 @@ def run_tests():
               f"sample={cr[:1]}")
 
     # Filtre par nature sur bilan et CR
-    code, bilan_n = req("GET", "/api/bilan?scenario=REEL&period=2024&nature=0LIASS", expect=200)
+    code, bilan_n = req("GET", f"/api/bilan?consolidation={cid}&period=2024&nature=0LIASS", expect=200)
     check("bilan nature=0LIASS → 200", code == 200)
     if isinstance(bilan_n, list) and bilan_n:
         check("bilan nature=0LIASS filtre correct",
               all(row.get("nature") == "0LIASS" for row in bilan_n),
               f"natures={ {row.get('nature') for row in bilan_n} }")
 
-    code, cr_n = req("GET", "/api/compte-resultat?scenario=REEL&period=2024&nature=0LIASS", expect=200)
+    code, cr_n = req("GET", f"/api/compte-resultat?consolidation={cid}&period=2024&nature=0LIASS", expect=200)
     check("CR nature=0LIASS → 200", code == 200)
     if isinstance(cr_n, list) and cr_n:
         check("CR nature=0LIASS filtre correct",
@@ -221,9 +234,9 @@ def run_tests():
     else:
         check("entries nature=0LIASS filtre correct", False, "réponse vide")
 
-    # Filtre par scénario
-    code, entries_s = req("GET", "/api/entries?scenario=REEL&limit=5", expect=200)
-    check("entries scenario=REEL → 200", code == 200)
+    # Filtre par phase (niveau raw : stg_entry.phase ; post-Q41, plus de `scenario`)
+    code, entries_s = req("GET", "/api/entries?level=raw&phase=REEL&limit=5", expect=200)
+    check("entries level=raw phase=REEL → 200", code == 200)
 
     # ── 8. CRUD Master Data ──────────────────────────────────────────
     print(dim("\n8. CRUD Master Data"))
@@ -286,7 +299,7 @@ def run_tests():
     # ── 9. Autres tables master data ─────────────────────────────────
     print(dim("\n9. Master Data — autres tables"))
     for table in ["entities", "flows", "sous_classes", "currencies",
-                  "scenarios", "periods", "natures"]:
+                  "consolidations", "periods", "natures"]:
         code, rows = req("GET", f"/api/md/{table}", expect=200)
         check(f"GET {table} → 200", code == 200,
               f"status={code}")
