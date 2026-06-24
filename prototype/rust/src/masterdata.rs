@@ -114,18 +114,15 @@ const TABLES: &[TableDef] = &[
         pk: &["code"],
         auto_pk: false,
     },
+    // Exercice : géré en simple liste de valeurs (code + libellé). Les colonnes
+    // techniques `type`/`date_debut`/`date_fin`/`statut` existent toujours en base
+    // (DDL, CSV, seed) mais ne sont plus exposées au CRUD master data — l'UAT ne
+    // veut éditer qu'une liste de valeurs libellées.
     TableDef {
         api_name: "periods",
         label: "Périodes",
         sql_name: "dim_period",
-        columns: &[
-            "code",
-            "libelle",
-            "type",
-            "date_debut",
-            "date_fin",
-            "statut",
-        ],
+        columns: &["code", "libelle"],
         pk: &["code"],
         auto_pk: false,
     },

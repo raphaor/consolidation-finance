@@ -346,6 +346,18 @@ export function MasterDataPage() {
       const def = buildTableDef(schemaResult, staticDef);
       setTableDef(def);
 
+      // Tri par défaut alphabétique sur la 1ʳᵉ colonne affichée (le plus souvent
+      // le code) ; conserve un tri manuel encore applicable lors d'un simple
+      // rafraîchissement. L'utilisateur peut re-trier en cliquant les en-têtes.
+      const firstCol = def.columns[0]?.name;
+      if (firstCol) {
+        setSorting((prev) =>
+          prev.length > 0 && def.columns.some((c) => c.name === prev[0].id)
+            ? prev
+            : [{ id: firstCol, desc: false }],
+        );
+      }
+
       // Options pour les select basés sur optionsFrom (tables master data).
       // On ne recharge pas les options API dédiées (rulesets) tant qu'aucune
       // colonne n'en dépend.

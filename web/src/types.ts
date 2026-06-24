@@ -9,6 +9,9 @@ export interface BilanRow {
   account: string;
   flow: string;
   nature: string;
+  // Sens comptable du compte : 'C' créditeur (passif, produits), 'D' débiteur
+  // (actif, charges), '?' inconnu. Sert au total signé Σ(C) − Σ(D) des rapports.
+  sens: 'C' | 'D' | '?';
   amount: number;
 }
 
@@ -381,13 +384,11 @@ export const MASTER_TABLES: TableDef[] = [
   {
     table: 'periods',
     label: 'Périodes',
+    // Exercice = simple liste de valeurs libellées (UAT). Les colonnes techniques
+    // type/début/fin/statut restent en base mais ne sont plus éditées ici.
     columns: [
       { name: 'code', label: 'Code', type: 'text', pk: true },
       { name: 'libelle', label: 'Libellé', type: 'text' },
-      { name: 'type', label: 'Type', type: 'text' },
-      { name: 'date_debut', label: 'Début', type: 'date' },
-      { name: 'date_fin', label: 'Fin', type: 'date' },
-      { name: 'statut', label: 'Statut', type: 'text' },
     ],
   },
   {

@@ -16,7 +16,7 @@ import type {
   IndicatorPreview,
   NativeEnum,
 } from '../types';
-import { formatOptionLabel } from '../utils/format';
+import { formatOptionLabel, sortForDisplay } from '../utils/format';
 
 const LEVELS = ['corporate', 'converted', 'consolidated'];
 const OPS = ['=', '!=', '>', '<', '>=', '<=', 'IN', 'IS NULL', 'IS NOT NULL'];
@@ -45,11 +45,11 @@ export function IndicatorsPage() {
           api.nativeEnums(),
           api.consolidations.list(),
         ]);
-        setDims(d);
+        setDims(sortForDisplay(d, (x) => formatOptionLabel(x.name, x.label)));
         setCharacteristics(c);
         setCustomRefs(r);
         setNativeEnums(e);
-        setConsolidations(cons);
+        setConsolidations(sortForDisplay(cons, (x) => x.libelle));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       }
@@ -167,7 +167,7 @@ function PostesTab({
   // Options de traversée pour une dimension donnée.
   const traverseOptions = useCallback(
     (dim: string) => {
-      const opts: { value: string; label: string }[] = [{ value: '', label: '(direct)' }];
+      const opts: { value: string; label: string }[] = [];
       nativeEnums.filter((e) => e.host_dimension === dim).forEach((e) =>
         opts.push({ value: `attr:${e.column}`, label: `attribut · ${e.column}` }),
       );
@@ -177,7 +177,8 @@ function PostesTab({
       customRefs.filter((r) => r.host_dimension === dim).forEach((r) =>
         opts.push({ value: `ref:${r.column}`, label: `référence · ${r.column}` }),
       );
-      return opts;
+      // `(direct)` en tête, le reste trié alphabétiquement par libellé.
+      return [{ value: '', label: '(direct)' }, ...sortForDisplay(opts, (o) => o.label)];
     },
     [nativeEnums, characteristics, customRefs],
   );

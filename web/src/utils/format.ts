@@ -25,3 +25,17 @@ export function formatOptionLabel(code: string, libelle?: string | null): string
   return `${c} - ${l}`;
 }
 
+// Comparateur alphabétique pour l'affichage : locale FR, insensible à la
+// casse/accents, tri numérique naturel (« 2 » avant « 10 »). Utilisé pour trier
+// les options de menus déroulants et les lignes de tables sur la valeur affichée.
+const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+
+export function compareText(a: string, b: string): number {
+  return collator.compare(a, b);
+}
+
+// Renvoie une copie triée de `rows` par le texte affiché (`getText`).
+export function sortForDisplay<T>(rows: T[], getText: (row: T) => string): T[] {
+  return [...rows].sort((a, b) => compareText(getText(a), getText(b)));
+}
+

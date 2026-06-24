@@ -85,7 +85,9 @@ export function PipelinePage() {
     void loadCounts();
     void (async () => {
       try {
-        const list = await api.consolidations.list();
+        const list = [...(await api.consolidations.list())].sort((a, b) =>
+          a.libelle.localeCompare(b.libelle),
+        );
         setConsolidations(list);
         if (list.length > 0) {
           const ouvert = list.find((c) => c.statut === 'ouvert');

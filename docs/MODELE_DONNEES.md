@@ -50,10 +50,12 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 ### `Period` (table unique des périodes)
 - **Master** : `code`, `libellé`, `type` (mois / trimestre / année / exercice), `date_début`, `date_fin`, `exercice_rattaché`, `statut` (clôturé / ouvert)
 - **Rôles** : `Period` (période impactée par l'écriture) et `Entry_period` (exercice en cours / clôture travaillée) sont **deux clés étrangères vers cette même table** ; `Entry_period` est contraint au `type = exercice`.
+- **Gestion master data** : l'**Exercice** s'édite comme une simple **liste de valeurs** (`code` + `libellé`). Les colonnes techniques (`type`, `date_début`, `date_fin`, `statut`) restent en base (DDL / CSV / seed) mais ne sont **plus exposées au CRUD** (UAT).
 - **Conso** : axe temporel d'agrégation et de conversion devise.
 
 ### `Account`
-- **Master** : `code`, `libellé`, `sens` (débit / crédit), `classe` (bilan / résultat / flux / hors-compte), `sous_classe`, `flow_scheme` (schéma de flux → taux de conversion et flux d'écart **par flux**, cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) « Schémas de flux » ; NULL = défaut dérivé de la classe)
+- **Master** : `code`, `libellé`, `classe` (bilan / résultat / flux / hors-compte), `sous_classe`, `flow_scheme` (schéma de flux → taux de conversion et flux d'écart **par flux**, cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) « Schémas de flux » ; NULL = défaut dérivé de la classe)
+- **Sens** (débiteur / créditeur) : **dérivé**, pas une colonne stockée. Il vient de `sous_classe` (`actif` & `charges` → **débiteur** ; `passif` & `produits` → **créditeur**). Les restitutions l'utilisent pour le total = **Σ(comptes créditeurs) − Σ(comptes débiteurs)** (équilibre du bilan → 0 ; résultat du P&L).
 - **Attributs ajoutés à l'exécution** (plus codés en dur) : le regroupement par nature (ex. `capitaux_propres`, utilisé par la **mise en équivalence**) se déclare comme **caractéristique** ; le **compte parent** (hiérarchie d'agrégation) comme **référence directe** vers `Account` lui-même (cf. §4 ter et la page « Attributs de dimension »).
 - **Conso** : cumul [B], agrégation hiérarchique pour les restitutions.
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { ConsolidationSummary, Entity, Nature, Period } from '../types';
-import { formatOptionLabel } from '../utils/format';
+import { formatOptionLabel, sortForDisplay } from '../utils/format';
 
 interface Props {
   consolidation: number | undefined;
@@ -74,6 +74,16 @@ export function Filters({
   const exercisePeriods = periods.filter((p) => p.type === 'exercice');
   const entryOptions = exercisePeriods.length > 0 ? exercisePeriods : periods;
 
+  // Tris alphabétiques pour l'affichage. Consolidations par libellé (l'id n'est
+  // pas signifiant) ; les autres par « code - libellé ».
+  const sortedConsolidations = sortForDisplay(consolidations, (c) => c.libelle);
+  const sortedEntities = sortForDisplay(entities, (e) => formatOptionLabel(e.code, e.libelle));
+  const sortedEntryOptions = sortForDisplay(entryOptions, (p) =>
+    formatOptionLabel(p.code, p.libelle),
+  );
+  const sortedPeriods = sortForDisplay(periods, (p) => formatOptionLabel(p.code, p.libelle));
+  const sortedNatures = sortForDisplay(natures, (n) => formatOptionLabel(n.code, n.libelle));
+
   return (
     <>
       <label className="field">
@@ -86,7 +96,7 @@ export function Filters({
           disabled={disabled}
         >
           <option value="">Toutes</option>
-          {consolidations.map((c) => (
+          {sortedConsolidations.map((c) => (
             <option key={c.id} value={c.id}>
               {formatOptionLabel(String(c.id), c.libelle)}
             </option>
@@ -101,7 +111,7 @@ export function Filters({
           disabled={disabled}
         >
           <option value="">Toutes</option>
-          {entities.map((e) => (
+          {sortedEntities.map((e) => (
             <option key={e.code} value={e.code}>
               {formatOptionLabel(e.code, e.libelle)}
             </option>
@@ -116,7 +126,7 @@ export function Filters({
           disabled={disabled}
         >
           <option value="">Tous</option>
-          {entryOptions.map((p) => (
+          {sortedEntryOptions.map((p) => (
             <option key={p.code} value={p.code}>
               {formatOptionLabel(p.code, p.libelle)}
             </option>
@@ -131,7 +141,7 @@ export function Filters({
           disabled={disabled}
         >
           <option value="">Toutes</option>
-          {periods.map((p) => (
+          {sortedPeriods.map((p) => (
             <option key={p.code} value={p.code}>
               {formatOptionLabel(p.code, p.libelle)}
             </option>
@@ -146,7 +156,7 @@ export function Filters({
           disabled={disabled}
         >
           <option value="">Toutes</option>
-          {natures.map((n) => (
+          {sortedNatures.map((n) => (
             <option key={n.code} value={n.code}>
               {formatOptionLabel(n.code, n.libelle)}
             </option>

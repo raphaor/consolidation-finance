@@ -2,7 +2,7 @@
 // patron liste d'objets → grille type Excel (cf. MasterDetailEditor) :
 //  - Schémas de flux  : un schéma → ses flux (taux, écart, report, à-nouveau).
 //  - Jeux de périmètre : un (jeu × période) → les entités (méthode, %, entrée/sortie).
-//  - Jeux de taux      : un (jeu × période) → les devises (taux clôture / moyen).
+//  - Jeux de taux      : un (jeu × période) → les devises (taux ouverture / moyen / clôture).
 
 import { useState } from 'react';
 import {
@@ -121,6 +121,7 @@ const RATES_CONFIG: MasterDetailConfig = {
       pk: true,
       optionsFrom: { table: 'currencies', value: 'code_iso', label: 'libelle' },
     },
+    { name: 'taux_ouverture', label: 'Taux ouverture', type: 'number', nullable: true },
     { name: 'taux_moyen', label: 'Taux moyen', type: 'number', nullable: true },
     { name: 'taux_close', label: 'Taux clôture', type: 'number' },
   ],

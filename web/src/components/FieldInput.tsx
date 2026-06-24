@@ -5,9 +5,25 @@
 
 import type { ReactNode } from 'react';
 import type { ColumnDef } from '../types';
-import { formatOptionLabel } from '../utils/format';
+import { compareText, formatOptionLabel } from '../utils/format';
 
 type Row = Record<string, unknown>;
+
+// Construit les options d'un select FK/dynamique et les trie par ordre
+// alphabétique du libellé affiché (`code - libellé`), plutôt que dans l'ordre de
+// la table source (identifiant / insertion).
+function buildOptions(
+  rows: Row[],
+  valueKey: string,
+  labelKey: string,
+): { value: string; text: string }[] {
+  return rows
+    .map((r) => ({
+      value: String(r[valueKey] ?? ''),
+      text: formatOptionLabel(String(r[valueKey] ?? ''), String(r[labelKey] ?? '')),
+    }))
+    .sort((a, b) => compareText(a.text, b.text));
+}
 
 // Clés value/label des options chargées dynamiquement (`optionsApi`).
 // Aujourd'hui seul `rulesets` est branché : { code, libelle }.
@@ -34,19 +50,15 @@ export function FieldInput({
   // select FK mais sans table master data sous-jacente.
   if (col.type === 'select' && col.optionsApi) {
     const keys = API_OPTION_KEYS[col.optionsApi] ?? { value: 'code', label: 'libelle' };
-    const rows = optionsRows ?? [];
+    const opts = buildOptions(optionsRows ?? [], keys.value, keys.label);
     return (
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {col.nullable && <option value="">—</option>}
-        {rows.map((r) => {
-          const v = String(r[keys.value] ?? '');
-          const l = String(r[keys.label] ?? '');
-          return (
-            <option key={v} value={v}>
-              {formatOptionLabel(v, l)}
-            </option>
-          );
-        })}
+        {opts.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.text}
+          </option>
+        ))}
       </select>
     );
   }
@@ -67,6 +79,7 @@ export function FieldInput({
     // croire que sa 1ʳᵉ option est sélectionnée alors que la valeur est vide.
     const known = new Set(filtered.map((r) => String(r[valueKey] ?? '')));
     const showPlaceholder = !col.nullable && !known.has(value);
+    const opts = buildOptions(filtered, valueKey, labelKey);
     return (
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
         {col.nullable && <option value="">—</option>}
@@ -75,15 +88,11 @@ export function FieldInput({
             — choisir —
           </option>
         )}
-        {filtered.map((r) => {
-          const v = String(r[valueKey] ?? '');
-          const l = String(r[labelKey] ?? '');
-          return (
-            <option key={v} value={v}>
-              {formatOptionLabel(v, l)}
-            </option>
-          );
-        })}
+        {opts.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.text}
+          </option>
+        ))}
       </select>
     );
   }

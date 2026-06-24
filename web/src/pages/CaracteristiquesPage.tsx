@@ -17,6 +17,7 @@
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { formatOptionLabel, sortForDisplay } from '../utils/format';
 import type {
   Characteristic,
   CustomReference,
@@ -68,18 +69,24 @@ export function CaracteristiquesPage() {
       try {
         if (isList(target)) {
           const rows = (await api.valueLists.listValues(target)) as Row[];
-          return rows.map((r) => ({
-            v: String(r['code'] ?? ''),
-            lbl: String(r['libelle'] ?? r['code'] ?? ''),
-          }));
+          return sortForDisplay(
+            rows.map((r) => ({
+              v: String(r['code'] ?? ''),
+              lbl: String(r['libelle'] ?? r['code'] ?? ''),
+            })),
+            (o) => o.lbl,
+          );
         }
         const di = dims.find((d) => d.dim === target);
         if (!di) return [];
         const rows = (await api.masterData.list(di.table as MasterTable)) as Row[];
-        return rows.map((r) => ({
-          v: String(r[di.key] ?? ''),
-          lbl: String(r['libelle'] ?? r[di.key] ?? ''),
-        }));
+        return sortForDisplay(
+          rows.map((r) => ({
+            v: String(r[di.key] ?? ''),
+            lbl: String(r['libelle'] ?? r[di.key] ?? ''),
+          })),
+          (o) => o.lbl,
+        );
       } catch {
         return [];
       }
@@ -98,13 +105,13 @@ export function CaracteristiquesPage() {
       ]);
       setChars(cs);
       setRefs(rs);
-      setLists(ls);
+      setLists(sortForDisplay(ls, (l) => formatOptionLabel(l.code, l.libelle)));
       const seen = new Set<string>();
       const ds: DimInfo[] = (references as ReferenceInfo[])
         .filter((r) => r.table === 'stg_entry')
         .filter((r) => (seen.has(r.column) ? false : (seen.add(r.column), true)))
         .map((r) => ({ dim: r.column, table: r.target_table, key: r.target_column }));
-      setDims(ds);
+      setDims(sortForDisplay(ds, (d) => d.dim));
     } catch (err) {
       notifyErr(err);
     } finally {
@@ -502,7 +509,7 @@ function CharacteristicDetail({
   const reload = useCallback(async () => {
     try {
       const vals = (await api.characteristics.listValues(char.code)) as Row[];
-      setValues(vals);
+      setValues(sortForDisplay(vals, (r) => String(r['code'] ?? '')));
       // Options : la dimension de base + la cible de chaque champ (dim ou liste).
       const targets = new Set<string>([char.base_dimension, ...char.attributes.map((a) => a.target_dimension)]);
       const cache: Record<string, Opt[]> = {};

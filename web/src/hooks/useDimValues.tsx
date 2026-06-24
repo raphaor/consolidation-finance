@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '../api';
+import { compareText, formatOptionLabel } from '../utils/format';
 import type {
   CustomReference,
   MasterTable,
@@ -21,6 +22,15 @@ import type {
   ReferenceInfo,
   SelectionCond,
 } from '../types';
+
+// Tri alphabétique des valeurs d'une dimension par libellé affiché (« code -
+// libellé »), pour que tous les menus déroulants les présentent dans cet ordre
+// plutôt que dans l'ordre de la table source.
+function sortDimValues(values: DimValue[]): DimValue[] {
+  return [...values].sort((a, b) =>
+    compareText(formatOptionLabel(a.code, a.libelle), formatOptionLabel(b.code, b.libelle)),
+  );
+}
 
 // Mapping dimension → table master data pour les listes déroulantes contextuelles.
 export type DimToTable = Record<string, { table: MasterTable; pkCol: string }>;
@@ -118,9 +128,10 @@ export function useDimValues(dim: string): { values: DimValue[]; loading: boolea
             };
           })
           .filter((v): v is DimValue => v !== null && v.code.length > 0);
+        const sorted = sortDimValues(codes);
         if (cancelled) return;
-        dimValuesCache.set(dim, codes);
-        setValues(codes);
+        dimValuesCache.set(dim, sorted);
+        setValues(sorted);
       } catch {
         if (cancelled) return;
         dimValuesCache.set(dim, []);
@@ -202,9 +213,10 @@ export function useCharacteristicValues(
             };
           })
           .filter((v): v is DimValue => v !== null && v.code.length > 0);
+        const sorted = sortDimValues(codes);
         if (cancelled) return;
-        characteristicValuesCache.set(charCode, codes);
-        setValues(codes);
+        characteristicValuesCache.set(charCode, sorted);
+        setValues(sorted);
       } catch {
         if (cancelled) return;
         characteristicValuesCache.set(charCode, []);
@@ -260,7 +272,7 @@ export function useSelectionValues(
     );
     return {
       values: enumDef
-        ? enumDef.values.map((v) => ({ code: v, libelle: v }))
+        ? sortDimValues(enumDef.values.map((v) => ({ code: v, libelle: v })))
         : [],
       loading: false,
     };

@@ -79,8 +79,20 @@ struct BilanRow {
     account: String,
     flow: String,
     nature: String,
+    /// Sens du compte dérivé de `dim_sous_classe.classe`/code : `"C"` créditeur
+    /// (passif, produits) ou `"D"` débiteur (actif, charges). Permet au rapport
+    /// de calculer le total comme Σ(comptes C) − Σ(comptes D) — équilibre du
+    /// bilan, résultat du P&L. `"?"` si la sous-classe est inconnue/nulle.
+    sens: String,
     amount: Decimal,
 }
+
+/// Dérivation SQL du sens comptable depuis `dim_account.sous_classe`.
+/// Créditeur (C) : passif, produits ; Débiteur (D) : actif, charges.
+/// Une sous-classe inconnue/nulle retombe sur `'?'` (exclue des totaux signés).
+const SENS_CASE: &str = "CASE a.sous_classe \
+    WHEN 'passif' THEN 'C' WHEN 'produits' THEN 'C' \
+    WHEN 'actif' THEN 'D' WHEN 'charges' THEN 'D' ELSE '?' END";
 
 /// Réponse `/api/run` : nombre de lignes produites à chaque étape du pipeline.
 #[derive(Serialize)]
@@ -275,11 +287,11 @@ async fn get_bilan(
             &q.nature,
         );
         let sql = format!(
-            "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
+            "SELECT e.account, e.flow, e.nature, {SENS_CASE} AS sens, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
              WHERE e.level = ? AND a.classe = 'bilan' {fsql}{of_which}
-             GROUP BY e.account, e.flow, e.nature
+             GROUP BY e.account, e.flow, e.nature, a.sous_classe
              ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
@@ -287,11 +299,12 @@ async fn get_bilan(
         let mut stmt = con.prepare(&sql).map_err(db_err)?;
         let iter = stmt
             .query_map(params_from_iter(params), |row| {
-                let m: Money = row.get(3)?;
+                let m: Money = row.get(4)?;
                 Ok(BilanRow {
                     account: row.get(0)?,
                     flow: row.get(1)?,
                     nature: row.get(2)?,
+                    sens: row.get(3)?,
                     amount: m.into_decimal(),
                 })
             })
@@ -328,11 +341,11 @@ async fn get_compte_resultat(
             &q.nature,
         );
         let sql = format!(
-            "SELECT e.account, e.flow, e.nature, SUM(e.amount) AS amount
+            "SELECT e.account, e.flow, e.nature, {SENS_CASE} AS sens, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
              WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
-             GROUP BY e.account, e.flow, e.nature
+             GROUP BY e.account, e.flow, e.nature, a.sous_classe
              ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
@@ -340,11 +353,12 @@ async fn get_compte_resultat(
         let mut stmt = con.prepare(&sql).map_err(db_err)?;
         let iter = stmt
             .query_map(params_from_iter(params), |row| {
-                let m: Money = row.get(3)?;
+                let m: Money = row.get(4)?;
                 Ok(BilanRow {
                     account: row.get(0)?,
                     flow: row.get(1)?,
                     nature: row.get(2)?,
+                    sens: row.get(3)?,
                     amount: m.into_decimal(),
                 })
             })

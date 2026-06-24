@@ -22,7 +22,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
-import { formatOptionLabel } from '../utils/format';
+import { formatOptionLabel, sortForDisplay } from '../utils/format';
 import {
   DIM_TO_TABLE_FALLBACK,
   DimRefContext,
@@ -106,7 +106,11 @@ function deriveDims(dims: DimensionInfo[]) {
   const selectionDims: string[] = dims.map((d) => d.name);
   selectionDims.push('level');
   const pilotableDims: string[] = dims.filter((d) => d.pilotable).map((d) => d.name);
-  return { selectionDims, pilotableDims };
+  // Affichage alphabétique des dimensions dans les dropdowns / lignes de destination.
+  return {
+    selectionDims: sortForDisplay(selectionDims, (d) => d),
+    pilotableDims: sortForDisplay(pilotableDims, (d) => d),
+  };
 }
 
 /// Parse la valeur d'une condition selon l'opérateur :
@@ -558,10 +562,13 @@ function RuleFormModal({
           setCustomReferences(refs);
           setNativeEnums(enums);
           setCoeffOptions([
-            ...coeffs.map((c) => ({
-              code: c.code,
-              label: c.libelle ? `${c.code} — ${c.libelle}` : c.code,
-            })),
+            ...sortForDisplay(
+              coeffs.map((c) => ({
+                code: c.code,
+                label: c.libelle ? `${c.code} — ${c.libelle}` : c.code,
+              })),
+              (c) => c.label,
+            ),
             { code: 'constant', label: 'constant (littéral)' },
           ]);
         }
@@ -984,14 +991,17 @@ function RuleFormModal({
                     // - références directes (patron B) portées par `s.dim`
                     //   (filtre sur la colonne de référence, ex : `compte_parent = 60`).
                     // - enums natifs `attr` (CHECK du DDL, ex : `account.classe`).
-                    const viaOptions = characteristics.filter(
-                      (c) => c.base_dimension === s.dim,
+                    const viaOptions = sortForDisplay(
+                      characteristics.filter((c) => c.base_dimension === s.dim),
+                      (c) => c.code,
                     );
-                    const refOptions = customReferences.filter(
-                      (r) => r.host_dimension === s.dim,
+                    const refOptions = sortForDisplay(
+                      customReferences.filter((r) => r.host_dimension === s.dim),
+                      (r) => r.column,
                     );
-                    const attrOptions = nativeEnums.filter(
-                      (e) => e.host_dimension === s.dim,
+                    const attrOptions = sortForDisplay(
+                      nativeEnums.filter((e) => e.host_dimension === s.dim),
+                      (e) => e.column,
                     );
                     // Valeur courante du dropdown « Traverser » :
                     // - '' → direct (pas de traversée)
@@ -1160,20 +1170,27 @@ function RuleFormModal({
                     // Mode `map` : seules les caractéristiques ayant un attribut
                     // ciblant cette dimension sont proposées (compatibilité de
                     // type imposée par le moteur).
-                    const viaOptions = characteristics.filter((c) =>
-                      c.attributes.some((a) => a.target_dimension === dim),
+                    const viaOptions = sortForDisplay(
+                      characteristics.filter((c) =>
+                        c.attributes.some((a) => a.target_dimension === dim),
+                      ),
+                      (c) => c.code,
                     );
                     const viaChar = characteristics.find((c) => c.code === dest.via);
-                    const attrOptions = (viaChar?.attributes ?? []).filter(
-                      (a) => a.target_dimension === dim,
+                    const attrOptions = sortForDisplay(
+                      (viaChar?.attributes ?? []).filter((a) => a.target_dimension === dim),
+                      (a) => a.name,
                     );
                     // Mode `map_ref` : seules les références directes (patron B)
                     // auto-référentielles sur `dim` sont proposées (host = target
                     // = dim, ex : `compte_parent` sur `account`). Le moteur
                     // exige en effet target = dim (la valeur écrite doit être un
                     // code valide pour `dim`).
-                    const mapRefOptions = customReferences.filter(
-                      (r) => r.host_dimension === dim && r.target_dimension === dim,
+                    const mapRefOptions = sortForDisplay(
+                      customReferences.filter(
+                        (r) => r.host_dimension === dim && r.target_dimension === dim,
+                      ),
+                      (r) => r.column,
                     );
                     return (
                       <div key={dim} className="rule-dest-row">
@@ -1432,7 +1449,7 @@ function RulesetFormModal({
                     {ruleOptions.length === 0 && (
                       <option value="">(aucune règle)</option>
                     )}
-                    {ruleOptions.map((r) => (
+                    {sortForDisplay(ruleOptions, (r) => `${r.code} — ${r.libelle}`).map((r) => (
                       <option key={r.code} value={r.code}>
                         {r.code} — {r.libelle}
                       </option>

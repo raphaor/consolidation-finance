@@ -9,6 +9,17 @@ import { usePersistentState } from '../utils/usePersistentState';
 
 type ReportType = 'bilan' | 'cr';
 
+// Contrôle de cohérence de clôture : F99 doit égaler la somme des autres flux
+// qui s'y reportent (cf. docs/FLUX_CONSO.md). On affiche l'écart F99 − Σ(autres
+// flux), attendu nul. Remplace l'ancienne colonne « Total compte » (qui sommait
+// tous les flux F99 inclus — redondant avec F99 lui-même).
+const CLOSING_FLOW = 'F99';
+const OTHER_FLOWS = FLOW_COLUMNS.filter((f) => f !== CLOSING_FLOW);
+
+function closingControl(line: Record<string, number>): number {
+  return line[CLOSING_FLOW] - OTHER_FLOWS.reduce((sum, f) => sum + line[f], 0);
+}
+
 export function RapportsPage() {
   // Filtres persistés (survivent au changement d'onglet et au rechargement).
   const [reportType, setReportType] = usePersistentState<ReportType>('rapports.reportType', 'bilan');
@@ -71,7 +82,7 @@ export function RapportsPage() {
     void load();
   }, [load]);
 
-  const { pivot, accounts, totals } = useMemo(() => buildPivot(rows), [rows]);
+  const { pivot, accounts, signedTotals } = useMemo(() => buildPivot(rows), [rows]);
   const naturePivot = useMemo(() => buildNaturePivot(rows), [rows]);
 
   const allExpanded =
@@ -172,7 +183,9 @@ export function RapportsPage() {
                     {flow}
                   </th>
                 ))}
-                <th className="num grid__total">Total</th>
+                <th className="num grid__total" title="F99 − Σ(autres flux), attendu nul">
+                  Contrôle
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -185,10 +198,7 @@ export function RapportsPage() {
               )}
               {naturePivot.accounts.map((account) => {
                 const detail = naturePivot.byAccount.get(account)!;
-                const accTotal = FLOW_COLUMNS.reduce(
-                  (sum, f) => sum + detail.total[f],
-                  0,
-                );
+                const accControl = closingControl(detail.total);
                 const isOpen = expanded.has(account);
                 return (
                   <Fragment key={account}>
@@ -212,15 +222,12 @@ export function RapportsPage() {
                         </td>
                       ))}
                       <td className="num num--strong">
-                        {formatAmount(accTotal)}
+                        {formatAmount(accControl)}
                       </td>
                     </tr>
                     {isOpen &&
                       detail.natures.map((nat) => {
-                        const natTotal = FLOW_COLUMNS.reduce(
-                          (sum, f) => sum + nat.values[f],
-                          0,
-                        );
+                        const natControl = closingControl(nat.values);
                         return (
                           <tr key={`${account}|${nat.nature}`} className="tree-child">
                             <td className="grid__rowhead grid__rowhead--child">
@@ -233,7 +240,7 @@ export function RapportsPage() {
                                   : ''}
                               </td>
                             ))}
-                            <td className="num">{formatAmount(natTotal)}</td>
+                            <td className="num">{formatAmount(natControl)}</td>
                           </tr>
                         );
                       })}
@@ -244,21 +251,21 @@ export function RapportsPage() {
             {naturePivot.accounts.length > 0 && (
               <tfoot>
                 <tr>
-                  <td className="grid__rowhead grid__total">Total flux</td>
+                  <td
+                    className="grid__rowhead grid__total"
+                    title="Σ(comptes créditeurs) − Σ(comptes débiteurs)"
+                  >
+                    Total (C − D)
+                  </td>
                   {FLOW_COLUMNS.map((flow) => (
                     <td key={flow} className="num num--strong">
-                      {naturePivot.totals[flow] !== 0
-                        ? formatAmount(naturePivot.totals[flow])
+                      {naturePivot.signedTotals[flow] !== 0
+                        ? formatAmount(naturePivot.signedTotals[flow])
                         : ''}
                     </td>
                   ))}
                   <td className="num num--strong">
-                    {formatAmount(
-                      FLOW_COLUMNS.reduce(
-                        (sum, f) => sum + naturePivot.totals[f],
-                        0,
-                      ),
-                    )}
+                    {formatAmount(closingControl(naturePivot.signedTotals))}
                   </td>
                 </tr>
               </tfoot>
@@ -276,7 +283,9 @@ export function RapportsPage() {
                     {flow}
                   </th>
                 ))}
-                <th className="num grid__total">Total compte</th>
+                <th className="num grid__total" title="F99 − Σ(autres flux), attendu nul">
+                  Contrôle
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -289,7 +298,6 @@ export function RapportsPage() {
               )}
               {accounts.map((account) => {
                 const line = pivot.get(account)!;
-                const total = FLOW_COLUMNS.reduce((sum, f) => sum + line[f], 0);
                 return (
                   <tr key={account}>
                     <td className="grid__rowhead">{account}</td>
@@ -298,7 +306,7 @@ export function RapportsPage() {
                         {line[flow] !== 0 ? formatAmount(line[flow]) : ''}
                       </td>
                     ))}
-                    <td className="num num--strong">{formatAmount(total)}</td>
+                    <td className="num num--strong">{formatAmount(closingControl(line))}</td>
                   </tr>
                 );
               })}
@@ -306,16 +314,19 @@ export function RapportsPage() {
             {accounts.length > 0 && (
               <tfoot>
                 <tr>
-                  <td className="grid__rowhead grid__total">Total flux</td>
+                  <td
+                    className="grid__rowhead grid__total"
+                    title="Σ(comptes créditeurs) − Σ(comptes débiteurs)"
+                  >
+                    Total (C − D)
+                  </td>
                   {FLOW_COLUMNS.map((flow) => (
                     <td key={flow} className="num num--strong">
-                      {totals[flow] !== 0 ? formatAmount(totals[flow]) : ''}
+                      {signedTotals[flow] !== 0 ? formatAmount(signedTotals[flow]) : ''}
                     </td>
                   ))}
                   <td className="num num--strong">
-                    {formatAmount(
-                      FLOW_COLUMNS.reduce((sum, f) => sum + totals[f], 0),
-                    )}
+                    {formatAmount(closingControl(signedTotals))}
                   </td>
                 </tr>
               </tfoot>
