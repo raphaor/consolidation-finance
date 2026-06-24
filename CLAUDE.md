@@ -48,20 +48,19 @@ Variables d'env du serveur : `CONSO_PORT` (3000), `CONSO_DB_PATH` (`conso.duckdb
 
 ## Architecture du moteur
 
-### Pipeline en 4 étapes (niveaux de stockage)
+### Pipeline en 3 étapes (niveaux de stockage)
 
-Tout passe par une seule table de faits `fact_entry`, dont la colonne `level` matérialise l'avancement. Chaque étape lit un niveau et produit le suivant — toute la logique est **du SQL déclaratif** (une passe SQL par règle métier), pas du calcul ligne à ligne en Rust.
+Tout passe par une seule table de faits `fact_entry`, dont la colonne `level` matérialise l'avancement. Chaque étape lit un niveau et produit le suivant — toute la logique est **du SQL déclaratif** (une passe SQL par règle métier), pas du calcul ligne à ligne en Rust. Les variations de périmètre (entrée F01, sortie F98) ne sont **plus** une étape native : elles sont repensées en **règles** (l'ancien niveau `reclassified` et l'étape `B` ont été supprimés ; les lettres `A/C/D` sont conservées pour la continuité de nommage).
 
 ```
-stg_entry ──A. agrégation────────▶ fact_entry[corporate]      (devise fonctionnelle)
-          ──B. reclassification──▶ fact_entry[reclassified]   (variations de périmètre)
-          ──C. conversion────────▶ fact_entry[converted]      (devise de présentation, écarts F80/F81)
-          ──D. consolidation─────▶ fact_entry[consolidated]   (× pct_integration selon méthode)
+stg_entry ──A. agrégation────▶ fact_entry[corporate]      (devise fonctionnelle)
+          ──C. conversion────▶ fact_entry[converted]      (devise de présentation, écarts F80/F81)
+          ──D. consolidation─▶ fact_entry[consolidated]   (× pct_integration selon méthode)
 ```
 
-- Orchestration : `src/pipeline/mod.rs`. Les 4 étapes implémentent le trait `Step` ; `run_steps` les enchaîne et, après B/C/D, injecte les flux de staging (`staging.rs`) puis reconstruit les clôtures.
-- Un fichier par étape : `aggregate.rs`, `reclassify.rs`, `convert.rs`, `consolidate.rs`.
-- `ConvertParams::load_params` hydrate les paramètres d'un run depuis `dim_scenario` + `app_config` (devises de présentation/pivot, périodes N et N-1 dérivée, rate_set). Pas de `Default` — un run dépend du scénario.
+- Orchestration : `src/pipeline/mod.rs`. Les 3 étapes implémentent le trait `Step` ; `run_steps` les enchaîne et, **après chaque niveau** (corporate inclus) : carry à-nouveau (`a_nouveau.rs`) → injection des flux de staging par préfixe de nature (`staging.rs`) → reconstruction autoritaire des clôtures (`materialize_closures.rs`) → hook post-niveau (injection des règles au niveau ciblé).
+- Un fichier par étape : `aggregate.rs`, `convert.rs`, `consolidate.rs` (+ `a_nouveau.rs`, `staging.rs`, `materialize_closures.rs`).
+- `ConvertParams::load_params(con, consolidation_id)` hydrate les paramètres d'un run depuis `dim_consolidation` + `app_config` (devises de présentation/pivot, exercice N, rate_set, **taux d'ouverture porté par N** — plus de période N-1 dérivée). Pas de `Default` — un run dépend de la consolidation.
 
 ### Modèle de flux et clôtures (`docs/FLUX_CONSO.md`)
 
@@ -96,7 +95,7 @@ C'est un **exécuteur générique**, PAS l'endroit où coder une règle métier 
 
 ### Serveur (`src/bin/server.rs`)
 
-Axum, état partagé `Arc<Mutex<Connection>>` (`src/state.rs`). Sert l'API JSON et, si `CONSO_WEB_DIR` existe, le frontend statique. Routes : `/api/health`, `/api/levels`, `/api/bilan`, `/api/compte-resultat`, `/api/entries`, `/api/scenarios`, `POST /api/run`, `POST /api/reset`, `POST /api/rules/run`, + CRUD master data / dimensions / import (`masterdata.rs`, `dimensions.rs`, `import.rs`).
+Axum, état partagé `Arc<Mutex<Connection>>` (`src/state.rs`). Sert l'API JSON et, si `CONSO_WEB_DIR` existe, le frontend statique. Routes : `/api/health`, `/api/levels`, `/api/bilan`, `/api/compte-resultat`, `/api/entries`, `/api/consolidations`, `POST /api/run` (applique le ruleset porté par `dim_consolidation.ruleset_code`, intercalé par niveau — il n'y a **pas** de route `/api/rules/run` standalone), `POST /api/reset`, CRUD règles/rulesets (`/api/rules`, `/api/rulesets`), + CRUD master data / dimensions / import (`masterdata.rs`, `dimensions.rs`, `import.rs`).
 
 ### Frontend (`web/src/`)
 

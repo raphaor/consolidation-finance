@@ -18,16 +18,16 @@ Les solutions actuelles sont soit professionnelles et coûteuses, soit s'appuien
 - [x] Légale (IFRS / French GAAP / US GAAP…)
 - [x] Budgétaire / prévisionnelle
 - [x] De gestion (KPI internes)
-- [x] Multi-scénarios (réel / budget / prévision)
+- [x] Multi-phases (réel / budget / prévision)
 
-> MVP : **réel seul**. Budget / prévision / multi-scénarios en post-MVP.
+> MVP : **réel seul**. Budget / prévision / multi-phases en post-MVP.
 
 ### 3.2 Structure du groupe
 - Définie par un **périmètre de consolidation** (scope) : mère + entités, chacune avec sa méthode (globale, proportionnelle, équivalence, cas spéciaux type IFRS 5).
 - Calcul des **intérêts minoritaires**.
 - Gestion des **entrées / sorties / fusions**, en cours d'exercice ou en début de période.
 
-> Périmètre = table satellite **versionnée** (`sat_perimeter`, clé `perimeter_set × entity × period`) ; méthode + % par entité, réutilisable entre scénarios ([Q5](./docs/QUESTIONS_OUVERTES.md), [Q35](./docs/QUESTIONS_OUVERTES.md) TRANCHÉES).
+> Périmètre = table satellite **versionnée** (`sat_perimeter`, clé `perimeter_set × entity × period`) ; méthode + % par entité, réutilisable entre consolidations ([Q5](./docs/QUESTIONS_OUVERTES.md), [Q35](./docs/QUESTIONS_OUVERTES.md) TRANCHÉES).
 
 ### 3.3 Référentiels & plans de compte
 - Plan de compte **customisable**.
@@ -131,6 +131,6 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 **Reporté (post-MVP)**
 - Extensions natives : fusions, entrées/sorties en cours d'exercice, IFRS 5.
 - Règles avancées : intérêts minoritaires, retraitements, variations de capital, répartition des résultats (cf. catalogue [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md) §10).
-- Multi-scénarios (budget, prévision), TFT, annexe, dashboards.
+- Multi-phases (budget, prévision), TFT, annexe, dashboards.
 
 **Encore à trancher (TÔT) avant la 1ʳᵒ implémentation** : [Q6](./docs/QUESTIONS_OUVERTES.md) (mode complète/marge), [Q8](./docs/QUESTIONS_OUVERTES.md) (workflow validation), [Q9](./docs/QUESTIONS_OUVERTES.md) (granularité de clôture), [Q10](./docs/QUESTIONS_OUVERTES.md) (détection interco — utile au post-MVP), [Q12](./docs/QUESTIONS_OUVERTES.md) (cible de perf).

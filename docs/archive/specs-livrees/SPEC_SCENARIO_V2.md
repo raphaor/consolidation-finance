@@ -1,5 +1,12 @@
 # SPEC : Scénario de consolidation v2 et taux pivot
 
+> ⚠️ **SUPERSEDÉ par [Q41]** (redesign identité, 2026-06-23). L'objet `dim_scenario` décrit ici a
+> été renommé `dim_consolidation` et repensé : PK technique `id` auto + clé naturelle
+> `(phase, exercice, perimeter_set, variant, presentation_currency)` ; `code` supprimé ;
+> `category`→`phase`, `entry_period`→`exercice`, `a_nouveau_scenario`→`a_nouveau_consolidation_id` ;
+> périodes explicites `perimeter_period`/`rate_period`. Voir `MODELE_DONNEES.md` §3 et
+> `QUESTIONS_OUVERTES.md` Q41. **Spec livrée conservée pour l'historique — ne pas réécrire.**
+
 *19 juin 2026 — Rédigé par Hermes, à implémenter par Opencode*
 
 ## Objectif

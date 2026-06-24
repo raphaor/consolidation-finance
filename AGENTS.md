@@ -2,7 +2,7 @@
 
 ## État du projet
 
-Projet en **phase prototype / POC**. Le moteur Rust (`prototype/rust/`, crate `conso-engine`) et le frontend React (`web/`) sont implémentés et fonctionnels : pipeline 4 étapes, conversion multi-devises, éditeur de règles, API REST, master data + import CSV. Le prototype Python (`prototype/python/`) reste une **référence historique** dont le Rust est le portage. Toute modification doit s'inscrire dans le cadre décrit par [`EXPRESSION_DE_BESOIN.md`](./EXPRESSION_DE_BESOIN.md), qui reste la source de vérité fonctionnelle. Voir [`CLAUDE.md`](./CLAUDE.md) pour l'architecture du moteur et les commandes de build/test.
+Projet en **phase prototype / POC**. Le moteur Rust (`prototype/rust/`, crate `conso-engine`) et le frontend React (`web/`) sont implémentés et fonctionnels : pipeline 3 étapes (corporate → converted → consolidated), conversion multi-devises, éditeur de règles, API REST, master data + import CSV. Le prototype Python (`prototype/python/`) reste une **référence historique** dont le Rust est le portage. Toute modification doit s'inscrire dans le cadre décrit par [`EXPRESSION_DE_BESOIN.md`](./EXPRESSION_DE_BESOIN.md), qui reste la source de vérité fonctionnelle. Voir [`CLAUDE.md`](./CLAUDE.md) pour l'architecture du moteur et les commandes de build/test.
 
 Langue de travail : **français** (docs, termes métier, commits). Conserver ce registre.
 

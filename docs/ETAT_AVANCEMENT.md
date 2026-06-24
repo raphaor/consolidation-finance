@@ -3,7 +3,7 @@
 > Vue consolidée de **ce qui est implémenté**, de son **comportement**, et de **ce qui reste**.
 > Pour le *pourquoi* d'une décision → [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) ;
 > pour le détail fonctionnel → les docs thématiques liées ci-dessous.
-> Dernière mise à jour : **2026-06-22**.
+> Dernière mise à jour : **2026-06-24**.
 
 **Légende** : ✅ implémenté & testé · 🟡 partiel / en cours · ⬜ reporté (post-MVP).
 
@@ -18,7 +18,7 @@ ligne à ligne. Orchestration : `pipeline/mod.rs`.
 
 | Étape | Comportement |
 |---|---|
-| **A. Agrégation** | Cumul des liasses par grain complet, en devise fonctionnelle. Filtré sur le scénario du run + les entités du périmètre. |
+| **A. Agrégation** | Cumul des liasses par grain complet, en devise fonctionnelle. Filtré sur la **phase** + l'exercice de la consolidation + les entités du périmètre, isolé par `consolidation_id`. |
 | **C. Conversion** | Multi-devises via **cross-rate** (devise pivot applicative), écarts de change F80/F81. |
 | **D. Consolidation** | `× pct_integration` selon la méthode de l'entité. |
 | **Clôtures** | F99 **reconstruite par identité** à chaque niveau (`materialize_closures`), pilotée par les données (`flux_de_report`), jamais en dur. |
@@ -76,24 +76,32 @@ de périmètre. → [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9, [`A_NOUVEAU.md`](./A
 ## Périmètre versionné — [Q35]
 
 ✅ `dim_perimeter_set` + `sat_perimeter` clé par `(perimeter_set, entity, period)` +
-`dim_scenario.perimeter_set`. Un même périmètre est **réutilisable** entre scénarios/variantes
-(symétrique des jeux de taux). Résolution `scénario → perimeter_set` en SQL.
+`dim_consolidation.perimeter_set`. Un même périmètre est **réutilisable** entre consolidations/variantes
+(symétrique des jeux de taux). Résolution `consolidation → perimeter_set` en SQL, période lue à
+`perimeter_period` (défaut = exercice).
 
 ## Taux de change versionnés — [Q34]
 
 ✅ `dim_rate_set` + `sat_exchange_rate` clé par `(rate_set, currency_source, period)` +
-`dim_scenario.rate_set`. CRUD + import CSV. Taux clôture & moyen, conversion vers une **devise
-pivot** applicative.
+`dim_consolidation.rate_set`, période lue à `rate_period` (défaut = exercice). CRUD + import CSV.
+Taux clôture & moyen, conversion vers une **devise pivot** applicative. **Taux d'ouverture**
+(`sat_exchange_rate.taux_ouverture` = clôture N-1, **portée par N**) consommé par la branche
+F00/F01 de la conversion — plus de dépendance à une période N-1 (`prev_period` supprimé).
 
-## Scénario (v2) — `dim_scenario`
+## Consolidation (v3) — `dim_consolidation` [Q41]
 
-✅ Objet composite : catégorie, période d'entrée, devise de présentation, variante, ruleset,
-`rate_set`, `perimeter_set`, `a_nouveau_scenario`. → archive `SPEC_SCENARIO_V2.md`.
+✅ Objet composite, **redesign identité** (`dim_scenario`→`dim_consolidation`) : PK technique `id`
+auto + **clé naturelle UNIQUE** `(phase, exercice, perimeter_set, variant, presentation_currency)`.
+`code` disparaît ; `category`→`phase`, `entry_period`→`exercice`, `a_nouveau_scenario`→
+`a_nouveau_consolidation_id`. **Périodes explicites** `perimeter_period` + `rate_period` (défaut =
+exercice), ruleset, `rate_set`, `perimeter_set`. Les saisies (`stg_entry`) sont au grain
+**phase + entry_period**, donc **partagées** entre consolidations ; chaque run est isolé par
+`fact_entry.consolidation_id`. → spec d'origine archivée `SPEC_SCENARIO_V2.md` (supersédée par Q41).
 
 ## À-nouveau (report d'ouverture) — [Q31]
 
 ✅ Report de la clôture **N-1 figée** (snapshot) sur l'ouverture **N**, piloté par les données
-(`flux_a_nouveau` du schéma + `dim_scenario.a_nouveau_scenario`). Collé au **corporate** et au
+(`flux_a_nouveau` du schéma + `dim_consolidation.a_nouveau_consolidation_id`). Collé au **corporate** et au
 **consolidé** (fige le % N-1) ; le converti se déduit par conversion normale. **Garde par
 compte** : seul le bilan reporte (le résultat non). Contrôle de cohérence dans `validate`.
 → Spec : [`A_NOUVEAU.md`](./A_NOUVEAU.md) / [`A_NOUVEAU_IMPL.md`](./A_NOUVEAU_IMPL.md).
@@ -141,7 +149,7 @@ REST dédiés (`prototype/rust/src/entries.rs`) : `POST /api/entries` (batch), `
 | **Marqueur** | `source = 'MANUAL'` forcé à l'INSERT (champ existant non propagé par le pipeline). |
 | **Protection** | PUT/DELETE refusés si `source ≠ MANUAL` (anti-écrasement des imports CSV). Insert-only sur le POST (jamais d'écrasement). |
 | **Validation** | Champs obligatoires + cohérence référentielle (FK), transaction atomique au POST (lot entier valide ou rien). |
-| **En-tête commun** | 6 champs factorisés (Scénario, Entité, Exercice, Période, Devise, Nature) en haut du batch, pré-remplissent chaque nouvelle ligne. Bouton « ↧ Appliquer partout » pour propager aux lignes existantes. Grille allégée par défaut (Account, Flow, Partner, Titre, Analysis×2, Amount) avec toggle pour afficher les colonnes communes (override au cas par cas). |
+| **En-tête commun** | 6 champs factorisés (Phase, Entité, Exercice, Période, Devise, Nature) en haut du batch, pré-remplissent chaque nouvelle ligne. Bouton « ↧ Appliquer partout » pour propager aux lignes existantes. Grille allégée par défaut (Account, Flow, Partner, Titre, Analysis×2, Amount) avec toggle pour afficher les colonnes communes (override au cas par cas). |
 | **Distinction visuelle** | `EcrituresPage` surligne les lignes `source=MANUAL` (classe `row--manual`) pour la traçabilité. |
 
 ⚠️ Le schéma `stg_entry` ayant évolué (`id` PK), un `POST /api/reset` ou `CONSO_FORCE_RESEED=1`

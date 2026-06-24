@@ -1,5 +1,8 @@
 # SPEC TECHNIQUE : Scénario v2 et taux pivot
 
+> ⚠️ **SUPERSEDÉ par [Q41]** (redesign identité, 2026-06-23) : `dim_scenario`→`dim_consolidation`.
+> Les DDL/SQL ci-dessous reflètent l'état pré-Q41. Voir `MODELE_DONNEES.md` §3 pour le schéma courant.
+
 *Annexe d'implémentation de [`SPEC_SCENARIO_V2.md`](./SPEC_SCENARIO_V2.md).*
 
 Cette note décrit l'implémentation concrète : DDL exacts, SQL de cross-rate,

@@ -1,5 +1,11 @@
 # À-nouveau — Suivi d'implémentation (tracker transitoire)
 
+> 🔁 **Post-Q41 (2026-06-23)** : renommages appliqués depuis ce tracker —
+> `dim_scenario`→`dim_consolidation`, `dim_scenario.a_nouveau_scenario`→
+> `dim_consolidation.a_nouveau_consolidation_id` (entier, FK technique). Les mentions
+> `dim_scenario`/`a_nouveau_scenario` ci-dessous sont **historiques** ; le schéma courant est dans
+> `MODELE_DONNEES.md` §3 et la spec dans [`A_NOUVEAU.md`](./A_NOUVEAU.md).
+
 > Fichier de **suivi de chantier**, à supprimer quand l'à-nouveau est livré.
 > Spec de référence : [`A_NOUVEAU.md`](./A_NOUVEAU.md). Plan complet en bas.
 >

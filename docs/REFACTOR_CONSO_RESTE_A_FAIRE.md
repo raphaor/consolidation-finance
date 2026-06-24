@@ -26,18 +26,18 @@ Suivi du chantier **scenario → consolidation** (+ taux d'ouverture).
 
 ## 🟡 Reste à faire
 
-### 1. Docs (finir) — priorité moyenne
-- [ ] `docs/ETAT_AVANCEMENT.md` : `dim_scenario` / « Scénario (v2) » → `dim_consolidation` (v3) ; `perimeter_set`/`rate_set` référencés par la consolidation ; mention `taux_ouverture`.
-- [ ] `docs/A_NOUVEAU_IMPL.md` : journal d'implémentation — ajouter un bandeau « post-Q41 : `dim_scenario`→`dim_consolidation`, `a_nouveau_scenario`→`a_nouveau_consolidation_id` » (ou marquer comme historique).
-- [ ] `docs/archive/specs-livrees/SPEC_SCENARIO_V2.md` : ajouter un bandeau **« SUPERSEDÉ par Q41 »** en tête (ne pas réécrire — c'est une spec livrée archivée).
-- [ ] `EXPRESSION_DE_BESOIN.md` : vérifier les mentions « scénario » (§3.1 MVP réel seul) — reformuler en « consolidation / phase » si pertinent. Rester court (EDB = source courte par intention).
-- [ ] Compléter au besoin `docs/FLUX_CONSO.md` si une mention `scenario` subsiste.
+### 1. Docs (finir) — ✅ FAIT (2026-06-24)
+- [x] `docs/ETAT_AVANCEMENT.md` : section « Scénario (v2) » → « Consolidation (v3) » [Q41] ; périmètre/taux référencés par `dim_consolidation` avec `perimeter_period`/`rate_period` ; mention `taux_ouverture` ; à-nouveau → `a_nouveau_consolidation_id` ; agrégation filtrée phase+exercice ; en-tête Saisie « Phase » ; date MAJ.
+- [x] `docs/A_NOUVEAU_IMPL.md` : bandeau « post-Q41 » (renommages historiques).
+- [x] `docs/archive/specs-livrees/SPEC_SCENARIO_V2.md` + `SPEC_SCENARIO_V2_TECH.md` : bandeaux **« SUPERSEDÉ par Q41 »** (non réécrits).
+- [x] `EXPRESSION_DE_BESOIN.md` : « multi-scénarios » → « multi-phases » ; « entre scénarios » → « entre consolidations ».
+- [x] `docs/FLUX_CONSO.md` : aucune mention `scenario` (rien à faire).
 
-### 2. Scripts Python de recette — priorité moyenne
-`golden_test.py`, `smoke_test.py`, `rules_test.py` (considérés « référence historique » selon `AGENTS.md`) sont **cassés** contre la nouvelle API :
-- [ ] Appels `/api/run {scenario}` → `{consolidation_id}` ; `/api/scenarios` → `/api/consolidations` ; payloads entries `scenario`→`phase`.
-- [ ] `data_golden/` déjà aligné (consolidations.csv, entries header `phase`, rates taux_ouverture) — vérifier que `golden_test.py` résout un `id` de consolidation.
-- [ ] **Décision à prendre** : les remettre en service, ou poser un bandeau « historique, API pré-Q41 » pour figer. (Recommandé : bandeau + créer une recette Rust/HTTP côté serveur si on veut une recette vivante.)
+### 2. Scripts Python de recette — ✅ FAIT (2026-06-24), golden à recalculer au runtime
+Décision retenue : **migrés et gardés vivants en Python** (cohérent avec la stratégie de tests : recette = smoke tests Python). Paramètres exacts de la nouvelle API : query `consolidation` (entier) aux niveaux `fact_entry`, `phase` (texte) au niveau `raw` ; body `/api/run` = `{"consolidation_id": N}` ; `/api/scenarios`→`/api/consolidations` ; md table `scenarios`→`consolidations`.
+- [x] `smoke_test.py` : id résolu via `/api/consolidations` (phase+exercice) ; run par id ; bilan/CR par `consolidation=` ; filtre `phase` au niveau raw ; **3 niveaux** (drop `reclassified`).
+- [x] `rules_test.py` : **`/api/rules/run` supprimée** → le ruleset est porté par `dim_consolidation.ruleset_code` (PUT master data) et exécuté dans `/api/run` (hook par niveau) ; rapport lu dans `body.ruleset_report`.
+- [x] `golden_test.py` : infra cliente migrée (id, run par id, pagination). **Réserve** : le golden master encode l'ancien modèle 4 niveaux (`reclassified`) + sortie F98 native ; bloc `S` et invariants reclassified (2b/3/4/6b/7b/8) **obsolètes** → bandeau STALE posé, invariants neutralisés. **Valeurs golden à recalculer contre le moteur 3-niveaux en marche** (tâche runtime, liée à la recette périmètre-par-règles §4).
 
 ### 3. Données & environnement — priorité haute (utilisateur)
 - [ ] **La base `prototype/rust/conso.duckdb` a été reset** lors du smoke test (CONSO_FORCE_RESEED=1). Elle ne contient plus que la consolidation `REEL` issue de `data/consolidations.csv`, **sans saisies**. Re-saisir les liasses (onglet Saisie, colonne **Phase**) et recréer `REEL_2023` si besoin.
