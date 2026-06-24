@@ -37,9 +37,10 @@ Sémantique des champs du CSV et caractéristiques *master data* de chaque dimen
 
 Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traitements alimentés).
 
-### `Scenario`
-- **Master** (objet composite v2) : `code`, `libellé`, `category` (réel / budget / prévision), `entry_period`, `presentation_currency`, `variant`, `ruleset_code` (nullable), `rate_set` (jeu de taux), `perimeter_set` (jeu de périmètre), `a_nouveau_scenario` (conso N-1 figée, nullable), `statut` (ouvert / verrouillé). La **devise pivot** est applicative (`app_config`), pas par scénario.
-- **Conso** : agrège **toutes les références d'un run** (taux, périmètre, règles, à-nouveau) ; pilotage multi-scénarios.
+### `Consolidation` (ex `Scenario`)
+- **Master** (objet composite v3 — `dim_consolidation`, cf. [Q41](./QUESTIONS_OUVERTES.md)) : `id` (PK technique auto), `libellé`, **clé naturelle** `(phase, exercice, perimeter_set, variant, presentation_currency)` ; hors clé : `perimeter_period` + `rate_period` (périodes explicites, défaut = exercice), `ruleset_code` (nullable), `a_nouveau_consolidation_id` (conso N-1 figée, nullable), `statut` (brouillon / ouvert / verrouillé). La **devise pivot** est applicative (`app_config`), pas par consolidation.
+- **Remontée** : les **saisies** (`stg_entry`) sont au grain **remontée** = `Phase` + `Entry_period` (colonne `phase`, partagée entre toutes les consolidations qui consomment la remontée). `fact_entry` référence la consolidation par `consolidation_id` (isolation d'un run). La **phase** est la dimension `dim_scenario_category` (catalogue des phases, inchangé).
+- **Conso** : agrège **toutes les références d'un run** (taux, périmètre, règles, à-nouveau) ; pilotage multi-consolidations.
 
 ### `Entity`
 - **Master** : `code`, `libellé`, `forme_juridique`, `pays`, `devise_fonctionnelle` (→ `Currency`), `entité_parent` (structure de groupe), `statut`
@@ -99,7 +100,7 @@ Pour chaque dimension : *Master data* (attributs à gérer) · *Conso* (traiteme
 ## 4. Tables satellites (référencées par les dimensions)
 
 ### Périmètre de consolidation
-Versionné comme les taux : un **jeu de périmètre** (`dim_perimeter_set`) est référencé par le scénario (`dim_scenario.perimeter_set`), symétrique de `rate_set` (cf. [Q35](./QUESTIONS_OUVERTES.md)). `sat_perimeter` est donc clé par `Perimeter_set × Entity × Period` (un même périmètre est réutilisable entre scénarios/variantes). Liste, par cette clé, les entités du scope avec leurs caractéristiques de conso :
+Versionné comme les taux : un **jeu de périmètre** (`dim_perimeter_set`) est référencé par la consolidation (`dim_consolidation.perimeter_set`, à la période `perimeter_period`), symétrique de `rate_set` (cf. [Q35](./QUESTIONS_OUVERTES.md)). `sat_perimeter` est donc clé par `Perimeter_set × Entity × Period` (un même périmètre est réutilisable entre consolidations/variantes). Liste, par cette clé, les entités du scope avec leurs caractéristiques de conso :
 - `méthode` (globale / proportionnelle / équivalence / IFRS5)
 - `%_intérêt` et `%_intégration` (= % de contrôle)
 - `entrée_sortie_mid_exercice` (booléen, lié à `Period`)
@@ -112,7 +113,7 @@ Pilotage : variations de périmètre et mise en équivalence (natif MVP) ; inté
 Répond à [Q5](./QUESTIONS_OUVERTES.md).
 
 ### Taux de change
-- **Versionné** : `dim_rate_set` (jeu de taux) référencé par `dim_scenario.rate_set`. `sat_exchange_rate` est clé par `(rate_set, currency_source, period)` et donne `taux_close` + `taux_moyen` (moyenne **simple** sur la période). Tous les taux convertissent vers une **devise pivot** applicative ; la conversion vers la devise de présentation se fait par **cross-rate** (cf. [Q34](./QUESTIONS_OUVERTES.md)).
+- **Versionné** : `dim_rate_set` (jeu de taux) référencé par `dim_consolidation.rate_set` (à la période `rate_period`). `sat_exchange_rate` est clé par `(rate_set, currency_source, period)` et donne `taux_close` + `taux_moyen` (moyenne **simple** sur la période) + **`taux_ouverture`** (= clôture N-1, porté par N — résout `close_n1` sans période antérieure, cf. [Q42](./QUESTIONS_OUVERTES.md)). Tous les taux convertissent vers une **devise pivot** applicative ; la conversion vers la devise de présentation se fait par **cross-rate** (cf. [Q34](./QUESTIONS_OUVERTES.md)).
 - **Application** (conversion multi-devises [B]) : le **taux par flux** est piloté par le **schéma de flux** du compte (`dim_account.flow_scheme` → `sat_flow_scheme_item`), avec repli sur le défaut `dim_flow`. Un compte de **bilan** suit le défaut (`taux_clôture` à la clôture, écart F80/F81) ; un compte de **résultat** suit le schéma `RESULTAT` (`taux_moyen`, **sans écart**). Cf. [`FLUX_CONSO.md`](./FLUX_CONSO.md) « Schémas de flux » et [Q32](./QUESTIONS_OUVERTES.md).
 - **Saisie** : écran CRUD + import d'un fichier CSV (format à spécifier). Pas de récupération automatique externe au POC.
 
@@ -127,7 +128,7 @@ Chaque dimension appartient à une **catégorie** (registre `engine/src/dimensio
 
 | Catégorie | Propagée | Pilotable (règles) | Nullable | Grain de clôture | Dans les **totaux** |
 |---|---|---|---|---|---|
-| **Fixed** (scenario, entry_period, period, currency) | oui | non | non | oui | oui |
+| **Fixed** (phase, entry_period, period, currency) | oui | non | non | oui | oui |
 | **Active** (entity, account, flow, nature) | oui | oui | non | oui | oui |
 | **Analytical** (partner, share, analysis, analysis2 + **custom**) | oui | oui | **oui** | **oui** | **non (voir ci-dessous)** |
 
@@ -146,11 +147,11 @@ Conséquence pratique : **une ligne principale ne doit jamais porter de valeur a
 
 Le modèle n'a pas de FK dures (DuckDB, choix du proto). Les liens entre objets sont déclarés dans un **registre central** (`engine/src/references.rs`) : chaque `(table.colonne) → (table_cible.colonne)`. Il couvre notamment :
 
-- `dim_scenario.{category, entry_period, presentation_currency, variant, ruleset_code, rate_set, perimeter_set}`
+- `dim_consolidation.{phase, exercice, perimeter_period, rate_period, presentation_currency, variant, ruleset_code, rate_set, perimeter_set, a_nouveau_consolidation_id}`
 - `dim_entity.{devise_fonctionnelle, entite_parent}`, `dim_account.{sous_classe, flow_scheme}`, `dim_flow.{flux_ecart, flux_de_report}`, `sat_flow_scheme_item.{scheme, flow, flux_ecart}`
 - **références dynamiques** (ajoutées à l'exécution) : caractéristiques N1/N2 et **références directes** (patron B, ex. `dim_account.compte_parent → dim_account.code`), fusionnées au graphe statique par `references::all_references`
 - `sat_perimeter.{perimeter_set, entity, period, methode}`, `sat_exchange_rate.{rate_set, currency_source, period}`
-- écritures : `{scenario, entity, entry_period, period, account, flow, currency, nature}` + `{partner, share}` → **`dim_entity`** (les trois rôles de la §2.2)
+- écritures : `stg_entry.{phase, …}` et `fact_entry.{consolidation_id, …}` ; `{entity, account, flow, currency, nature}` + `{partner, share}` → **`dim_entity`** (les trois rôles de la §2.2) ; `phase → dim_scenario_category`, `consolidation_id → dim_consolidation`
 - `dim_ruleset_item.{ruleset_code, rule_code}`
 
 **Validation à l'écriture** (rejet d'une référence inexistante, message explicite) :

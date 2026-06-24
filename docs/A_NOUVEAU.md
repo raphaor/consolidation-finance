@@ -51,14 +51,15 @@ dans laquelle son solde se reporte à la période suivante.
 > intermédiaire → ouverture intermédiaire) suffirait à activer un second
 > à-nouveau, sans toucher au code.
 
-### 2.2 `dim_scenario.a_nouveau_scenario` (nouveau champ)
+### 2.2 `dim_consolidation.a_nouveau_consolidation_id` (champ)
 
-La **définition d'une consolidation** (= `dim_scenario`) reçoit une référence
-**facultative** vers la consolidation d'à-nouveau.
+La **définition d'une consolidation** (= `dim_consolidation`, ex `dim_scenario` —
+cf. [Q41](./QUESTIONS_OUVERTES.md)) reçoit une référence **facultative** vers la
+consolidation d'à-nouveau.
 
 | Attribut | Rôle |
 |---|---|
-| `a_nouveau_scenario` | FK `dim_scenario` (nullable). Le run N-1 figé dont on reporte la clôture. **NULL = pas d'à-nouveau** (cf. §6). |
+| `a_nouveau_consolidation_id` | FK `dim_consolidation.id` (nullable). Le run N-1 figé dont on reporte la clôture. **NULL = pas d'à-nouveau** (cf. §6). |
 
 ### 2.3 Snapshot figé (décision : à-nouveau = conso N-1 figée)
 
@@ -104,6 +105,8 @@ il n'y a (presque) rien à coller au-dessus :
   l'identité de reconstruction `F99_converti = F99_fonctionnel × taux_clôture`,
   on a `F00_converti = F00_corporate × taux_clôture_{N-1} = F99_converti N-1`.
   → **aucune collecte ni exemption au converti.**
+  *(Sourcing : `taux_clôture_{N-1}` = `sat_exchange_rate.taux_ouverture` porté par
+  la période N — cf. [Q42](./QUESTIONS_OUVERTES.md) ; aucune période N-1 requise.)*
 - **consolidé** : **seul niveau qui exige une collecte du snapshot** (+ exemption
   du `× pct` à l'étape D, §3.3), car le **% d'intégration a pu changer** entre
   N-1 et N — il ne peut pas être reproduit par le pipeline. La collecte fige le
@@ -331,7 +334,7 @@ une règle au niveau corporate : chaque constituant X génère `−X` sur F98, d
 > ce que **tous les packages soient entrants** et que leur F00 soit reclassé sur
 > F01. Le scope de consolidation doit le refléter. »
 
-Quand `dim_scenario.a_nouveau_scenario` est NULL :
+Quand `dim_consolidation.a_nouveau_consolidation_id` est NULL :
 
 - Aucune entité n'a de report → **toutes** sont traitées comme entrantes → tous
   les F00 → F01 (règle §5.1, scope `entree = true`).
@@ -349,8 +352,8 @@ Quand `dim_scenario.a_nouveau_scenario` est NULL :
 | Élément | Nature | Détail |
 |---|---|---|
 | `dim_flow.flux_a_nouveau` | Schéma | Nouveau champ nullable (F99 → F00). |
-| `dim_scenario.a_nouveau_scenario` | Schéma | FK nullable vers le run N-1 figé. |
-| Isolation des runs par scénario | Moteur | `DELETE … WHERE scenario = ?` + préservation des scénarios figés. |
+| `dim_consolidation.a_nouveau_consolidation_id` | Schéma | FK nullable vers le run N-1 figé (`dim_consolidation.id`). |
+| Isolation des runs par consolidation | Moteur | `DELETE … WHERE consolidation_id = ?` + préservation des consolidations figées. |
 | Injection du report | Moteur | Coller F99[N-1] → F00[N] au **corporate** (écrase la liasse) et au **consolidé** ; le converti se déduit par conversion normale. Entités présentes en N-1 seulement. |
 | Exemption F00 | Moteur | **Consolidation seule** : `× pct` exclut les flux cibles d'à-nouveau. **Conversion : aucune exemption** (elle reproduit le F99 converti N-1 + F80 depuis le corporate). |
 | Suppression étape B | Moteur | Pipeline corporate → converti ; niveau `reclassified` **retiré du programme entier**. |

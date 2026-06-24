@@ -31,9 +31,9 @@ Langue de travail : **français** (docs, termes métier, commits). Conserver ce 
 Format d'échange : **CSV** (pour le prototype uniquement, évolutif ensuite).
 
 Champs en entrée (respecter l'ordre et la casse) :
-`Scenario, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Partner*, Share*, Analysis*, Analysis2*, Source*, Amount`
+`Phase, Entity, Entry_period, Period, Account, Flow, Currency, Nature, Partner*, Share*, Analysis*, Analysis2*, Source*, Amount`
 
-Champs marqués `*` sont **optionnels**. Tout autre champ est obligatoire. (`Audit_id` supprimé : provenance portée par `Source`, ancien axe renommé `Analysis2` — cf. [Q13](./docs/QUESTIONS_OUVERTES.md).)
+Champs marqués `*` sont **optionnels**. Tout autre champ est obligatoire. (`Audit_id` supprimé : provenance portée par `Source`, ancien axe renommé `Analysis2` — cf. [Q13](./docs/QUESTIONS_OUVERTES.md).) La saisie est au grain **remontée** (`Phase` + `Entry_period`) — cf. [Q41](./docs/QUESTIONS_OUVERTES.md) : `Phase` remplace l'ancien `Scenario`.
 
 ## Sémantique métier essentielle
 
