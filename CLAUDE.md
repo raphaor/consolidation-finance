@@ -93,18 +93,27 @@ C'est un **exécuteur générique**, PAS l'endroit où coder une règle métier 
 
 **Sécurité SQL** : les identifiants (noms de colonnes/dimensions, niveaux, `via`/`attr`/`ref`) sont validés contre des whitelists dérivées du registre / `information_schema` ; les valeurs passent par des `?` paramétrés. Ne jamais interpoler un identifiant venant du JSON utilisateur.
 
+### Moteur de formules (`src/formula.rs`, `coefficients.rs`, `indicators.rs`) — langage type Excel
+
+Créateur de formules type Excel ([Q43], spec `docs/FORMULES.md`). **Un seul moteur, deux catalogues d'opérandes** selon le contexte.
+
+- `formula.rs` — **moteur pur** (sans DB) : lexer → parser → AST. Fonctions `MIN`/`MAX`/`IF`/`ABS`/`ROUND`/`SAFE_DIV`, opérateurs `+ − × ÷`, références `[ … ]`, séparateur d'arguments `;`. Deux cibles : `compile` → SQL (via un trait `OperandResolver` injecté — garde le compilateur agnostique du contexte) et `evaluate` → `f64` (preview live). `MIN`/`MAX` compilés en `CASE` (pas `LEAST`/`GREATEST` qui ignorent les NULL sous DuckDB).
+- `coefficients.rs` — **volet 1** : un coefficient de règle est une **formule nommée** (`dim_coefficient`, survit au reset ; natifs `pct_integration`/`elim_ic_corp_*` **seedés comme formules** — l'ancienne enum `Coefficient` en dur a disparu). Opérandes = `sat_perimeter` aux 4 perspectives (`entity`/`partner`/`entity_n1`/`partner_n1`), défaut **0** uniforme. Compile vers `(SQL, CoeffJoins)`, consommé par `rules::resolve_coefficient`. Routes `/api/coefficients*`.
+- `indicators.rs` — **volet 2** (indicateurs/KPI) : **postes** (`dim_aggregate` = sélection nommée sur `fact_entry`, traversées `via`/`ref`/`attr`) + **indicateurs** (`dim_indicator` = formule combinant des postes, à un **grain**). Compilé en une requête au grain (`SUM(amount) FILTER (WHERE …)` par poste, **LEFT JOINs partagés**). **Non-additif** (jamais sommé) et **jamais réinjecté dans `fact_entry`**. Routes `/api/aggregates*`, `/api/indicators*`.
+- **Exception à la règle Decimal** : un **coefficient** (un taux) est manipulé en `f64` dans l'expression SQL (parité avec l'ancien `coefficient_expr`) ; les **montants** restent en `Decimal`.
+
 ### Serveur (`src/bin/server.rs`)
 
-Axum, état partagé `Arc<Mutex<Connection>>` (`src/state.rs`). Sert l'API JSON et, si `CONSO_WEB_DIR` existe, le frontend statique. Routes : `/api/health`, `/api/levels`, `/api/bilan`, `/api/compte-resultat`, `/api/entries`, `/api/consolidations`, `POST /api/run` (applique le ruleset porté par `dim_consolidation.ruleset_code`, intercalé par niveau — il n'y a **pas** de route `/api/rules/run` standalone), `POST /api/reset`, CRUD règles/rulesets (`/api/rules`, `/api/rulesets`), + CRUD master data / dimensions / import (`masterdata.rs`, `dimensions.rs`, `import.rs`).
+Axum, état partagé `Arc<Mutex<Connection>>` (`src/state.rs`). Sert l'API JSON et, si `CONSO_WEB_DIR` existe, le frontend statique. Routes : `/api/health`, `/api/levels`, `/api/bilan`, `/api/compte-resultat`, `/api/entries`, `/api/consolidations`, `POST /api/run` (applique le ruleset porté par `dim_consolidation.ruleset_code`, intercalé par niveau — il n'y a **pas** de route `/api/rules/run` standalone), `POST /api/reset`, CRUD règles/rulesets (`/api/rules`, `/api/rulesets`), **coefficients** (`/api/coefficients*`), **indicateurs** (`/api/aggregates*`, `/api/indicators*`), + CRUD master data / dimensions / import (`masterdata.rs`, `dimensions.rs`, `import.rs`). Au démarrage sur base existante, des migrations idempotentes (`coefficients::ensure_schema`, `indicators::ensure_schema`) créent les tables récentes sans reset.
 
 ### Frontend (`web/src/`)
 
-Pages dans `pages/` (Import, MasterData, Pipeline, Rapports, Ecritures, Rules), client API centralisé dans `api.ts`, types partagés dans `types.ts`. En dev, `/api` est proxifié vers `localhost:3000` (`vite.config.ts`).
+Pages dans `pages/` (Import, MasterData, Pipeline, Rapports, Ecritures, Rules, Caracteristiques, Saisie, SchemasJeux, **Coefficients**, **Indicators**), client API centralisé dans `api.ts`, types partagés dans `types.ts`. En dev, `/api` est proxifié vers `localhost:3000` (`vite.config.ts`).
 
 ## Règles métier — invariants à respecter
 
 - **Ne pas inventer de règle de consolidation.** Tout traitement non listé comme **natif** dans `EXPRESSION_DE_BESOIN.md` §3.4 doit passer par l'éditeur de règles. Ne pas coder de logique interco/participation en dur dans le moteur.
-- **Précision décimale** : les montants utilisent `rust_decimal::Decimal` (sérialisé en *nombre* JSON via la feature `serde-float`), jamais `f64`. La finance n'accepte pas le flottant binaire.
+- **Précision décimale** : les montants utilisent `rust_decimal::Decimal` (sérialisé en *nombre* JSON via la feature `serde-float`), jamais `f64`. La finance n'accepte pas le flottant binaire. (Seule exception assumée : les **coefficients** du moteur de formules — des taux — restent en `f64`, cf. §Moteur de formules.)
 - **Perf = critère de validation.** Cible : large (50+ entités, millions de lignes). Préférer le SQL ensembliste DuckDB à toute matérialisation en Rust. Éviter l'architecture spéculative (sécurité, multi-format) tant que non listée comme objectif.
 - Avant d'implémenter, vérifier `docs/QUESTIONS_OUVERTES.md` : toute question `BLOC` ou `TÔT` non tranchée doit être soumise à l'utilisateur d'abord.
 - Style de commit observé : `<type>: <sujet court>` (`docs:`, `refactor:`, `feat:`).
@@ -116,6 +125,7 @@ Pages dans `pages/` (Import, MasterData, Pipeline, Rapports, Ecritures, Rules), 
 - `docs/MODELE_DONNEES.md` — sémantique des champs CSV, dimensions, satellites.
 - `docs/FLUX_CONSO.md` — catalogue des flux F00–F99.
 - `docs/REGLES_CONSO.md` — spécification de l'éditeur de règles.
+- `docs/FORMULES.md` — moteur de formules (coefficients utilisateur + indicateurs/KPI).
 - `docs/TECHNIQUE.md` — architecture et justifications de la stack.
 - `docs/README.md` — index de la doc (vivant vs archive).
 - `docs/archive/` — **historique non maintenu** : specs d'implémentation livrées (`specs-livrees/` : registry, propagation, règles, UI règles, scénario v2) et analyses/revues ponctuelles (`analyses/`). Référence de conception, pas spec courante.

@@ -119,13 +119,44 @@ référence n'est pas sélectionné.
 ✅ **UI riche** (`web/src/pages/RulesPage.tsx`) : dropdown « Traverser » dans la sélection ;
 multi-select repliable pour l'opérateur `IN` (tous cas : direct, via N1, ref) avec cases à cocher
 et fermeture au clic extérieur ; dropdowns adaptatifs pour les 5 modes de destination.
+✅ **Coefficient d'une opération = formule** (volet 1 du moteur de formules, voir ci-dessous) :
+les anciens coefficients en dur (`pct_integration`, `elim_ic_corp_*`…) sont devenus des **formules
+nommées** de la bibliothèque ; le menu Coefficient des règles liste natifs + formules utilisateur.
 ⬜ Catalogue métier à composer : interco avancées, intérêts minoritaires, retraitements,
 variations de capital, répartition des résultats. → [`REGLES_CONSO.md`](./REGLES_CONSO.md) §10.
+
+## Moteur de formules (coefficients & indicateurs) — [Q43]
+
+✅ **Langage type Excel** (`prototype/rust/src/formula.rs`, moteur pur) : lexer → parser → AST,
+`+ − × ÷`, `MIN`/`MAX`/`IF`/`ABS`/`ROUND`/`SAFE_DIV`, références `[ … ]`, séparateur `;`. Deux
+cibles de compilation : **SQL** (exécution) et **f64** (preview live). Un seul moteur, **deux
+catalogues d'opérandes** selon le contexte. Sécurité SQL identique aux règles. → [`FORMULES.md`](./FORMULES.md).
+
+**Volet 1 — Coefficients** (`coefficients.rs`) : bibliothèque `dim_coefficient` (natifs **seedés
+comme formules** + coefficients utilisateur, survit au reset). Une formule compile vers
+`(SQL, CoeffJoins)` — point d'insertion exact de l'ancien `coefficient_expr`. Opérandes = valeurs
+de `sat_perimeter` aux **4 perspectives** (`entity`/`partner`/`entity_n1`/`partner_n1`), défaut **0**
+(décision F3 : pas de neutralité magique, `SAFE_DIV` à la charge de l'utilisateur). API REST
+`/api/coefficients` (+ `/operands`, `/preview`). UI : `web/src/pages/CoefficientsPage.tsx` (éditeur
++ opérandes insérables + preview live).
+
+**Volet 2 — Indicateurs / KPI** (`indicators.rs`) : **postes** (`dim_aggregate` = sélection nommée
+sur `fact_entry`, traversées `via`/`ref`/`attr` comprises) + **indicateurs** (`dim_indicator` =
+formule combinant des postes, à un **grain** de restitution). Compilé en **une** requête au grain :
+`SUM(amount) FILTER (WHERE …)` par poste, **LEFT JOINs partagés** (un poste ne filtre pas les lignes
+des autres), renvois entre indicateurs avec détection de cycle. **Non-additif** (calculé au grain,
+jamais sommé) et **jamais réinjecté dans `fact_entry`**. API REST `/api/aggregates`,
+`/api/indicators` (+ `/operands`, `/preview`). UI : `web/src/pages/IndicatorsPage.tsx` (sous-onglets
+Postes + Indicateurs, éditeur de sélection, formule + grain + preview live).
+
+⬜ Colonnes KPI directement dans les rapports, dashboard de cartes, intelligence temporelle N-1
+(`[CA · N-1]` via l'à-nouveau, prévue par opérande).
 
 ## Restitutions
 
 ✅ Table consolidée **filtrable**, **bilan par flux**, **compte de résultat** — filtrables par
 nature, avec **détail par nature** dépliable. Les totaux excluent les « of which ».
+✅ **Indicateurs / KPI** calculés à un grain (page Indicateurs, voir ci-dessus).
 ⬜ Bilan mis en forme, tableau de flux de trésorerie, annexe, dashboards.
 
 ## Master data & échanges

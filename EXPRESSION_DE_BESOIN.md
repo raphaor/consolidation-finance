@@ -57,6 +57,8 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 **Éditeur de règles de consolidation** ([Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE — implémenté)
 Écritures automatiques paramétrables par l'utilisateur. Premières règles prévues : éliminations interco (ventes, créances/dettes, marges en stock, dividendes) et éliminations des participations ; puis **intérêts minoritaires**, retraitements, variations de capital, répartition des résultats. Spécification détaillée dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md).
 
+**Moteur de formules** ([Q43](./docs/QUESTIONS_OUVERTES.md) — implémenté) : créateur de formules type Excel, branché sur deux usages. (1) **Coefficients de règles** : la liste fermée des coefficients (`pct_integration`…) devient des formules éditables par l'utilisateur. (2) **Indicateurs / KPI** : mesures calculées combinant des « postes » (sélections agrégées) à un grain. Spécification : [`docs/FORMULES.md`](./docs/FORMULES.md).
+
 ### 3.5 Process & workflow
 - Saisie par **chargement de fichier** (format §4) + écritures manuelles par-dessus.
 - Calendrier : clôture **mensuelle / trimestrielle / annuelle**, prévisionnelle multi-années possible.
@@ -81,6 +83,7 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 - Table consolidée filtrable (toutes les lignes, filtres sur tous les champs dont **nature**).
 - **Bilan par flux** : comptes en lignes, flux en colonnes (`solde_ouverture` / `variation` / `solde_clôture`), filtrable par **nature**.
 - **Compte de résultat** : flux d'ouverture et flux de clôture, filtrable par **nature**.
+- **Indicateurs / KPI** : mesures calculées (marge, ratios…) via un **créateur de formules** type Excel, affichées à un grain choisi (voir [`docs/FORMULES.md`](./docs/FORMULES.md)).
 
 **À terme** (post-POC) : bilan consolidé mis en forme, tableau de flux de trésorerie, annexe / notes, dashboards analytiques.
 
@@ -124,7 +127,8 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 - Scénario : **réel seul** (objet composite : période, devise, variante, jeu de taux, jeu de périmètre, ruleset, à-nouveau).
 - Traitements **natifs** : agrégation, conversion multi-devises (taux par **schéma de flux** du compte), méthodes de conso **pilotables** (globale, proportionnelle), **report d'à-nouveau** (F99 N-1 → F00 N). Les **variations de périmètre** (entrées/sorties) passent désormais par des **règles** (suppression du niveau natif *reclassifié*). Mise en équivalence et intérêts minoritaires reportés (post-MVP).
 - **Éditeur de règles de consolidation** ([Q24](./docs/QUESTIONS_OUVERTES.md) TRANCHÉE, implémenté par anticipation) : éliminations interco et participations. Spécification dans [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md). Reste post-MVP : intérêts minoritaires, retraitements, variations de capital, répartition des résultats (catalogue §10).
-- Restitutions : table filtrable, **bilan par flux**, **compte de résultat** (§5).
+- **Moteur de formules** ([Q43](./docs/QUESTIONS_OUVERTES.md), implémenté) : coefficients de règles éditables + indicateurs / KPI ([`docs/FORMULES.md`](./docs/FORMULES.md)).
+- Restitutions : table filtrable, **bilan par flux**, **compte de résultat**, **indicateurs/KPI** (§5).
 - Master data : **CRUD complet** pour chaque dimension et table satellite + import CSV (liasses + taux) (§3.4, [`docs/MODELE_DONNEES.md`](./docs/MODELE_DONNEES.md)).
 - Volumétrie : **large** (50+ entités, millions de lignes) — la performance est un critère de validation.
 

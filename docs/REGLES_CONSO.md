@@ -86,6 +86,16 @@ Le facteur appliqué au montant de chaque grain sélectionné est le produit de 
 facteur = coefficient × multiplicateur
 ```
 
+> **Évolution (2026-06-24, [Q43]) — coefficients pilotés par le moteur de formules.**
+> Le `coefficient` n'est plus une **liste fermée codée en dur**. Les coefficients
+> (`pct_integration`, `pct_interet`, `elim_ic_corp_*`…) sont désormais des **formules
+> nommées** de la bibliothèque `dim_coefficient`, et l'utilisateur peut **créer les
+> siennes** (ex. `1 - [pct_interet.entity]`). La sémantique décrite ci-dessous reste
+> exacte (les natifs sont seedés comme formules équivalentes) ; ce qui change, c'est
+> que la liste est ouverte et éditable. Le champ JSON `coefficient` accepte
+> `{"type":"<code>"}` (référence à la bibliothèque) ou `{"type":"constant","value":…}`.
+> Spec : [`FORMULES.md`](./FORMULES.md) §3.
+
 | Composante | Description | Exemples |
 |------------|-------------|----------|
 | **Coefficient** | Valeur dynamique issue du périmètre ou d'un taux. Peut varier par grain. | `pct_integration`, `pct_interet`, `elim_ic_corp_n` / `elim_ic_corp_n1` / `elim_ic_corp_var`, `constant` |
