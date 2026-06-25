@@ -1481,3 +1481,284 @@
   padding: 4px 6px;
   background: var(--bg, #fff);
 }
+
+/* ---------- Éditeur de formules (coloration + autocomplétion) ---------- */
+/* Un <pre> coloré est superposé sous un <textarea> transparent (caret visible).
+   Les deux partagent exactement les mêmes métriques (police, padding, bord,
+   wrapping) pour que les caractères s'alignent pixel pour pixel. */
+
+.formula-editor {
+  position: relative;
+}
+
+.formula-editor__overlay,
+.formula-editor__ta {
+  margin: 0;
+  /* Métriques communes — toute différence casse l'alignement du caret. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+.formula-editor__overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  color: var(--text);
+  overflow: hidden;
+  pointer-events: none;
+  /* Le scroll est piloté par celui du textarea (cf. FormulaEditor onScroll). */
+}
+
+.formula-editor__ta {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.formula-editor__ta::placeholder {
+  color: var(--text-muted);
+}
+
+.formula-editor__ta:focus {
+  outline: 2px solid rgba(31, 111, 235, 0.35);
+  outline-offset: 0;
+  border-color: var(--primary);
+}
+
+/* Tokens : références (bleu primaire), fonctions (violet), nombres (orange),
+   opérateurs/séparateurs (grisé). Référence inconnue → soulignement onduleur. */
+.tok-ref {
+  color: var(--primary);
+  font-weight: 600;
+}
+.tok-fn {
+  color: #8250df;
+  font-weight: 600;
+}
+.tok-num {
+  color: #b3541e;
+}
+.tok-op {
+  color: var(--text-muted);
+}
+.tok-err {
+  text-decoration: underline wavy var(--danger);
+  text-underline-offset: 2px;
+}
+
+/* Liste d'autocomplétion au `[` : ancrée sous l'éditeur, largeur du conteneur. */
+.formula-editor__complete {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 5;
+  min-width: 260px;
+  max-width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(20, 40, 70, 0.16);
+  padding: 4px;
+}
+
+.formula-editor__opt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.formula-editor__opt.is-active {
+  background: var(--row-hover);
+}
+
+.formula-editor__opt-token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--primary-dark);
+  flex: 0 0 auto;
+}
+
+.formula-editor__opt-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Chips (opérandes & fonctions insérables) ---------- */
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.chip:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chip__token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+.chip__label {
+  color: var(--text-muted);
+}
+/* Fonctions (MIN, MAX…) : teinte primaire pour les distinguer des opérandes. */
+.chip--fn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: rgba(31, 111, 235, 0.06);
+}
+
+/* ---------- Palette d'opérandes (recherche + tri) ---------- */
+.operand-palette {
+  margin-top: 16px;
+}
+.operand-palette__head {
+  margin-bottom: 8px;
+}
+.operand-palette__title {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.operand-palette__hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.operand-palette__search {
+  width: 100%;
+  max-width: 340px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+.operand-palette__search:focus {
+  outline: 2px solid rgba(31, 111, 235, 0.35);
+  border-color: var(--primary);
+}
+.operand-palette__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------- Grain (chips togglables) ---------- */
+.grain-block {
+  margin-top: 8px;
+}
+.grain-block__label {
+  margin-bottom: 4px;
+}
+.grain-block__empty {
+  margin-top: 4px;
+}
+.grain-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.grain-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.grain-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+.grain-chip.is-on {
+  background: rgba(31, 111, 235, 0.1);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+/* ---------- Preview live (coefficients) ---------- */
+.preview {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+.preview--ok {
+  background: rgba(26, 159, 90, 0.06);
+  border-color: rgba(26, 159, 90, 0.4);
+}
+.preview--err {
+  background: rgba(201, 58, 58, 0.06);
+  border-color: rgba(201, 58, 58, 0.4);
+}
+.preview pre {
+  margin: 6px 0 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.preview__error {
+  color: var(--danger);
+}
+
+/* ---------- Valeurs d'exemple (preview coefficient) ---------- */
+.coeff-samples {
+  margin-top: 8px;
+}
+.coeff-samples__label {
+  margin-bottom: 4px;
+}
+.coeff-samples__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.coeff-samples__token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.coeff-samples__input {
+  width: 90px;
+}

@@ -4,6 +4,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { FormulaEditor, type FormulaEditorHandle } from '../components/FormulaEditor';
+import { OperandPalette } from '../components/OperandPalette';
+import {
+  OpSelect,
+  SelectionValueField,
+  TraverseField,
+} from '../components/ConditionFields';
+import { NULL_OPS, OP_SYMBOL } from '../components/operators';
+import { parseCondVal } from '../utils/conditionValue';
 import type {
   Aggregate,
   AggregateCond,
@@ -19,8 +28,6 @@ import type {
 import { formatOptionLabel, sortForDisplay } from '../utils/format';
 
 const LEVELS = ['corporate', 'converted', 'consolidated'];
-const OPS = ['=', '!=', '>', '<', '>=', '<=', 'IN', 'IS NULL', 'IS NOT NULL'];
-const NULL_OPS = new Set(['IS NULL', 'IS NOT NULL']);
 const FUNCTIONS = ['MIN', 'MAX', 'SAFE_DIV', 'IF', 'ABS', 'ROUND'];
 const FORMATS = ['nombre', 'pourcentage', 'ratio'];
 
@@ -103,8 +110,51 @@ export function IndicatorsPage() {
 // Sous-onglet Postes
 // =====================================================================
 
-interface CondDraft extends AggregateCond {
-  traverse: string; // '' | 'attr:<col>' | 'via:<char>' | 'ref:<col>'
+// Condition de sélection en cours d'édition. `traverse` condense le mode de
+// traversée (`''` | `via:<char>` | `ref:<col>` | `attr:<col>`) ; les champs
+// `via`/`ref`/`attr` réellement envoyés au moteur en sont dérivés au save.
+interface CondDraft {
+  dim: string;
+  op: string;
+  val: unknown;
+  traverse: string;
+}
+
+// Décode `traverse` en (via, ref, attr) pour la résolution des valeurs
+// (`useSelectionValues`) et pour l'enregistrement.
+function decodeTraverse(traverse: string): { via?: string; ref?: string; attr?: string } {
+  if (traverse.startsWith('via:')) return { via: traverse.slice(4) };
+  if (traverse.startsWith('ref:')) return { ref: traverse.slice(4) };
+  if (traverse.startsWith('attr:')) return { attr: traverse.slice(5) };
+  return {};
+}
+
+// Phrase de relecture d'un poste, générée depuis les conditions (aide à valider
+// sans déchiffrer chaque champ). Même esprit que `summarizeOperation` (règles).
+function summarizePoste(level: string, conds: CondDraft[]): string {
+  const meaningful = conds.filter(
+    (c) =>
+      c.dim &&
+      (NULL_OPS.has(c.op) ||
+        (Array.isArray(c.val) ? c.val.length > 0 : String(c.val ?? '').trim() !== '')),
+  );
+  const sel =
+    meaningful.length === 0
+      ? 'toutes les écritures'
+      : 'les écritures où ' +
+        meaningful
+          .map((c) => {
+            const sym = OP_SYMBOL[c.op] ?? c.op;
+            const { via, ref, attr } = decodeTraverse(c.traverse);
+            const trav = via ? `.${via}` : ref ? `.${ref}` : attr ? `.${attr}` : '';
+            let v = '';
+            if (!NULL_OPS.has(c.op)) {
+              v = Array.isArray(c.val) ? `{${c.val.join(', ')}}` : String(c.val ?? '') || '∅';
+            }
+            return `${c.dim}${trav} ${sym}${v ? ` ${v}` : ''}`.trim();
+          })
+          .join(' et ');
+  return `Sur ${level}, somme des montants de ${sel}.`;
 }
 
 interface PosteForm {
@@ -158,30 +208,20 @@ function PostesTab({
       libelle: a.libelle ?? '',
       level: a.level,
       conditions: (a.definition?.selection ?? []).map((c) => ({
-        ...c,
+        dim: c.dim,
+        op: c.op,
+        val: c.val,
         traverse: c.attr ? `attr:${c.attr}` : c.via ? `via:${c.via}` : c.ref ? `ref:${c.ref}` : '',
       })),
     });
   }, [onError]);
 
-  // Options de traversée pour une dimension donnée.
-  const traverseOptions = useCallback(
-    (dim: string) => {
-      const opts: { value: string; label: string }[] = [];
-      nativeEnums.filter((e) => e.host_dimension === dim).forEach((e) =>
-        opts.push({ value: `attr:${e.column}`, label: `attribut · ${e.column}` }),
-      );
-      characteristics.filter((c) => c.base_dimension === dim).forEach((c) =>
-        opts.push({ value: `via:${c.code}`, label: `caractéristique · ${c.code}` }),
-      );
-      customRefs.filter((r) => r.host_dimension === dim).forEach((r) =>
-        opts.push({ value: `ref:${r.column}`, label: `référence · ${r.column}` }),
-      );
-      // `(direct)` en tête, le reste trié alphabétiquement par libellé.
-      return [{ value: '', label: '(direct)' }, ...sortForDisplay(opts, (o) => o.label)];
-    },
-    [nativeEnums, characteristics, customRefs],
-  );
+  // Ajoute une condition pour une dimension donnée (chips « + dim »).
+  const addCondForDim = (dim: string) =>
+    setForm((f) => ({
+      ...f,
+      conditions: [...f.conditions, { dim, op: '=', val: '', traverse: '' }],
+    }));
 
   const updateCond = (i: number, patch: Partial<CondDraft>) =>
     setForm((f) => ({
@@ -194,11 +234,8 @@ function PostesTab({
     setSaving(true);
     try {
       const selection: AggregateCond[] = form.conditions.map((c) => {
-        const cond: AggregateCond = { dim: c.dim, op: c.op };
+        const cond: AggregateCond = { dim: c.dim, op: c.op, ...decodeTraverse(c.traverse) };
         if (!NULL_OPS.has(c.op)) cond.val = c.val;
-        if (c.traverse.startsWith('attr:')) cond.attr = c.traverse.slice(5);
-        else if (c.traverse.startsWith('via:')) cond.via = c.traverse.slice(4);
-        else if (c.traverse.startsWith('ref:')) cond.ref = c.traverse.slice(4);
         return cond;
       });
       const body = { libelle: form.libelle || undefined, level: form.level, definition: { selection } };
@@ -291,69 +328,79 @@ function PostesTab({
             </label>
           </div>
 
-          <h3 style={{ margin: '16px 0 6px' }}>Sélection</h3>
-          {form.conditions.map((c, i) => (
-            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <label className="field">
-                <span>Dimension</span>
-                <select value={c.dim} onChange={(e) => updateCond(i, { dim: e.target.value, traverse: '' })}>
-                  <option value="">— choisir —</option>
-                  {dims.map((d) => (
-                    <option key={d.name} value={d.name}>
-                      {formatOptionLabel(d.name, d.label)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Traverser</span>
-                <select value={c.traverse} onChange={(e) => updateCond(i, { traverse: e.target.value })}>
-                  {traverseOptions(c.dim).map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Opérateur</span>
-                <select value={c.op} onChange={(e) => updateCond(i, { op: e.target.value })}>
-                  {OPS.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {!NULL_OPS.has(c.op) && (
-                <label className="field">
-                  <span>Valeur{c.op === 'IN' ? ' (séparées par ,)' : ''}</span>
-                  <input
-                    type="text"
-                    value={typeof c.val === 'string' ? c.val : ''}
-                    onChange={(e) => updateCond(i, { val: e.target.value })}
-                    placeholder={c.op === 'IN' ? '700,705' : 'ex. 700'}
+          <div className="rule-section" style={{ marginTop: 12 }}>
+            <h4 className="rule-section__title">Sélection</h4>
+            {form.conditions.map((c, i) => {
+              const viaOptions = characteristics.filter((ch) => ch.base_dimension === c.dim);
+              const refOptions = customRefs.filter((r) => r.host_dimension === c.dim);
+              const attrOptions = nativeEnums.filter((e) => e.host_dimension === c.dim);
+              const { via, ref, attr } = decodeTraverse(c.traverse);
+              const libelle = dims.find((d) => d.name === c.dim)?.label ?? '';
+              const dimTitle = formatOptionLabel(c.dim, libelle);
+              return (
+                <div key={i} className="rule-condition rule-condition--compact">
+                  <span className="rule-sel-dim" title={dimTitle}>
+                    {dimTitle}
+                  </span>
+                  <TraverseField
+                    value={c.traverse}
+                    disabled={!c.dim}
+                    viaOptions={viaOptions}
+                    refOptions={refOptions}
+                    attrOptions={attrOptions}
+                    onSelect={(v) => updateCond(i, { traverse: v, val: '' })}
                   />
-                </label>
-              )}
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => setForm((f) => ({ ...f, conditions: f.conditions.filter((_, idx) => idx !== i) }))}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() =>
-              setForm((f) => ({ ...f, conditions: [...f.conditions, { dim: '', op: '=', val: '', traverse: '' }] }))
-            }
-          >
-            + Ajouter une condition
-          </button>
+                  <OpSelect value={c.op} onChange={(op) => updateCond(i, { op })} />
+                  {!NULL_OPS.has(c.op) && (
+                    <label className="field field--grow">
+                      <span>Valeur</span>
+                      <SelectionValueField
+                        sel={{ dim: c.dim, op: c.op, val: c.val, via, ref, attr }}
+                        customReferences={customRefs}
+                        nativeEnums={nativeEnums}
+                        op={c.op}
+                        value={c.val}
+                        onRawChange={(raw) => updateCond(i, { val: parseCondVal(c.op, raw) })}
+                      />
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    title="Retirer la condition"
+                    onClick={() =>
+                      setForm((f) => ({ ...f, conditions: f.conditions.filter((_, idx) => idx !== i) }))
+                    }
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+            {(() => {
+              const present = new Set(form.conditions.map((c) => c.dim));
+              const addable = sortForDisplay(
+                dims.filter((d) => !present.has(d.name)),
+                (d) => formatOptionLabel(d.name, d.label),
+              );
+              return (
+                <div className="rule-dest-add">
+                  <span className="rule-dest-add__label">Ajouter un filtre</span>
+                  {addable.map((d) => (
+                    <button key={d.name} type="button" className="rule-chip" onClick={() => addCondForDim(d.name)}>
+                      + {formatOptionLabel(d.name, d.label)}
+                    </button>
+                  ))}
+                  {addable.length === 0 && <span className="muted">toutes les dimensions sont posées</span>}
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="rule-op-summary">
+            <span className="rule-op-summary__tag">résumé</span>
+            <span>{summarizePoste(form.level, form.conditions)}</span>
+          </div>
 
           <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
             <button
@@ -404,7 +451,7 @@ function IndicateursTab({
   const [consolidation, setConsolidation] = useState<number | undefined>(undefined);
   const [preview, setPreview] = useState<IndicatorPreview | null>(null);
   const [saving, setSaving] = useState(false);
-  const exprRef = useRef<HTMLTextAreaElement>(null);
+  const exprRef = useRef<FormulaEditorHandle>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -464,20 +511,7 @@ function IndicateursTab({
   }, [form.expression, form.grain, consolidation]);
 
   const insert = useCallback((fragment: string) => {
-    const ta = exprRef.current;
-    setForm((f) => {
-      const start = ta?.selectionStart ?? f.expression.length;
-      const end = ta?.selectionEnd ?? f.expression.length;
-      const next = f.expression.slice(0, start) + fragment + f.expression.slice(end);
-      requestAnimationFrame(() => {
-        if (ta) {
-          const pos = start + fragment.length;
-          ta.focus();
-          ta.setSelectionRange(pos, pos);
-        }
-      });
-      return { ...f, expression: next };
-    });
+    exprRef.current?.insert(fragment);
   }, []);
 
   const save = useCallback(async () => {
@@ -595,29 +629,46 @@ function IndicateursTab({
 
           <label className="field">
             <span>Formule</span>
-            <textarea
+            <FormulaEditor
               ref={exprRef}
-              rows={3}
               value={form.expression}
-              spellCheck={false}
-              style={{ fontFamily: 'monospace', fontSize: 14 }}
-              onChange={(e) => setForm((f) => ({ ...f, expression: e.target.value }))}
+              onChange={(v) => setForm((f) => ({ ...f, expression: v }))}
+              operands={operands}
+              rows={3}
               placeholder="SAFE_DIV([resultat]; [ca])"
             />
           </label>
 
           {/* Grain */}
-          <div style={{ marginTop: 8 }}>
-            <div className="muted" style={{ marginBottom: 4 }}>Grain (dimensions de restitution) :</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-              {dims.map((d) => (
-                <label key={d.name} className="field--inline" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input type="checkbox" checked={form.grain.includes(d.name)} onChange={() => toggleGrain(d.name)} />
-                  <span>{d.name}</span>
-                </label>
-              ))}
+          <div className="grain-block">
+            <div className="muted grain-block__label">Grain (dimensions de restitution) :</div>
+            <div className="grain-chips">
+              {dims.map((d) => {
+                const on = form.grain.includes(d.name);
+                return (
+                  <button
+                    key={d.name}
+                    type="button"
+                    className={`grain-chip${on ? ' is-on' : ''}`}
+                    title={d.label}
+                    onClick={() => toggleGrain(d.name)}
+                  >
+                    {d.name}
+                  </button>
+                );
+              })}
             </div>
-            {form.grain.length === 0 && <div className="muted" style={{ marginTop: 4 }}>Aucun grain → un total unique.</div>}
+            {form.grain.length === 0 && (
+              <div className="muted grain-block__empty">Aucun grain → un total unique.</div>
+            )}
+          </div>
+
+          <div className="rule-op-summary">
+            <span className="rule-op-summary__tag">résumé</span>
+            <span>
+              {form.libelle || form.code || 'indicateur'} — format « {form.format} », par{' '}
+              {form.grain.length > 0 ? form.grain.join(' × ') : 'total unique'}.
+            </span>
           </div>
 
           {/* Preview */}
@@ -655,26 +706,12 @@ function IndicateursTab({
           </div>
 
           {/* Postes / indicateurs insérables */}
-          <div style={{ marginTop: 20 }}>
-            <h3 style={{ margin: '0 0 6px' }}>Postes & indicateurs disponibles</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {operands.length === 0 && (
-                <span className="muted">Aucun poste défini — créez-en dans l'onglet « Postes ».</span>
-              )}
-              {operands.map((op) => (
-                <button
-                  key={`${op.kind}:${op.token}`}
-                  type="button"
-                  className="chip"
-                  title={`${op.kind} — ${op.label}`}
-                  onClick={() => insert(`[${op.token}]`)}
-                >
-                  {op.token}
-                  {op.label ? ` · ${op.label}` : ''}
-                </button>
-              ))}
-            </div>
-          </div>
+          <OperandPalette
+            title="Postes & indicateurs disponibles"
+            hint="Cliquez pour insérer dans la formule. Créez les postes dans l’onglet « Postes »."
+            operands={operands}
+            onPick={(token) => insert(`[${token}]`)}
+          />
         </div>
       )}
     </div>

@@ -5,6 +5,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { FormulaEditor, type FormulaEditorHandle } from '../components/FormulaEditor';
+import { OperandPalette } from '../components/OperandPalette';
 import type { Coefficient, CoefficientOperand, CoefficientPreview } from '../types';
 
 const FUNCTIONS = ['MIN', 'MAX', 'SAFE_DIV', 'IF', 'ABS', 'ROUND'];
@@ -27,7 +29,7 @@ export function CoefficientsPage() {
   const [preview, setPreview] = useState<CoefficientPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const exprRef = useRef<HTMLTextAreaElement>(null);
+  const exprRef = useRef<FormulaEditorHandle>(null);
 
   const isBuiltin = useMemo(() => {
     if (selected === 'new' || selected === null) return false;
@@ -108,21 +110,7 @@ export function CoefficientsPage() {
 
   // Insère un fragment à la position du curseur dans la barre de formule.
   const insert = useCallback((fragment: string) => {
-    const ta = exprRef.current;
-    setForm((f) => {
-      const start = ta?.selectionStart ?? f.expression.length;
-      const end = ta?.selectionEnd ?? f.expression.length;
-      const next = f.expression.slice(0, start) + fragment + f.expression.slice(end);
-      // Replace le curseur après le fragment inséré (au prochain tick).
-      requestAnimationFrame(() => {
-        if (ta) {
-          const pos = start + fragment.length;
-          ta.focus();
-          ta.setSelectionRange(pos, pos);
-        }
-      });
-      return { ...f, expression: next };
-    });
+    exprRef.current?.insert(fragment);
   }, []);
 
   const save = useCallback(async () => {
@@ -267,28 +255,26 @@ export function CoefficientsPage() {
             {/* Barre de formule */}
             <label className="field">
               <span>Formule</span>
-              <textarea
+              <FormulaEditor
                 ref={exprRef}
-                rows={4}
                 value={form.expression}
+                onChange={(v) => setForm((f) => ({ ...f, expression: v }))}
+                operands={operands}
                 readOnly={readOnly}
-                spellCheck={false}
-                style={{ fontFamily: 'monospace', fontSize: 14 }}
-                onChange={(e) => setForm((f) => ({ ...f, expression: e.target.value }))}
+                rows={4}
                 placeholder="MIN(1; SAFE_DIV([pct_integration.partner]; [pct_integration.entity]))"
               />
             </label>
 
             {/* Preview live */}
-            <div className={`preview ${preview && !preview.ok ? 'preview--err' : 'preview--ok'}`}
-                 style={{ marginTop: 8, padding: 10, borderRadius: 6, border: '1px solid #ddd' }}>
+            <div
+              className={`preview ${preview && !preview.ok ? 'preview--err' : 'preview--ok'}`}
+            >
               {!preview && <span className="muted">Saisissez une formule pour la prévisualiser.</span>}
               {preview && preview.ok && (
                 <div>
                   <strong>Résultat&nbsp;: {formatValue(preview.value)}</strong>
-                  {preview.sql && (
-                    <pre style={{ margin: '6px 0 0', fontSize: 12, whiteSpace: 'pre-wrap' }}>{preview.sql}</pre>
-                  )}
+                  {preview.sql && <pre>{preview.sql}</pre>}
                 </div>
               )}
               {preview && !preview.ok && (
@@ -298,16 +284,16 @@ export function CoefficientsPage() {
 
             {/* Valeurs d'exemple de la preview */}
             {preview?.operands?.length ? (
-              <div style={{ marginTop: 8 }}>
-                <div className="muted" style={{ marginBottom: 4 }}>Valeurs d'exemple (preview) :</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div className="coeff-samples">
+                <div className="muted coeff-samples__label">Valeurs d'exemple (preview) :</div>
+                <div className="coeff-samples__grid">
                   {preview.operands.map((op) => (
                     <label key={op} className="field field--inline">
-                      <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{op}</span>
+                      <span className="coeff-samples__token">{op}</span>
                       <input
                         type="number"
                         step="any"
-                        style={{ width: 90 }}
+                        className="coeff-samples__input"
                         value={samples[op] ?? 1}
                         onChange={(e) =>
                           setSamples((s) => ({ ...s, [op]: Number(e.target.value) }))
@@ -343,27 +329,13 @@ export function CoefficientsPage() {
             )}
 
             {/* Panneau d'opérandes insérables */}
-            <div style={{ marginTop: 20 }}>
-              <h3 style={{ margin: '0 0 6px' }}>Opérandes disponibles (périmètre)</h3>
-              <p className="muted" style={{ margin: '0 0 8px' }}>
-                Cliquez pour insérer dans la formule. Taux absent → 0 (vigilance à
-                votre charge ; protégez les divisions avec <code>SAFE_DIV</code>).
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {operands.map((op) => (
-                  <button
-                    key={op.token}
-                    type="button"
-                    className="chip"
-                    disabled={readOnly}
-                    title={op.token}
-                    onClick={() => insert(`[${op.token}]`)}
-                  >
-                    {op.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <OperandPalette
+              title="Opérandes disponibles (périmètre)"
+              hint="Cliquez pour insérer dans la formule. Taux absent → 0 (vigilance à votre charge ; protégez les divisions avec SAFE_DIV)."
+              operands={operands}
+              disabled={readOnly}
+              onPick={(token) => insert(`[${token}]`)}
+            />
           </div>
         )}
       </div>
