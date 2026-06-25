@@ -178,9 +178,11 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut)
         VALUES
-            (nextval('seq_consolidation'), 'Réel', 'REEL', '2024', 'PERIM_REEL',
+            (nextval('seq_consolidation'), 'Réel',
+             (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2024',
+             (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL'),
              (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR',
-             '2024', 'RATES', '2024', NULL, NULL, 'ouvert');
+             '2024', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2024', NULL, NULL, 'ouvert');
 
         INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut) VALUES
             ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),

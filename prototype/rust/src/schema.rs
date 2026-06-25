@@ -115,14 +115,14 @@ CREATE TABLE dim_consolidation (
     id                          INTEGER DEFAULT nextval('seq_consolidation') PRIMARY KEY,
     libelle                     TEXT,
     -- Clé naturelle (identité métier) :
-    phase                       TEXT,   -- FK dim_scenario_category ('REEL', 'BUDGET'…)
+    phase                       INTEGER,-- FK dim_scenario_category.id (clé technique B1 ; contrat code 'REEL')
     exercice                    TEXT,   -- FK dim_period ('2024') — sélectionne la remontée
-    perimeter_set               TEXT,   -- FK dim_perimeter_set
+    perimeter_set               INTEGER,-- FK dim_perimeter_set.id (clé technique B1 ; contrat code)
     variant                     INTEGER,-- FK dim_variant.id (clé technique, chantier B1 ; contrat externe = code 'BASE')
     presentation_currency       TEXT,   -- FK dim_currency ('EUR')
     -- Hors clé (paramètres de traitement) :
     perimeter_period            TEXT,   -- FK dim_period (défaut = exercice)
-    rate_set                    TEXT,   -- FK dim_rate_set
+    rate_set                    INTEGER,-- FK dim_rate_set.id (clé technique B1 ; contrat code)
     rate_period                 TEXT,   -- FK dim_period (défaut = exercice)
     ruleset_code                TEXT,   -- FK dim_ruleset (NULL = pas de règles)
     a_nouveau_consolidation_id  INTEGER, -- FK dim_consolidation : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2

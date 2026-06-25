@@ -528,12 +528,18 @@ async fn list_consolidations(
         let con = lock_con(&state)?;
         let mut stmt = con
             .prepare(
-                // `variant` est stockée en clé technique (id) mais exposée en
-                // **code** (contrat option A, chantier B1) : on la résout par JOIN.
-                "SELECT c.id, c.libelle, c.phase, c.exercice, c.perimeter_set, v.code AS variant,
-                        c.presentation_currency, c.perimeter_period, c.rate_set, c.rate_period,
+                // FK stockées en clé technique (id) mais exposées en **code**
+                // (contrat option A, chantier B1) : résolues par JOIN —
+                // phase, perimeter_set, rate_set, variant.
+                "SELECT c.id, c.libelle, sc.code AS phase, c.exercice,
+                        ps.code AS perimeter_set, v.code AS variant,
+                        c.presentation_currency, c.perimeter_period,
+                        rs.code AS rate_set, c.rate_period,
                         c.ruleset_code, c.a_nouveau_consolidation_id, c.statut
                  FROM dim_consolidation c
+                 LEFT JOIN dim_scenario_category sc ON sc.id = c.phase
+                 LEFT JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set
+                 LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
                  LEFT JOIN dim_variant v ON v.id = c.variant
                  ORDER BY c.id",
             )

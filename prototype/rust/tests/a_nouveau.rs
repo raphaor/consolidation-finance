@@ -19,7 +19,8 @@ const TOL: f64 = 0.01;
 /// Résout l'id d'une consolidation par (phase, exercice).
 fn cid(con: &Connection, phase: &str, exercice: &str) -> i64 {
     con.query_row(
-        "SELECT id FROM dim_consolidation WHERE phase = ? AND exercice = ?",
+        "SELECT id FROM dim_consolidation \
+         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) AND exercice = ?",
         [phase, exercice],
         |r| r.get(0),
     )
@@ -88,9 +89,11 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2025', 'REEL', '2025', 'PERIM_CUR', \
+         VALUES (nextval('seq_consolidation'), 'Réel 2025', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2025', \
+                 (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'), \
                  (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
-                 '2025', 'RATES', '2025', NULL, ?, 'ouvert')",
+                 '2025', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2025', NULL, ?, 'ouvert')",
         [reel_id],
     )
     .expect("seed consolidation CUR");
@@ -193,9 +196,11 @@ fn snapshot_reel_et_cur() -> Connection {
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2025', 'REEL', '2025', 'PERIM_CUR', \
+         VALUES (nextval('seq_consolidation'), 'Réel 2025', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2025', \
+                 (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'), \
                  (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
-                 '2025', 'RATES', '2025', NULL, ?, 'ouvert')",
+                 '2025', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2025', NULL, ?, 'ouvert')",
         [reel_id],
     )
     .expect("seed consolidation CUR");

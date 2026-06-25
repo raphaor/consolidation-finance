@@ -39,7 +39,8 @@ fn engine() -> Connection {
 /// Résout l'id d'une consolidation par (phase, exercice).
 fn cid(con: &Connection, phase: &str, exercice: &str) -> i64 {
     con.query_row(
-        "SELECT id FROM dim_consolidation WHERE phase = ? AND exercice = ?",
+        "SELECT id FROM dim_consolidation \
+         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) AND exercice = ?",
         [phase, exercice],
         |r| r.get(0),
     )
@@ -66,7 +67,9 @@ fn put(
         "INSERT INTO fact_entry \
             (consolidation_id, phase, entity, entry_period, period, account, flow, currency, \
              nature, partner, share, analysis, analysis2, level, amount) \
-         SELECT (SELECT id FROM dim_consolidation WHERE phase='REEL' AND exercice='2024'), \
+         SELECT (SELECT id FROM dim_consolidation \
+                 WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
+                   AND exercice='2024'), \
                 'REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?",
         duckdb::params![entity, account, flow, nature, partner, level, amount],
     )
@@ -679,9 +682,11 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2023', 'REEL', '2023', 'PSET_N1', \
+         VALUES (nextval('seq_consolidation'), 'Réel 2023', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2023', \
+                 (SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), \
                  (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
-                 '2023', 'RATES', '2023', NULL, NULL, 'verrouillé')",
+                 '2023', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2023', NULL, NULL, 'verrouillé')",
         [],
     )
     .expect("consolidation à-nouveau");

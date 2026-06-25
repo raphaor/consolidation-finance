@@ -102,7 +102,7 @@ const fn ri(
 /// `crate::custom_references`), donc absente de cette liste statique.
 pub const REFERENCES: &[Reference] = &[
     // dim_consolidation (ex dim_scenario) — objet composite (PK technique `id`).
-    r("dim_consolidation", "phase", "dim_scenario_category", "code"),
+    ri("dim_consolidation", "phase", "dim_scenario_category", "code", false),
     r("dim_consolidation", "exercice", "dim_period", "code"),
     r("dim_consolidation", "perimeter_period", "dim_period", "code"),
     r("dim_consolidation", "rate_period", "dim_period", "code"),
@@ -116,8 +116,8 @@ pub const REFERENCES: &[Reference] = &[
     // externe = code. Première FK dim→dim flippée (pilote du mécanisme générique).
     ri("dim_consolidation", "variant", "dim_variant", "code", false),
     r("dim_consolidation", "ruleset_code", "dim_ruleset", "code"),
-    r("dim_consolidation", "rate_set", "dim_rate_set", "code"),
-    r("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code"),
+    ri("dim_consolidation", "rate_set", "dim_rate_set", "code", false),
+    ri("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code", false),
     // Conso d'à-nouveau : auto-référence vers une autre consolidation (N-1 figé).
     r(
         "dim_consolidation",

@@ -94,11 +94,17 @@ impl ConvertParams {
             rate_period,
             a_nouveau_consolidation_id,
         ): (String, String, String, String, String, String, String, Option<i64>) = con.query_row(
-            "SELECT c.phase, c.exercice, c.presentation_currency,
-                    c.perimeter_set, c.perimeter_period,
-                    c.rate_set, c.rate_period,
+            // phase / perimeter_set / rate_set sont stockés en clé technique (id,
+            // chantier B1) : résolus id→code par JOIN pour que le pipeline reste
+            // code-based (jointures sur satellites en codes inchangées).
+            "SELECT sc.code, c.exercice, c.presentation_currency,
+                    ps.code, c.perimeter_period,
+                    rs.code, c.rate_period,
                     c.a_nouveau_consolidation_id
              FROM dim_consolidation c
+             LEFT JOIN dim_scenario_category sc ON sc.id = c.phase
+             LEFT JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set
+             LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
              WHERE c.id = ?",
             [consolidation_id],
             |r| {

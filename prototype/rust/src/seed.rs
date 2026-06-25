@@ -840,9 +840,15 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
                 (id, libelle, phase, exercice, perimeter_set, variant,
                  presentation_currency, perimeter_period, rate_set, rate_period,
                  ruleset_code, a_nouveau_consolidation_id, statut)
-             VALUES (nextval('seq_consolidation'), ?, ?, ?, ?,
+             VALUES (nextval('seq_consolidation'),
+                     ?,
+                     (SELECT id FROM dim_scenario_category WHERE code = ?),
+                     ?,
+                     (SELECT id FROM dim_perimeter_set WHERE code = ?),
                      (SELECT id FROM dim_variant WHERE code = ?),
-                     ?, ?, ?, ?, ?, NULL, ?)",
+                     ?, ?,
+                     (SELECT id FROM dim_rate_set WHERE code = ?),
+                     ?, ?, NULL, ?)",
             params![c.0, c.1, c.2, c.3, c.4, c.5, c.6, c.7, c.8, c.9, c.10],
         )?;
     }

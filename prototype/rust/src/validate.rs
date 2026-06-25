@@ -261,7 +261,9 @@ pub fn check_a_nouveau_coherence(
                       AND s.entity = p.entity
                 ) AS was_consolidated
          FROM sat_perimeter p
-         WHERE p.perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = ?)
+         WHERE p.perimeter_set = (SELECT ps.code FROM dim_consolidation c
+                                  JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set
+                                  WHERE c.id = ?)
            AND p.period = ?
          ORDER BY p.entity",
     )?;
@@ -298,7 +300,9 @@ pub fn check_a_nouveau_coherence(
            AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
            AND s.entity NOT IN (
                SELECT entity FROM sat_perimeter
-               WHERE perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = ?)
+               WHERE perimeter_set = (SELECT ps.code FROM dim_consolidation c
+                                      JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set
+                                      WHERE c.id = ?)
                  AND period = ?
            )
          ORDER BY s.entity",

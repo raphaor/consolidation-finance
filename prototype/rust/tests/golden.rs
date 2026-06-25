@@ -61,7 +61,9 @@ fn setup() -> Connection {
     seed_all(&con).expect("seed_all");
     let reel_id: i64 = con
         .query_row(
-            "SELECT id FROM dim_consolidation WHERE phase='REEL' AND exercice='2024'",
+            "SELECT id FROM dim_consolidation \
+             WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
+               AND exercice='2024'",
             [],
             |r| r.get(0),
         )
