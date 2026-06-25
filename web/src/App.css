@@ -1752,6 +1752,117 @@
   color: var(--danger);
 }
 
+/* ---------- Attributs de dimension (caractéristiques & emprunts) ---------- */
+
+/* Liste unifiée (gauche) | détail de la sélection (droite). Repli en une
+   colonne sur écran étroit, comme `rule-op-grid`. */
+.attr-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .attr-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.attr-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Une ligne cliquable par attribut (caractéristique ou emprunt) : code + badge
+   de type en tête, phrase de relecture « en clair » en dessous. */
+.attr-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.attr-item:last-child {
+  border-bottom: none;
+}
+.attr-item:hover {
+  background: var(--row-hover);
+}
+.attr-item.is-selected {
+  background: rgba(31, 111, 235, 0.08);
+}
+
+.attr-item__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.attr-item__code {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.attr-item__recap {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.attr-item__del {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.attr-item__del:hover {
+  color: var(--danger);
+  background: var(--row-hover);
+}
+
+/* Badges de type : caractéristique (bleu), emprunt (neutre), natif (verrouillé,
+   bord pointillé). Même échelle que `dim-chip`. */
+.attr-badge {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 0 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.attr-badge--char {
+  background: #e6f1fb;
+  color: #0c447c;
+}
+.attr-badge--ref {
+  background: var(--header-bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+}
+.attr-badge--native {
+  background: var(--header-bg);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-strong);
+}
+
+/* Empty state de la liste. */
+.attr-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Valeurs depuis : dimension vs liste de valeurs (légère teinte). */
+.attr-src {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* ---------- Valeurs d'exemple (preview coefficient) ---------- */
 .coeff-samples {
   margin-top: 8px;

@@ -53,7 +53,21 @@ export default function App() {
       {page === 'postes' && <PostesPage />}
       {page === 'indicateurs' && <IndicateursPage />}
       {/* Référentiel */}
-      {page === 'masterdata' && <MasterDataPage hideTables={['consolidations']} />}
+      {page === 'masterdata' && (
+        <MasterDataPage
+          // Tables à foyer dédié ailleurs (principe « une table = un seul foyer ») :
+          // consolidations → Définitions ; perimeter/rates → Jeux de périmètre/taux ;
+          // flow_schemes(+items) → Schémas de flux. Les car_*/lst_* sont écartés en
+          // amont (groupedTables ne garde que les natives — foyer = Attributs de dimension).
+          hideTables={[
+            'consolidations',
+            'perimeter',
+            'rates',
+            'flow_schemes',
+            'flow_scheme_items',
+          ]}
+        />
+      )}
       {page === 'caracteristiques' && <CaracteristiquesPage />}
       {page === 'maintenance' && <MaintenancePage />}
     </Layout>

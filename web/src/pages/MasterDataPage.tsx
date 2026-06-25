@@ -45,6 +45,23 @@ type Row = Record<string, unknown>;
 type FormState = { mode: 'create' } | { mode: 'edit'; row: Row } | null;
 type Notice = { kind: 'success' | 'error'; text: string } | null;
 
+// Tables natives qui sont des **dimensions de la table de faits** (axes de
+// `fact_entry`), par opposition aux **référentiels de paramétrage**. La source de
+// vérité est le registre des dimensions (engine `dimensions.rs`) + leurs tables de
+// référence (`references.rs`) ; on la reflète ici côté front car le menu Master
+// data mêle des concepts purement UI (certaines tables ont une page dédiée).
+// Cf. typologie « Dimensions / Attributs / Paramétrage ». Tout ce qui est natif et
+// hors de cet ensemble est rangé sous « Référentiels de paramétrage ».
+const DIMENSION_TABLES = new Set<string>([
+  'scenario_categories', // phase
+  'entities', //            entity (+ partner, share)
+  'periods', //             period, entry_period
+  'accounts', //            account
+  'flows', //               flow
+  'currencies', //          currency
+  'natures', //             nature
+]);
+
 // ───────────── Construction runtime d'un TableDef depuis le schéma ─────────────
 
 // Capitalise un identifiant technique pour fallback de libellé : `compte_parent`
@@ -532,22 +549,20 @@ export function MasterDataPage({
     await load();
   }
 
-  // Tables groupées par kind pour le dropdown. Si l'endpoint /api/md n'a rien
-  // renvoyé (serveur obsolète), tableList contient les natives via MASTER_TABLES.
+  // Tables groupées pour le dropdown, selon la typologie : « Dimensions » (axes de
+  // faits) puis « Référentiels de paramétrage » (le reste des natives). Les tables
+  // dynamiques `car_*` / `lst_*` (kind characteristic/value_list) ne sont plus
+  // listées ici : leur foyer unique est la page « Attributs de dimension ». Si
+  // l'endpoint /api/md n'a rien renvoyé (serveur obsolète), tableList contient les
+  // natives via MASTER_TABLES.
   const groupedTables = useMemo(() => {
+    const natives = tableList.filter((t) => t.kind === 'native');
+    const dims = natives.filter((t) => DIMENSION_TABLES.has(t.table));
+    const refs = natives.filter((t) => !DIMENSION_TABLES.has(t.table));
     const groups: { label: string; items: TableSummary[] }[] = [];
-    const byKind: Record<string, TableSummary[]> = {};
-    for (const t of tableList) {
-      (byKind[t.kind] ??= []).push(t);
-    }
-    if (byKind['native']) {
-      groups.push({ label: 'Référentiels', items: byKind['native'] });
-    }
-    if (byKind['characteristic']) {
-      groups.push({ label: 'Caractéristiques', items: byKind['characteristic'] });
-    }
-    if (byKind['value_list']) {
-      groups.push({ label: 'Listes de valeurs', items: byKind['value_list'] });
+    if (dims.length > 0) groups.push({ label: 'Dimensions', items: dims });
+    if (refs.length > 0) {
+      groups.push({ label: 'Référentiels de paramétrage', items: refs });
     }
     if (hideTables && hideTables.length > 0) {
       const hidden = new Set(hideTables);
