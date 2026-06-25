@@ -186,10 +186,16 @@ depuis les données existantes (jamais de reseed).
    `ensure_ids` ; ids non consommés ; FK/faits restent en codes). Non-breaking.
    Unicité par séquence (pas d'index : DuckDB bloque alors `DROP COLUMN`) ; la
    PK sur `id` viendra à l'étape 3/4.
-2. **Couche de résolution** code↔id (§5) + tests batch. ⬅️ *en cours*
+2. ✅ **Couche de résolution** code↔id (`src/resolve.rs` : `resolve_id`/`code_of`
+   + cartes batch) + tests.
 3. **Basculer les FK dim→dim** vers `_id` (petit ensemble : `entite_parent`,
    `sous_classe`, `flow_scheme`, FK de `dim_consolidation`…). Renommage déjà
-   gratuit pour celles-là.
+   gratuit pour celles-là. ⬅️ *prochaine étape — début des réécritures invasives*
+   - ⚠️ ces FK sont **couplées** : `account.flow_scheme` est joint dans la vue
+     `v_flow_behavior` à `sat_flow_scheme_item.scheme` (+ défauts en dur
+     `RESULTAT`/`BILAN`) ; `account.sous_classe` pilote `SENS_CASE` (report.rs) ;
+     toutes sont dans `references.rs` + le seed des FK natives. À basculer de
+     façon **coordonnée**, golden + suite complète comme filet à chaque cut.
 4. **Basculer `fact_entry` en ids** : réécrire la frontière étape A + jointures
    pipeline + reports. *La grosse étape.*
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
