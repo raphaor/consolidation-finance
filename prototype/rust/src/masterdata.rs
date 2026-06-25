@@ -19,7 +19,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use duckdb::{params_from_iter, types::Value as DbValue, types::ValueRef, Row};
@@ -894,6 +894,92 @@ async fn remove(
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
+// ─────────────────────────── Renommage de code (B1, étape 7) ────────────────────
+
+/// Renomme le `code` d'un membre d'une dimension à clé technique.
+///
+/// Cœur du chantier « codes renommables » : possible **uniquement** si plus
+/// aucune référence ne pointe vers le code de cette dimension (toutes ses FK
+/// entrantes ont été migrées en clé technique `id`). Sinon le renommage
+/// orphelinerait des données → refus avec la liste des blocages.
+///
+/// Limite connue : la garde s'appuie sur le **graphe de références**. Elle ne
+/// couvre pas encore les codes éventuellement **enfouis dans les JSON** (règles,
+/// coefficients, indicateurs) ni `app_config` — à ajouter avant de rendre
+/// renommables les dimensions dont les valeurs apparaissent dans ces contenus
+/// (cf. `docs/PLAN_RENOMMAGE_CODES.md` rôle 3). Les dimensions aujourd'hui
+/// éligibles (ex. `variant`) n'y figurent pas.
+pub fn rename_code(
+    con: &duckdb::Connection,
+    api_table: &str,
+    old: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    let def = resolve_table(con, api_table)?
+        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {api_table}")))?;
+    // Seules les dimensions à clé technique (registre SURROGATE_DIMS) ont un code
+    // renommable ; `master_of` fournit (table SQL, colonne code) de façon sûre.
+    let (sql_table, code_col) = resolve::master_of(&def.sql_name).ok_or_else(|| {
+        AppError::bad_request(format!("{api_table} n'est pas une dimension à code renommable"))
+    })?;
+
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(()); // no-op
+    }
+
+    // Garde de sûreté : aucune référence ne doit encore cibler le **code**.
+    let blockers: Vec<String> = references::all_references(con)
+        .into_iter()
+        .filter(|r| r.target_table == sql_table && r.target_column == code_col)
+        .map(|r| format!("{}.{}", r.table, r.column))
+        .collect();
+    if !blockers.is_empty() {
+        return Err(AppError::conflict(format!(
+            "code non renommable : encore référencé par {} \
+             (FK non migrées en clé technique)",
+            blockers.join(", ")
+        )));
+    }
+
+    if !references::value_exists(con, sql_table, code_col, old).map_err(db_err)? {
+        return Err(AppError::not_found(format!("code introuvable : {old}")));
+    }
+    if references::value_exists(con, sql_table, code_col, new).map_err(db_err)? {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+
+    con.execute(
+        &format!("UPDATE {sql_table} SET \"{code_col}\" = ? WHERE \"{code_col}\" = ?"),
+        [new, old],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct RenameBody {
+    old: String,
+    new: String,
+}
+
+/// POST /api/md/{table}/rename — renomme le code d'un membre (cf. [`rename_code`]).
+async fn rename_handler(
+    Path(table): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    {
+        let con = lock_con(&state)?;
+        rename_code(&con, &table, &body.old, &body.new)?;
+        // Durabilité : flushe l'UPDATE (cf. CHECKPOINT au démarrage de server.rs).
+        let _ = con.execute("CHECKPOINT", []);
+    }
+    Ok(Json(serde_json::json!({ "renamed": { "old": body.old, "new": body.new } })))
+}
+
 // ─────────────────────── HTTP — Schéma et liste des tables ─────────────────────
 
 /// Résumé d'une table navigable dans master data.
@@ -1194,6 +1280,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/api/md/{table}",
             get(list).post(create).put(update).delete(remove),
         )
+        .route("/api/md/{table}/rename", post(rename_handler))
         .route("/api/md/{table}/schema", get(table_schema))
         .route("/api/meta/references", get(get_references))
         .route("/api/meta/native-enums", get(get_native_enums))
@@ -1211,6 +1298,43 @@ mod tests {
         let con = Connection::open_in_memory().expect("open in-memory");
         crate::schema::create_schema(&con).expect("create_schema");
         con
+    }
+
+    /// Renommage de code (B1, étape 7) : autorisé pour une dimension entièrement
+    /// basculée en clé technique (`variant`), refusé sinon (`currency` a encore
+    /// des FK code-keyed). Vérifie aussi la propagation et les conflits.
+    #[test]
+    fn rename_code_variant_ok_currency_refuse() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // variant : entièrement flippée → renommage autorisé et propagé.
+        let cons_variant_before: i64 = con
+            .query_row("SELECT variant FROM dim_consolidation LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        rename_code(&con, "variants", "BASE", "STANDARD").expect("variant renommable");
+        // Le code a changé ; l'id (donc la FK dim_consolidation.variant) est intact.
+        assert!(
+            resolve::resolve_id(&con, "dim_variant", "BASE").unwrap().is_none(),
+            "ancien code disparu"
+        );
+        let new_id = resolve::resolve_id(&con, "dim_variant", "STANDARD")
+            .unwrap()
+            .expect("nouveau code présent");
+        assert_eq!(new_id, cons_variant_before, "la FK (id) pointe toujours la même ligne");
+
+        // currency : encore référencée par des FK code-keyed → refus explicite.
+        let err = rename_code(&con, "currencies", "EUR", "EURO").unwrap_err();
+        assert!(
+            err.1.contains("non renommable"),
+            "refus attendu pour currency : {}",
+            err.1
+        );
+
+        // Conflit : renommer vers un code existant est rejeté.
+        con.execute("INSERT INTO dim_variant (code, libelle) VALUES ('OPT','Option')", [])
+            .unwrap();
+        assert!(rename_code(&con, "variants", "STANDARD", "OPT").is_err());
     }
 
     /// FK migrée en clé technique (option A, chantier B1) : `dim_consolidation.variant`
