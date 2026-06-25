@@ -22,7 +22,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
-import { formatOptionLabel, sortForDisplay } from '../utils/format';
+import { sortForDisplay } from '../utils/format';
 import {
   DIM_TO_TABLE_FALLBACK,
   DimRefContext,
@@ -63,6 +63,72 @@ const COEFF_TYPES = [
 ];
 
 const NULL_OPS = new Set(['IS NULL', 'IS NOT NULL']);
+
+// Symboles compacts pour l'opérateur (l'UI affiche le symbole, le JSON conserve
+// la chaîne d'origine attendue par le moteur, cf. `rules.rs`). Le libellé sert
+// d'infobulle (title) et de légende.
+const OP_SYMBOL: Record<string, string> = {
+  '=': '=',
+  '!=': '≠',
+  '>': '>',
+  '<': '<',
+  '>=': '≥',
+  '<=': '≤',
+  IN: '∈',
+  'IS NULL': '∅',
+  'IS NOT NULL': '≠∅',
+};
+const OP_LABEL: Record<string, string> = {
+  '=': 'égal',
+  '!=': 'différent',
+  '>': 'supérieur',
+  '<': 'inférieur',
+  '>=': 'supérieur ou égal',
+  '<=': 'inférieur ou égal',
+  IN: 'dans la liste',
+  'IS NULL': 'est nul',
+  'IS NOT NULL': 'non nul',
+};
+
+// Dimensions pilotables affichées d'emblée en destination (les plus fréquentes).
+// Les autres dimensions pilotables sont proposées à l'ajout via des chips « + ».
+// (À l'ouverture d'une règle existante, toute dimension déjà pilotée — mode ≠
+// inherit — est aussi révélée automatiquement, cf. `visibleDestDims`.)
+const DEFAULT_DEST_DIMS = ['account', 'flow', 'nature'];
+
+// Dimensions de filtre affichées d'emblée en sélection (mêmes que destination).
+// Les autres sont ajoutables via des chips « + ». Les lignes seedées laissées
+// vides sont filtrées à l'enregistrement (cf. `RuleFormModal.submit`).
+const DEFAULT_SEL_DIMS = ['account', 'flow', 'nature'];
+
+/// Une condition de sélection est-elle « porteuse » (à envoyer au moteur) ? Les
+/// ops unaires (IS NULL / IS NOT NULL) le sont toujours ; sinon il faut une
+/// valeur non vide. Sert à filtrer les lignes de base seedées restées vides.
+function selectionIsMeaningful(s: SelectionCond): boolean {
+  if (NULL_OPS.has(s.op)) return true;
+  if (Array.isArray(s.val)) return s.val.length > 0;
+  return String(s.val ?? '').trim() !== '';
+}
+
+/// Seed les dimensions de base manquantes (account/flow/nature) en tête de la
+/// sélection de chaque opération, sans dupliquer celles déjà présentes ni
+/// toucher aux conditions existantes. Appelé à l'ouverture de la modale.
+function seedBaseSelection(
+  def: RuleDefinition,
+  selectionDims: string[],
+): RuleDefinition {
+  const base = DEFAULT_SEL_DIMS.filter((d) => selectionDims.includes(d));
+  return {
+    ...def,
+    operations: def.operations.map((op) => {
+      const present = new Set(op.selection.map((s) => s.dim));
+      const seeded: SelectionCond[] = base
+        .filter((d) => !present.has(d))
+        .map((d) => ({ dim: d, op: '=', val: '' }));
+      return { ...op, selection: [...seeded, ...op.selection] };
+    }),
+  };
+}
 
 // Fallback des 12 dimensions built-in si l'API /api/meta/dimensions est
 // injoignable (serveur obsolète, réseau en panne). Miroir de
@@ -205,7 +271,8 @@ function ValueField({
           ? [value]
           : [];
       return (
-        <MultiSelectDropdown
+        <ValueDropdown
+          multiple
           options={values}
           selected={arr}
           loading={loading}
@@ -216,29 +283,16 @@ function ValueField({
     return <InValueField value={value} onRawChange={onRawChange} />;
   }
 
-  // Liste déroulante si des valeurs sont disponibles.
+  // Valeur unique : cartouche repliable si master data disponible.
   if (values.length > 0) {
     const current = formatCondVal(value);
-    const codes = values.map((v) => v.code);
     return (
-      <select
-        value={codes.includes(current) ? current : ''}
-        onChange={(e) => onRawChange(e.target.value)}
-      >
-        <option value="" disabled>
-          — choisir —
-        </option>
-        {values.map((v) => (
-          <option key={v.code} value={v.code}>
-            {formatOptionLabel(v.code, v.libelle)}
-          </option>
-        ))}
-        {/* Si la valeur actuelle n'est pas dans la liste (ex: règle existante
-            avec une valeur supprimée de la master data), on l'affiche quand même. */}
-        {current && !codes.includes(current) && (
-          <option value={current}>{current} (hors liste)</option>
-        )}
-      </select>
+      <ValueDropdown
+        options={values}
+        selected={current ? [current] : []}
+        loading={loading}
+        onChange={(arr) => onRawChange(arr[0] ?? '')}
+      />
     );
   }
 
@@ -265,28 +319,15 @@ function OverrideValueField({
   value: string;
   onChange: (v: string) => void;
 }) {
-  const { values } = useDimValues(dim);
+  const { values, loading } = useDimValues(dim);
   if (values.length > 0) {
-    const codes = values.map((v) => v.code);
     return (
-      <select
-        className="rule-dest-input"
-        value={codes.includes(value) ? value : ''}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="" disabled>
-          — choisir —
-        </option>
-        {values.map((v) => (
-          <option key={v.code} value={v.code}>
-            {formatOptionLabel(v.code, v.libelle)}
-          </option>
-        ))}
-        {/* Si la valeur actuelle n'est pas dans la liste, on l'affiche quand même. */}
-        {value && !codes.includes(value) && (
-          <option value={value}>{value} (hors liste)</option>
-        )}
-      </select>
+      <ValueDropdown
+        options={values}
+        selected={value ? [value] : []}
+        loading={loading}
+        onChange={(arr) => onChange(arr[0] ?? '')}
+      />
     );
   }
   return (
@@ -300,19 +341,22 @@ function OverrideValueField({
   );
 }
 
-/// Multi-select repliable pour l'opérateur `IN`. Bouton qui ouvre un panel
-/// absolu avec checkboxes ; fermeture au clic extérieur. Affichage fermé :
-/// 0 → placeholder, 1-3 → codes séparés par virgule, >3 → compteur. Pas de
-/// recherche ni de boutons globaux (cf. choix utilisateur).
-function MultiSelectDropdown({
+/// Sélecteur de valeur(s) repliable, unifié pour les choix uniques et `IN`.
+/// Bouton qui affiche la (les) valeur(s) en **pastilles** et ouvre un panel
+/// absolu ; fermeture au clic extérieur. Le panel liste `code` + `libellé` sur
+/// une ligne, l'état sélectionné par un fond teinté + ✓ (pas de checkbox
+/// encombrante). En mode simple (`multiple=false`), choisir une valeur referme.
+function ValueDropdown({
   options,
   selected,
   onChange,
+  multiple = false,
   loading,
 }: {
   options: DimValue[];
-  selected: string[];
-  onChange: (newArr: string[]) => void;
+  selected: string[]; // codes ; en mode simple, longueur ≤ 1
+  onChange: (next: string[]) => void;
+  multiple?: boolean;
   loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -330,27 +374,40 @@ function MultiSelectDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const display =
-    selected.length === 0
-      ? '— choisir —'
-      : selected.length <= 3
-        ? selected.join(', ')
-        : `${selected.length} valeurs sélectionnées`;
-
-  const toggle = (code: string) => {
-    if (selected.includes(code)) onChange(selected.filter((c) => c !== code));
-    else onChange([...selected, code]);
+  const pick = (code: string) => {
+    if (multiple) {
+      if (selected.includes(code)) onChange(selected.filter((c) => c !== code));
+      else onChange([...selected, code]);
+    } else {
+      onChange([code]);
+      setOpen(false);
+    }
   };
 
   return (
-    <div className="multiselect" ref={ref}>
+    <div className={`multiselect${multiple ? '' : ' multiselect--single'}`} ref={ref}>
       <button
         type="button"
         className="multiselect__btn"
         onClick={() => setOpen((o) => !o)}
         disabled={loading}
       >
-        {loading ? '…' : display}
+        {loading ? (
+          '…'
+        ) : selected.length === 0 ? (
+          <span className="multiselect__placeholder">— choisir —</span>
+        ) : (
+          <span className="multiselect__chips">
+            {selected.map((code) => (
+              <span key={code} className="dim-chip">
+                {code}
+              </span>
+            ))}
+          </span>
+        )}
+        <span className="multiselect__caret" aria-hidden="true">
+          ▾
+        </span>
       </button>
       {open && (
         <div className="multiselect__panel">
@@ -360,14 +417,18 @@ function MultiSelectDropdown({
           {options.map((o) => {
             const checked = selected.includes(o.code);
             return (
-              <label key={o.code} className="multiselect__item">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggle(o.code)}
-                />
-                <span>{formatOptionLabel(o.code, o.libelle)}</span>
-              </label>
+              <button
+                type="button"
+                key={o.code}
+                className={`multiselect__item${checked ? ' is-selected' : ''}`}
+                onClick={() => pick(o.code)}
+              >
+                <span className="multiselect__code">{o.code}</span>
+                <span className="multiselect__lib">{o.libelle ?? ''}</span>
+                <span className="multiselect__tick" aria-hidden="true">
+                  {checked ? '✓' : ''}
+                </span>
+              </button>
             );
           })}
         </div>
@@ -410,7 +471,8 @@ function SelectionValueField({
           ? [value]
           : [];
       return (
-        <MultiSelectDropdown
+        <ValueDropdown
+          multiple
           options={values}
           selected={arr}
           loading={loading}
@@ -421,29 +483,16 @@ function SelectionValueField({
     return <InValueField value={value} onRawChange={onRawChange} />;
   }
 
-  // Ops unaires : dropdown si valeurs, sinon input texte libre.
+  // Valeur unique : cartouche repliable si valeurs disponibles, sinon texte libre.
   if (values.length > 0) {
     const current = formatCondVal(value);
-    const codes = values.map((v) => v.code);
     return (
-      <select
-        value={codes.includes(current) ? current : ''}
-        onChange={(e) => onRawChange(e.target.value)}
-      >
-        <option value="" disabled>
-          — choisir —
-        </option>
-        {values.map((v) => (
-          <option key={v.code} value={v.code}>
-            {formatOptionLabel(v.code, v.libelle)}
-          </option>
-        ))}
-        {/* Si la valeur actuelle n'est pas dans la liste (ex: règle existante
-            avec une valeur supprimée de la master data), on l'affiche quand même. */}
-        {current && !codes.includes(current) && (
-          <option value={current}>{current} (hors liste)</option>
-        )}
-      </select>
+      <ValueDropdown
+        options={values}
+        selected={current ? [current] : []}
+        loading={loading}
+        onChange={(arr) => onRawChange(arr[0] ?? '')}
+      />
     );
   }
   return (
@@ -455,13 +504,177 @@ function SelectionValueField({
   );
 }
 
-function emptyScopeCond(): ScopeCond {
-  return { target: 'entity', dim: SCOPE_DIMS[0], op: '=', val: '' };
+/// Sélecteur d'opérateur compact : affiche le symbole (=, ≠, ∈, ∅…), conserve
+/// la chaîne d'origine en valeur. Rendu avec son `<label className="field">`
+/// pour s'aligner dans `.rule-condition` ; modificateur `field--op` = largeur
+/// réduite (cf. App.css).
+function OpSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (op: string) => void;
+}) {
+  return (
+    <label className="field field--op">
+      <span>Op</span>
+      <select
+        className="op-select"
+        value={value}
+        title={OP_LABEL[value] ?? value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {OPS.map((o) => (
+          <option key={o} value={o} title={OP_LABEL[o]}>
+            {OP_SYMBOL[o] ?? o}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
-function emptySelectionCond(selectionDims: string[]): SelectionCond {
-  const dim = selectionDims[0] ?? 'account';
-  return { dim, op: '=', val: '' };
+/// Champ « Traverser » repliable : par défaut une simple icône ↳ (gain de
+/// place, la traversée étant l'exception) ; se déplie en `<select>` au clic, ou
+/// d'emblée si la condition utilise déjà une traversée (`value ≠ ''`). La valeur
+/// est de la forme `''` (direct) | `via:<code>` | `ref:<col>` | `attr:<col>`.
+function TraverseField({
+  value,
+  disabled,
+  viaOptions,
+  refOptions,
+  attrOptions,
+  onSelect,
+}: {
+  value: string;
+  disabled: boolean;
+  viaOptions: Characteristic[];
+  refOptions: CustomReference[];
+  attrOptions: NativeEnum[];
+  onSelect: (v: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(value !== '');
+  const hasOptions =
+    viaOptions.length > 0 || refOptions.length > 0 || attrOptions.length > 0;
+
+  if (!expanded) {
+    return (
+      <label className="field field--traverse">
+        <span>Traverser</span>
+        <button
+          type="button"
+          className="rule-traverse-btn"
+          disabled={disabled || !hasOptions}
+          title={
+            hasOptions
+              ? 'Filtrer par attribut : caractéristique N1 ou référence directe'
+              : 'Aucune traversée disponible pour cette dimension'
+          }
+          onClick={() => setExpanded(true)}
+        >
+          ↳
+        </button>
+      </label>
+    );
+  }
+
+  return (
+    <label className="field">
+      <span>Traverser</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === '') setExpanded(false);
+          onSelect(v);
+        }}
+      >
+        <option value="">(direct)</option>
+        {viaOptions.length > 0 && (
+          <optgroup label="Caractéristique N1">
+            {viaOptions.map((c) => (
+              <option key={`via:${c.code}`} value={`via:${c.code}`}>
+                {c.code}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {refOptions.length > 0 && (
+          <optgroup label="Référence directe">
+            {refOptions.map((r) => (
+              <option key={`ref:${r.column}`} value={`ref:${r.column}`}>
+                {r.column}
+                {r.native ? ' (natif)' : ''}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {attrOptions.length > 0 && (
+          <optgroup label="Attribut natif">
+            {attrOptions.map((e) => (
+              <option key={`attr:${e.column}`} value={`attr:${e.column}`}>
+                {e.column}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </label>
+  );
+}
+
+/// Phrase de relecture d'une opération, générée depuis le JSON (aide à valider
+/// sans déchiffrer chaque champ). Volontairement compacte ; pas de prétention
+/// SQL, juste un résumé lisible.
+function summarizeOperation(op: Operation): string {
+  const fmtVal = (o: string, val: unknown): string => {
+    if (NULL_OPS.has(o)) return '';
+    if (Array.isArray(val)) return `{${val.join(', ')}}`;
+    const s = String(val ?? '');
+    return s === '' ? '∅' : s;
+  };
+  const conds = op.selection.filter(selectionIsMeaningful);
+  const sel =
+    conds.length === 0
+      ? 'toutes les écritures'
+      : 'les écritures où ' +
+        conds
+          .map((s) => {
+            const sym = OP_SYMBOL[s.op] ?? s.op;
+            const trav = s.via
+              ? `.${s.via}`
+              : s.ref
+                ? `.${s.ref}`
+                : s.attr
+                  ? `.${s.attr}`
+                  : '';
+            const v = fmtVal(s.op, s.val);
+            return `${s.dim}${trav} ${sym}${v ? ` ${v}` : ''}`.trim();
+          })
+          .join(' et ');
+  const coeffLabel =
+    op.coefficient.type === 'constant'
+      ? String(op.coefficient.value ?? 0)
+      : op.coefficient.type;
+  const mult = Number.isNaN(op.multiplicateur) ? '?' : op.multiplicateur;
+  const overrides = Object.entries(op.destination)
+    .filter(([, d]) => d.mode !== 'inherit')
+    .map(([dim, d]) => {
+      if (d.mode === 'override') return `${dim} → ${d.value ?? '?'}`;
+      if (d.mode === 'null') return `${dim} → ∅`;
+      if (d.mode === 'map') return `${dim} ← ${d.via ?? '?'}.${d.attr ?? '?'}`;
+      if (d.mode === 'map_ref') return `${dim} ← ${d.ref ?? '?'}`;
+      return dim;
+    });
+  const destPart = overrides.length
+    ? `écrit ${overrides.join(', ')}`
+    : 'destination héritée';
+  return `Sur ${op.level}, prend ${sel}, applique ${coeffLabel} × ${mult}, ${destPart}.`;
+}
+
+function emptyScopeCond(): ScopeCond {
+  return { target: 'entity', dim: SCOPE_DIMS[0], op: '=', val: '' };
 }
 
 function emptyOperation(seq: number, pilotableDims: string[]): Operation {
@@ -472,7 +685,8 @@ function emptyOperation(seq: number, pilotableDims: string[]): Operation {
   return {
     seq,
     level: LEVELS_LIST[0],
-    selection: [],
+    // Dimensions de filtre de base affichées d'emblée (vides → ignorées au save).
+    selection: DEFAULT_SEL_DIMS.map((d) => ({ dim: d, op: '=', val: '' })),
     coefficient: { type: COEFF_TYPES[0] },
     multiplicateur: 1,
     destination,
@@ -530,9 +744,16 @@ function RuleFormModal({
   onSubmit,
   onCancel,
 }: RuleFormModalProps) {
-  const [draft, setDraft] = useState<RuleDraft>(initial);
+  const [draft, setDraft] = useState<RuleDraft>(() => ({
+    ...initial,
+    definition: seedBaseSelection(initial.definition, selectionDims),
+  }));
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Dimensions de destination révélées manuellement par opération (clé = seq).
+  // Les défauts (account/flow/nature) et toute dimension déjà pilotée sont
+  // toujours visibles ; ceci ne couvre que les chips « + » cliqués.
+  const [revealedDest, setRevealedDest] = useState<Record<number, string[]>>({});
   // Caractéristiques N1/N2 disponibles pour les destinations `map` et les
   // sélections `via`.
   const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
@@ -603,8 +824,22 @@ function RuleFormModal({
       return;
     }
 
+    // Nettoyage avant envoi : on retire les conditions de sélection vides (lignes
+    // de base seedées non renseignées) pour ne pas envoyer de filtre `dim = ''`
+    // au moteur.
+    const cleaned: RuleDraft = {
+      ...draft,
+      definition: {
+        ...draft.definition,
+        operations: draft.definition.operations.map((o) => ({
+          ...o,
+          selection: o.selection.filter(selectionIsMeaningful),
+        })),
+      },
+    };
+
     try {
-      await onSubmit(draft);
+      await onSubmit(cleaned);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'erreur');
     } finally {
@@ -700,11 +935,12 @@ function RuleFormModal({
       return { ...d, definition: { ...d.definition, operations } };
     });
   }
-  function addSelection(opIdx: number) {
+  // Ajoute une condition de filtre pour une dimension donnée (chips « + »).
+  function addSelectionForDim(opIdx: number, dim: string) {
     setDraft((d) => {
       const operations = d.definition.operations.map((o, i) =>
         i === opIdx
-          ? { ...o, selection: [...o.selection, emptySelectionCond(selectionDims)] }
+          ? { ...o, selection: [...o.selection, { dim, op: '=', val: '' }] }
           : o,
       );
       return { ...d, definition: { ...d.definition, operations } };
@@ -738,6 +974,41 @@ function RuleFormModal({
       });
       return { ...d, definition: { ...d.definition, operations } };
     });
+  }
+
+  // Dimensions de destination à afficher pour une opération : défauts
+  // (account/flow/nature) + toute dimension déjà pilotée (mode ≠ inherit) +
+  // chips révélés manuellement. Défauts en tête, le reste trié.
+  function visibleDestDims(op: Operation): string[] {
+    const defaults = DEFAULT_DEST_DIMS.filter((d) => pilotableDims.includes(d));
+    const active = pilotableDims.filter(
+      (d) => (op.destination[d]?.mode ?? 'inherit') !== 'inherit',
+    );
+    const revealed = (revealedDest[op.seq] ?? []).filter((d) =>
+      pilotableDims.includes(d),
+    );
+    const shown = new Set<string>([...defaults, ...active, ...revealed]);
+    const rest = sortForDisplay(
+      [...shown].filter((d) => !defaults.includes(d)),
+      (d) => d,
+    );
+    return [...defaults, ...rest];
+  }
+
+  // Révèle une dimension de destination (chip « + ») sans la piloter encore
+  // (reste inherit jusqu'à modification du mode).
+  function revealDest(seq: number, dim: string) {
+    setRevealedDest((r) => ({ ...r, [seq]: [...(r[seq] ?? []), dim] }));
+  }
+
+  // Masque une dimension non-défaut : remet son mode à inherit et la retire des
+  // dimensions révélées.
+  function hideDest(opIdx: number, seq: number, dim: string) {
+    updateDestination(opIdx, dim, { mode: 'inherit' });
+    setRevealedDest((r) => ({
+      ...r,
+      [seq]: (r[seq] ?? []).filter((d) => d !== dim),
+    }));
   }
 
   // ---------- Level global (hérité par toutes les opérations) ----------
@@ -842,19 +1113,10 @@ function RuleFormModal({
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  <span>Op</span>
-                  <select
-                    value={c.op}
-                    onChange={(e) => updateScope(idx, { op: e.target.value })}
-                  >
-                    {OPS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <OpSelect
+                  value={c.op}
+                  onChange={(op) => updateScope(idx, { op })}
+                />
                 {!NULL_OPS.has(c.op) && (
                   <label className="field">
                     <span>Valeur</span>
@@ -971,19 +1233,10 @@ function RuleFormModal({
                   </button>
                 </div>
 
+                <div className="rule-op-grid">
                 {/* Sélection */}
                 <div className="rule-section" style={{ marginTop: 0 }}>
                   <h4 className="rule-section__title">Sélection</h4>
-                  <p className="rule-section__hint">
-                    Conditions combinées par <strong>ET</strong> (toutes doivent être vraies).
-                   {' '}
-                    <em>
-                      Par défaut, le filtre porte sur la valeur directe de la dimension.
-                      Utilisez « Traverser » pour filtrer par <strong>attribut</strong> :
-                      caractéristique N1 (regroupement) ou référence directe
-                      (ex. <code>compte_parent</code>).
-                    </em>
-                  </p>
                   {op.selection.map((s, sIdx) => {
                     // Options de traversée pour `s.dim` :
                     // - caractéristiques N1 dont la dimension de base est `s.dim`
@@ -1016,118 +1269,52 @@ function RuleFormModal({
                           ? `attr:${s.attr}`
                           : '';
                     return (
-                      <div key={sIdx} className="rule-condition">
-                        <label className="field">
-                          <span>Dim</span>
-                          <select
-                            value={s.dim}
-                            onChange={(e) =>
+                      <div key={sIdx} className="rule-condition rule-condition--compact">
+                        <span className="rule-sel-dim">{s.dim}</span>
+                        <TraverseField
+                          value={traverseVal}
+                          disabled={s.dim === 'level'}
+                          viaOptions={viaOptions}
+                          refOptions={refOptions}
+                          attrOptions={attrOptions}
+                          onSelect={(v) => {
+                            if (v === '') {
                               updateSelection(opIdx, sIdx, {
-                                dim: e.target.value,
                                 via: undefined,
                                 ref: undefined,
                                 attr: undefined,
-                              })
+                                val: '',
+                              });
+                            } else if (v.startsWith('via:')) {
+                              updateSelection(opIdx, sIdx, {
+                                via: v.slice(4),
+                                ref: undefined,
+                                attr: undefined,
+                                val: '',
+                              });
+                            } else if (v.startsWith('ref:')) {
+                              updateSelection(opIdx, sIdx, {
+                                via: undefined,
+                                ref: v.slice(4),
+                                attr: undefined,
+                                val: '',
+                              });
+                            } else if (v.startsWith('attr:')) {
+                              updateSelection(opIdx, sIdx, {
+                                via: undefined,
+                                ref: undefined,
+                                attr: v.slice(5),
+                                val: '',
+                              });
                             }
-                          >
-                            {selectionDims.map((d) => (
-                              <option key={d} value={d}>
-                                {d}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>Traverser</span>
-                          <select
-                            value={traverseVal}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (v === '') {
-                                updateSelection(opIdx, sIdx, {
-                                  via: undefined,
-                                  ref: undefined,
-                                  attr: undefined,
-                                  val: '',
-                                });
-                              } else if (v.startsWith('via:')) {
-                                updateSelection(opIdx, sIdx, {
-                                  via: v.slice(4),
-                                  ref: undefined,
-                                  attr: undefined,
-                                  val: '',
-                                });
-                              } else if (v.startsWith('ref:')) {
-                                updateSelection(opIdx, sIdx, {
-                                  via: undefined,
-                                  ref: v.slice(4),
-                                  attr: undefined,
-                                  val: '',
-                                });
-                              } else if (v.startsWith('attr:')) {
-                                updateSelection(opIdx, sIdx, {
-                                  via: undefined,
-                                  ref: undefined,
-                                  attr: v.slice(5),
-                                  val: '',
-                                });
-                              }
-                            }}
-                            disabled={
-                              s.dim === 'level' ||
-                              (viaOptions.length === 0 &&
-                                refOptions.length === 0 &&
-                                attrOptions.length === 0)
-                            }
-                          >
-                            <option value="">(direct)</option>
-                            {viaOptions.length > 0 && (
-                              <optgroup label="Caractéristique N1">
-                                {viaOptions.map((c) => (
-                                  <option key={`via:${c.code}`} value={`via:${c.code}`}>
-                                    {c.code}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {refOptions.length > 0 && (
-                              <optgroup label="Référence directe">
-                                {refOptions.map((r) => (
-                                  <option key={`ref:${r.column}`} value={`ref:${r.column}`}>
-                                    {r.column}
-                                    {r.native ? ' (natif)' : ''}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {attrOptions.length > 0 && (
-                              <optgroup label="Attribut natif">
-                                {attrOptions.map((e) => (
-                                  <option key={`attr:${e.column}`} value={`attr:${e.column}`}>
-                                    {e.column}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>Op</span>
-                          <select
-                            value={s.op}
-                            onChange={(e) =>
-                              updateSelection(opIdx, sIdx, { op: e.target.value })
-                            }
-                          >
-                            {OPS.map((o) => (
-                              <option key={o} value={o}>
-                                {o}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                          }}
+                        />
+                        <OpSelect
+                          value={s.op}
+                          onChange={(op) => updateSelection(opIdx, sIdx, { op })}
+                        />
                         {!NULL_OPS.has(s.op) && (
-                          <label className="field">
+                          <label className="field field--grow">
                             <span>Valeur</span>
                             <SelectionValueField
                               sel={s}
@@ -1153,142 +1340,262 @@ function RuleFormModal({
                       </div>
                     );
                   })}
-                  <button
-                    type="button"
-                    className="rule-add-btn"
-                    onClick={() => addSelection(opIdx)}
-                  >
-                    + Ajouter une condition
-                  </button>
+                  {(() => {
+                    const presentSel = new Set(op.selection.map((s) => s.dim));
+                    const baseSel = DEFAULT_SEL_DIMS.filter((d) =>
+                      selectionDims.includes(d),
+                    );
+                    const addableSel = [
+                      ...baseSel.filter((d) => !presentSel.has(d)),
+                      ...sortForDisplay(
+                        selectionDims.filter(
+                          (d) => !presentSel.has(d) && !baseSel.includes(d),
+                        ),
+                        (d) => d,
+                      ),
+                    ];
+                    return (
+                      <div className="rule-dest-add">
+                        <span className="rule-dest-add__label">Ajouter un filtre</span>
+                        {addableSel.map((dim) => (
+                          <button
+                            key={dim}
+                            type="button"
+                            className="rule-chip"
+                            onClick={() => addSelectionForDim(opIdx, dim)}
+                          >
+                            + {dim}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Destination */}
-                <div className="rule-section" style={{ marginTop: 0 }}>
+                <div className="rule-section rule-section--dest" style={{ marginTop: 0 }}>
                   <h4 className="rule-section__title">Destination</h4>
-                  {pilotableDims.map((dim) => {
-                    const dest = op.destination[dim] ?? { mode: 'inherit' as DestMode };
-                    // Mode `map` : seules les caractéristiques ayant un attribut
-                    // ciblant cette dimension sont proposées (compatibilité de
-                    // type imposée par le moteur).
-                    const viaOptions = sortForDisplay(
-                      characteristics.filter((c) =>
-                        c.attributes.some((a) => a.target_dimension === dim),
-                      ),
-                      (c) => c.code,
-                    );
-                    const viaChar = characteristics.find((c) => c.code === dest.via);
-                    const attrOptions = sortForDisplay(
-                      (viaChar?.attributes ?? []).filter((a) => a.target_dimension === dim),
-                      (a) => a.name,
-                    );
-                    // Mode `map_ref` : seules les références directes (patron B)
-                    // auto-référentielles sur `dim` sont proposées (host = target
-                    // = dim, ex : `compte_parent` sur `account`). Le moteur
-                    // exige en effet target = dim (la valeur écrite doit être un
-                    // code valide pour `dim`).
-                    const mapRefOptions = sortForDisplay(
-                      customReferences.filter(
-                        (r) => r.host_dimension === dim && r.target_dimension === dim,
-                      ),
-                      (r) => r.column,
+                  {(() => {
+                    const visible = visibleDestDims(op);
+                    const addable = sortForDisplay(
+                      pilotableDims.filter((d) => !visible.includes(d)),
+                      (d) => d,
                     );
                     return (
-                      <div key={dim} className="rule-dest-row">
-                        <span className="rule-dest-label">{dim}</span>
-                        <select
-                          value={dest.mode}
-                          onChange={(e) =>
-                            updateDestination(opIdx, dim, {
-                              mode: e.target.value as DestMode,
-                            })
-                          }
-                        >
-                          <option value="inherit">inherit</option>
-                          <option value="override">override</option>
-                          <option value="null">null</option>
-                          <option value="map" disabled={viaOptions.length === 0}>
-                            map (caractéristique)
-                          </option>
-                          <option value="map_ref" disabled={mapRefOptions.length === 0}>
-                            map_ref (référence)
-                          </option>
-                        </select>
-                        {dest.mode === 'override' && (
-                          <OverrideValueField
-                            dim={dim}
-                            value={dest.value ?? ''}
-                            onChange={(v) =>
-                              updateDestination(opIdx, dim, { value: v })
-                            }
-                          />
-                        )}
-                        {dest.mode === 'map' && (
-                          <>
-                            <select
-                              className="rule-dest-input"
-                              value={dest.via ?? ''}
-                              onChange={(e) =>
-                                updateDestination(opIdx, dim, {
-                                  via: e.target.value,
-                                  attr: '',
-                                })
-                              }
-                            >
-                              <option value="" disabled>
-                                — caractéristique —
-                              </option>
-                              {viaOptions.map((c) => (
-                                <option key={c.code} value={c.code}>
-                                  {c.code}
+                      <>
+                        {visible.map((dim) => {
+                          const dest =
+                            op.destination[dim] ?? { mode: 'inherit' as DestMode };
+                          // Mode `map` : seules les caractéristiques ayant un
+                          // attribut ciblant cette dimension sont proposées
+                          // (compatibilité de type imposée par le moteur).
+                          const viaOptions = sortForDisplay(
+                            characteristics.filter((c) =>
+                              c.attributes.some((a) => a.target_dimension === dim),
+                            ),
+                            (c) => c.code,
+                          );
+                          const viaChar = characteristics.find(
+                            (c) => c.code === dest.via,
+                          );
+                          const attrOptions = sortForDisplay(
+                            (viaChar?.attributes ?? []).filter(
+                              (a) => a.target_dimension === dim,
+                            ),
+                            (a) => a.name,
+                          );
+                          // Mode `map_ref` : seules les références directes
+                          // (patron B) auto-référentielles sur `dim` (host =
+                          // target = dim, ex : `compte_parent` sur `account`).
+                          const mapRefOptions = sortForDisplay(
+                            customReferences.filter(
+                              (r) =>
+                                r.host_dimension === dim &&
+                                r.target_dimension === dim,
+                            ),
+                            (r) => r.column,
+                          );
+                          const isDefault = DEFAULT_DEST_DIMS.includes(dim);
+                          return (
+                            <div key={dim} className="rule-dest-row">
+                              <span className="rule-dest-label">{dim}</span>
+                              <select
+                                className={`rule-dest-mode rule-dest-mode--${dest.mode}`}
+                                value={dest.mode}
+                                onChange={(e) =>
+                                  updateDestination(opIdx, dim, {
+                                    mode: e.target.value as DestMode,
+                                  })
+                                }
+                              >
+                                <option value="inherit">inherit</option>
+                                <option value="override">override</option>
+                                <option value="null">null</option>
+                                <option value="map" disabled={viaOptions.length === 0}>
+                                  map (caractéristique)
                                 </option>
-                              ))}
-                            </select>
-                            <select
-                              className="rule-dest-input"
-                              value={dest.attr ?? ''}
-                              disabled={!dest.via}
-                              onChange={(e) =>
-                                updateDestination(opIdx, dim, { attr: e.target.value })
-                              }
-                            >
-                              <option value="" disabled>
-                                — attribut —
-                              </option>
-                              {attrOptions.map((a) => (
-                                <option key={a.name} value={a.name}>
-                                  {a.name}
+                                <option
+                                  value="map_ref"
+                                  disabled={mapRefOptions.length === 0}
+                                >
+                                  map_ref (référence)
                                 </option>
-                              ))}
-                            </select>
-                          </>
-                        )}
-                        {dest.mode === 'map_ref' && (
-                          <select
-                            className="rule-dest-input"
-                            value={dest.ref ?? ''}
-                            onChange={(e) =>
-                              updateDestination(opIdx, dim, { ref: e.target.value })
-                            }
-                          >
-                            <option value="" disabled>
-                              — référence —
-                            </option>
-                            {mapRefOptions.map((r) => (
-                              <option key={r.column} value={r.column}>
-                                {r.column}
-                              </option>
+                              </select>
+                              <span className="rule-dest-extra">
+                                {dest.mode === 'inherit' && (
+                                  <span className="rule-dest-muted">
+                                    hérité de la source
+                                  </span>
+                                )}
+                                {dest.mode === 'null' && (
+                                  <span className="rule-dest-muted">
+                                    forcé à vide (∅)
+                                  </span>
+                                )}
+                                {dest.mode === 'override' && (
+                                  <OverrideValueField
+                                    dim={dim}
+                                    value={dest.value ?? ''}
+                                    onChange={(v) =>
+                                      updateDestination(opIdx, dim, { value: v })
+                                    }
+                                  />
+                                )}
+                                {dest.mode === 'map' && (
+                                  <>
+                                    <select
+                                      className="rule-dest-input"
+                                      value={dest.via ?? ''}
+                                      onChange={(e) =>
+                                        updateDestination(opIdx, dim, {
+                                          via: e.target.value,
+                                          attr: '',
+                                        })
+                                      }
+                                    >
+                                      <option value="" disabled>
+                                        — caractéristique —
+                                      </option>
+                                      {viaOptions.map((c) => (
+                                        <option key={c.code} value={c.code}>
+                                          {c.code}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      className="rule-dest-input"
+                                      value={dest.attr ?? ''}
+                                      disabled={!dest.via}
+                                      onChange={(e) =>
+                                        updateDestination(opIdx, dim, {
+                                          attr: e.target.value,
+                                        })
+                                      }
+                                    >
+                                      <option value="" disabled>
+                                        — attribut —
+                                      </option>
+                                      {attrOptions.map((a) => (
+                                        <option key={a.name} value={a.name}>
+                                          {a.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </>
+                                )}
+                                {dest.mode === 'map_ref' && (
+                                  <select
+                                    className="rule-dest-input"
+                                    value={dest.ref ?? ''}
+                                    onChange={(e) =>
+                                      updateDestination(opIdx, dim, {
+                                        ref: e.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="" disabled>
+                                      — référence —
+                                    </option>
+                                    {mapRefOptions.map((r) => (
+                                      <option key={r.column} value={r.column}>
+                                        {r.column}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </span>
+                              {isDefault ? (
+                                <span aria-hidden="true" />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="rule-dest-remove"
+                                  aria-label={`Retirer ${dim}`}
+                                  title="Retirer cette dimension (repasse en inherit)"
+                                  onClick={() => hideDest(opIdx, op.seq, dim)}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {addable.length > 0 && (
+                          <div className="rule-dest-add">
+                            <span className="rule-dest-add__label">
+                              Autres dimensions
+                            </span>
+                            {addable.map((dim) => (
+                              <button
+                                key={dim}
+                                type="button"
+                                className="rule-chip"
+                                onClick={() => revealDest(op.seq, dim)}
+                              >
+                                + {dim}
+                              </button>
                             ))}
-                          </select>
+                          </div>
                         )}
-                      </div>
+                      </>
                     );
-                  })}
+                  })()}
+                </div>
+                </div>
+
+                <div className="rule-op-summary">
+                  <span className="rule-op-summary__tag">résumé</span>
+                  <span>{summarizeOperation(op)}</span>
                 </div>
               </div>
             ))}
             <button type="button" className="rule-add-btn" onClick={addOp}>
               + Ajouter une opération
             </button>
+
+            {/* Aides consolidées (affichées une seule fois pour toutes les
+                opérations afin de garder le formulaire compact). */}
+            <div className="rule-help">
+              <p className="rule-section__hint rule-op-legend">
+                <strong>Opérateurs :</strong> <code>=</code> égal · <code>≠</code>{' '}
+                différent · <code>&gt;</code> <code>&lt;</code> <code>≥</code>{' '}
+                <code>≤</code> comparaisons · <code>∈</code> dans la liste ·{' '}
+                <code>∅</code> est nul · <code>≠∅</code> non nul
+              </p>
+              <p className="rule-section__hint">
+                <strong>Sélection :</strong> conditions combinées par ET (toutes
+                doivent être vraies). Par défaut le filtre porte sur la valeur directe
+                de la dimension ; l'icône <span className="rule-traverse-glyph">↳</span>{' '}
+                « Traverser » permet de filtrer par attribut (caractéristique N1 ou
+                référence directe, ex. <code>compte_parent</code>).
+              </p>
+              <p className="rule-section__hint">
+                <strong>Destination :</strong> <code>account</code>, <code>flow</code>{' '}
+                et <code>nature</code> sont affichées d'office ; ajoutez les autres
+                dimensions via les boutons <strong>+</strong>. Les dimensions laissées
+                en <code>inherit</code> conservent la valeur de la source.
+              </p>
+            </div>
           </div>
 
           {formError && (
