@@ -5,6 +5,7 @@
 import type { ReactNode } from 'react';
 import { HealthBadge } from './HealthBadge';
 import type { HealthState } from '../hooks/useHealth';
+import { useTheme } from '../hooks/useTheme';
 
 export type PageId =
   // Restitution
@@ -102,18 +103,29 @@ interface Props {
 
 export function Layout({ active, onNavigate, health, children }: Props) {
   const activeGroup = GROUP_OF_PAGE.get(active) ?? GROUPS[0];
+  const { theme, toggle } = useTheme();
 
   return (
     <div className="app">
       <header className="app__topbar">
         <div className="app__brand">
-          <span className="app__logo">Σ</span>
+          <img className="app__logo" src="/magellan.png" alt="Magellan" />
           <div>
-            <div className="app__title">Consolidation par les flux</div>
-            <div className="app__subtitle">Prototype — moteur + UI</div>
+            <div className="app__title">Magellan</div>
+            <div className="app__subtitle">Consolidation par les flux</div>
           </div>
         </div>
-        <HealthBadge state={health} />
+        <div className="app__topbar-right">
+          <label className="theme-toggle" title="Affichage sombre">
+            <input
+              type="checkbox"
+              checked={theme === 'dark'}
+              onChange={toggle}
+            />
+            <span>{theme === 'dark' ? '🌙' : '☀️'} Sombre</span>
+          </label>
+          <HealthBadge state={health} />
+        </div>
       </header>
 
       <nav className="app__tabs">

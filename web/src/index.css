@@ -12,6 +12,9 @@
   --warn: #c77700;
   --header-bg: #f0f4f9;
   --row-hover: #eef3f9;
+  /* Teinte « sélection » (pastilles, lignes choisies). Surchargée en sombre. */
+  --select-bg: #e6f1fb;
+  --select-text: #0c447c;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
     sans-serif;
@@ -19,6 +22,27 @@
   background: var(--bg);
   font-size: 14px;
   line-height: 1.45;
+}
+
+/* Thème sombre : on ne redéfinit que les variables — tout le CSS s'appuie
+   dessus, donc l'app entière bascule sans toucher aux composants. */
+:root[data-theme='dark'] {
+  --bg: #0f1722;
+  --surface: #18222f;
+  --border: #2a3a4d;
+  --border-strong: #3a4d63;
+  --text: #e6edf5;
+  --text-muted: #93a4b8;
+  --primary: #4d94ff;
+  --primary-dark: #2f7be8;
+  --danger: #f0686a;
+  --ok: #3fbf7f;
+  --warn: #e0a13a;
+  --header-bg: #1f2c3b;
+  --row-hover: #233141;
+  --select-bg: #1d3a5c;
+  --select-text: #bcd8f7;
+  color-scheme: dark;
 }
 
 *,
