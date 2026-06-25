@@ -196,15 +196,22 @@ depuis les données existantes (jamais de reseed).
      `translate_rows_out`, validation, dropdowns, health) ; résolution à l'import
      (`loader`). Une FK flippée = `ri()` + colonne `TEXT→INTEGER` + résolution au
      seed/loader + (si lue par un consommateur interne) résolution là-bas.
-   - ✅ **1ʳᵉ FK flippée** : `dim_consolidation.variant` (non lue par le pipeline →
-     pilote idéal). Round-trip code↔id testé.
-   - ⏭️ **FK restantes** : `dim_consolidation.{phase, exercice, perimeter_set,
-     presentation_currency, perimeter_period, rate_set, rate_period, ruleset_code}`
-     (→ `load_params` doit résoudre id→code, le pipeline joint les satellites en
-     code) ; `dim_entity.{devise_fonctionnelle (convert.rs), entite_parent}` ;
-     `dim_account.{sous_classe (SENS_CASE), flow_scheme (vue v_flow_behavior +
-     défauts RESULTAT/BILAN)}`. Chacune : flip + résolution dans son lecteur,
-     golden + suite comme filet.
+   - ✅ **FK flippées** : `dim_consolidation.{variant, phase, perimeter_set,
+     rate_set}`. Lecteurs résolus : `load_params` (JOIN, pipeline reste code-based),
+     `list_consolidations`, `validate.rs`, `rules.rs` (interco/coefficients), helpers
+     de test. Round-trip code↔id testé.
+   - ⚠️ **À smoke-tester par l'utilisateur** : `GET /api/consolidations` et le
+     dropdown PipelinePage (server.rs non couvert par `cargo test` ; un bug
+     `variant`/String y a déjà été trouvé puis corrigé).
+   - ⏭️ **FK restantes du lot consolidation** : `exercice`, `presentation_currency`,
+     `perimeter_period`, `rate_period` (→ **réordonner** seed + loader : `dim_period`
+     et `dim_currency` avant `dim_consolidation`), `ruleset_code` (→ résoudre dans
+     le handler `run`).
+   - ⏭️ **FK entity/account** : `dim_entity.{devise_fonctionnelle (convert.rs),
+     entite_parent}`, `dim_account.{sous_classe (SENS_CASE), flow_scheme (vue
+     v_flow_behavior + défauts RESULTAT/BILAN)}`. Spécificité : ce sont des
+     **références natives traversables** (`NATIVE_MASTER_REFS`/`map_ref`) → décider
+     entre rendre la traversée id-aware ou retirer ces FK de la traversée.
 4. **Basculer `fact_entry` en ids** : réécrire la frontière étape A + jointures
    pipeline + reports. *La grosse étape.*
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
