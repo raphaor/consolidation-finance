@@ -290,14 +290,14 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
         -- période antérieure. Porté par la période N (ici 2024 = clôture 2023).
         INSERT INTO sat_exchange_rate
             (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture) VALUES
-            ('RATES','USD','2023', 0.92000000, NULL,        NULL),
-            ('RATES','USD','2024', 0.90000000, 0.95000000, 0.92000000),
-            ('RATES','GBP','2023', 1.15000000, NULL,        NULL),
-            ('RATES','GBP','2024', 1.12000000, 1.18000000, 1.15000000),
-            ('RATES','CHF','2023', 0.98000000, NULL,        NULL),
-            ('RATES','CHF','2024', 1.05000000, 1.02000000, 0.98000000),
-            ('RATES','JPY','2023', 0.00650000, NULL,        NULL),
-            ('RATES','JPY','2024', 0.00620000, 0.00680000, 0.00650000);
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'USD','2023', 0.92000000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'USD','2024', 0.90000000, 0.95000000, 0.92000000),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'GBP','2023', 1.15000000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'GBP','2024', 1.12000000, 1.18000000, 1.15000000),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'CHF','2023', 0.98000000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'CHF','2024', 1.05000000, 1.02000000, 0.98000000),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'JPY','2023', 0.00650000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'JPY','2024', 0.00620000, 0.00680000, 0.00650000);
         ",
     )?;
     Ok(())

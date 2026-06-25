@@ -123,7 +123,10 @@ WITH params AS (\n\
     SELECT\n\
         ?::TEXT AS presentation,\n\
         ?::TEXT AS pivot,\n\
-        ?::TEXT AS rate_set,\n\
+        -- `rate_set` est stocké en id dans sat_exchange_rate (B1) : on résout\n\
+        -- le code (porté par les params, cf. load_params) vers l'id une fois\n\
+        -- pour toutes dans la CTE — les deux jointures suivantes l'utilisent.\n\
+        (SELECT id FROM dim_rate_set WHERE code = ?::TEXT) AS rate_set,\n\
         ?::TEXT AS cur_period\n\
 ),\n\
 conv AS (\n\

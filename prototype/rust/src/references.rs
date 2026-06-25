@@ -150,7 +150,10 @@ pub const REFERENCES: &[Reference] = &[
     rq("sat_perimeter", "period", "dim_period", "code"),
     rq("sat_perimeter", "methode", "dim_method", "code"),
     // sat_exchange_rate (rate_set/currency_source/period = PK)
-    rq("sat_exchange_rate", "rate_set", "dim_rate_set", "code"),
+    // `rate_set` migrée en clé technique (chantier B1) : stockée en id, contrat
+    // externe = code. Rend la dimension `rate_set` entièrement flippée (plus
+    // aucune référence code-based → renommable).
+    ri("sat_exchange_rate", "rate_set", "dim_rate_set", "code", true),
     rq(
         "sat_exchange_rate",
         "currency_source",

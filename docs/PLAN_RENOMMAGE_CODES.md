@@ -18,13 +18,21 @@ codes-renommables, branche `feat/renommage-codes`, voir
 - Fait : **étapes 0, 1, 2** (golden / `id` partout / résolution code↔id),
   **étape 3 partielle** (FK `dim_consolidation` flippées : `variant`, `phase`,
   `perimeter_set`, `rate_set`), **étape 7** (renommage, livré en avance).
+  **`rate_set` est désormais une dimension entièrement flippée** (renommable de
+  bout en bout) : `sat_exchange_rate.rate_set` basculée en `id` (PK →
+  reconstruction in-place), `convert.rs` joint sur l'id (résolu une fois dans la
+  CTE `params`), seed/bench + import CSV + loader résolvent code→id. 2ᵉ dimension
+  renommable après `variant`.
 - Robustesse : migration in-place par **reconstruction de table**, **import
-  B1-aware**, **`CHECKPOINT`** anti-corruption WAL (cf. §7 + §10).
-- État : **123 tests unit + 36 intégration verts, golden inchangé**.
+  B1-aware**, **`CHECKPOINT`** anti-corruption WAL (cf. §7 + §10). Couverture
+  **loader** ajoutée (`tests/loader.rs`) : le fresh-init serveur (`load_all`)
+  n'était pas testé jusqu'ici — sa résolution code→id l'est désormais.
+- État : **126 tests unit + 37 intégration verts, golden inchangé**.
 
 ### Modules clés (où regarder)
-- `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) + `migrate_consolidation_fk_to_id`
-  (reconstruction in-place). Le **registre `SURROGATE_DIMS`**.
+- `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) +
+  `migrate_consolidation_fk_to_id` + `migrate_sat_exchange_rate_fk_to_id`
+  (reconstructions in-place). Le **registre `SURROGATE_DIMS`**.
 - `src/resolve.rs` — résolution code↔id (unitaire + cartes batch).
 - `src/references.rs` — `Reference.target_display_column` + constructeur `ri()`
   (FK « id en stockage, code en contrat »). Patron de tout flip.
@@ -55,6 +63,12 @@ codes-renommables, branche `feat/renommage-codes`, voir
   base cassée : supprimer le `.duckdb.wal`.
 - **`ALTER … SET DATA TYPE … USING (sous-requête)` est interdit** par DuckDB →
   migration par reconstruction de table.
+- **Colonnes `ri()` dans une table importée par CSV** (`sat_exchange_rate` = 1ʳᵉ) :
+  le loader (`build_insert_sql`) traduit code→id automatiquement, mais
+  `import.rs::import_rates` (INSERT direct hors loader) et
+  `validate_csv_references` doivent être rendus ri()-aware à la main. Le validateur
+  compare le CSV à la **colonne de contrat** (`target_display_column` = code),
+  pas à la colonne de stockage (`id`) — sinon tout est marqué invalide.
 - **Rôle 3 (codes dans le JSON)** : non traité. La garde de `rename_code`
   s'appuie sur le **graphe de références uniquement** — pas encore de scan des
   codes dans `dim_rule.definition` / `dim_coefficient.expression` / indicateurs /
@@ -62,18 +76,18 @@ codes-renommables, branche `feat/renommage-codes`, voir
   dans ces contenus (ex. `methode` est dans le scope d'une règle seedée).
 
 ### Prochaine étape (au choix de l'utilisateur)
-Carte de coût des **dimensions de config** (cf. §8.3) :
-- **`rate_set`** : la plus propre (pas de rôle-3, pas de traversée native). Coût :
-  chirurgie `convert.rs` (jointures de taux) + rebuild `sat_exchange_rate` (PK).
-- **`perimeter_set`** : jointures pipeline (`aggregate`/`consolidate`/`a_nouveau`/
-  `validate`/`rules`) + rebuild `sat_perimeter`.
+Carte de coût des **dimensions de config** (cf. §8.3) — `rate_set` est **faite** :
+- **`perimeter_set`** : la plus propre des restantes (pas de rôle-3, pas de
+  traversée native). Coût : jointures pipeline (`aggregate`/`consolidate`/
+  `a_nouveau`/`validate`/`rules`) + rebuild `sat_perimeter` (PK).
 - **`method`** : nécessite d'abord le **rôle 3** (scope de règle `methode='globale'`).
 - **`sous_classe`** : `SENS_CASE` (server.rs, non testé) + réf. native.
 - **`flow_scheme`** : vue `v_flow_behavior` + défauts en dur `RESULTAT`/`BILAN`.
 - **`phase` / `exercice` / devises** : sur `fact_entry` → **étape 4** (la grosse).
 
-Recommandation : `rate_set` pour enchaîner vite et sûrement, OU attaquer
-**l'étape 4 (fact_entry)** si l'objectif est de rendre entités/comptes renommables.
+Recommandation : `perimeter_set` (suit `rate_set` comme prochaine dimension « sans
+rôle-3 ni traversée native »), OU attaquer **l'étape 4 (fact_entry)** si
+l'objectif est de rendre entités/comptes renommables.
 
 ### Hors chantier (ne pas committer)
 Travail parallèle non-committé sur l'ergonomie des règles : `web/src/App.css`,
@@ -268,10 +282,14 @@ depuis les données existantes (jamais de reseed).
      `translate_rows_out`, validation, dropdowns, health) ; résolution à l'import
      (`loader`). Une FK flippée = `ri()` + colonne `TEXT→INTEGER` + résolution au
      seed/loader + (si lue par un consommateur interne) résolution là-bas.
-   - ✅ **FK flippées** : `dim_consolidation.{variant, phase, perimeter_set,
-     rate_set}`. Lecteurs résolus : `load_params` (JOIN, pipeline reste code-based),
-     `list_consolidations`, `validate.rs`, `rules.rs` (interco/coefficients), helpers
-     de test. Round-trip code↔id testé.
+    - ✅ **FK flippées** : `dim_consolidation.{variant, phase, perimeter_set,
+      rate_set}`. Lecteurs résolus : `load_params` (JOIN, pipeline reste code-based),
+      `list_consolidations`, `validate.rs`, `rules.rs` (interco/coefficients), helpers
+      de test. Round-trip code↔id testé.
+    - ✅ **Dimension `rate_set` entièrement flippée** : `sat_exchange_rate.rate_set`
+      (PK → `migrate_sat_exchange_rate_fk_to_id`, reconstruction) + `convert.rs`
+      (jointures sur id, résolu dans la CTE `params`) + import CSV (`import_rates`)
+      + loader. → `rate_set` est **renommable** (2ᵉ dimension après `variant`).
    - ⚠️ **À smoke-tester par l'utilisateur** : `GET /api/consolidations` et le
      dropdown PipelinePage (server.rs non couvert par `cargo test` ; un bug
      `variant`/String y a déjà été trouvé puis corrigé).
@@ -291,10 +309,11 @@ depuis les données existantes (jamais de reseed).
 7. ✅ **Endpoint `rename` + UI** (livré en avance) : `POST /api/md/{table}/rename`
    (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
    refuse si une référence cible encore le code (liste les blocages). Effectif dès
-   qu'une dimension est entièrement flippée — aujourd'hui **`variant`**. S'étend
+   qu'une dimension est entièrement flippée — aujourd'hui **`variant`** et
+   **`rate_set`** (sat_exchange_rate incluse). S'étend
    automatiquement aux suivantes. ⚠️ Garde basée sur le graphe ; **pas encore** de
    scan des codes enfouis dans JSON/`app_config` (rôle 3) — à ajouter avant de
-   rendre renommables les dimensions présentes dans ces contenus.
+   rendre renommables les dimensions présentes dans ces contenus (ex. `methode`).
    Robustesse base : `CHECKPOINT` après migrations/import/reset/rename (sinon WAL
    DuckDB irrejouable au redémarrage). Import B1-aware (restaure un export en codes).
 8. **Retirer les chemins code-based** résiduels + finaliser la migration

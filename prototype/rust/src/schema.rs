@@ -313,7 +313,7 @@ CREATE TABLE sat_perimeter (
 /// dans plusieurs jeux de taux (réels vs budget). Cf. SPEC_SCENARIO_V2.md §1, §2.
 pub const DDL_SAT_EXCHANGE_RATE: &str = "\
 CREATE TABLE sat_exchange_rate (
-    rate_set        TEXT,        -- FK dim_rate_set
+    rate_set        INTEGER,     -- FK dim_rate_set.id (clé technique B1 ; contrat code)
     currency_source TEXT,        -- devise source (convertie vers le pivot)
     period          TEXT,
     taux_close      DECIMAL(18,8),

@@ -935,7 +935,7 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute(
             "INSERT INTO sat_exchange_rate \
              (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+             VALUES ((SELECT id FROM dim_rate_set WHERE code = ?), ?, ?, ?, ?, ?)",
             params![k.0, k.1, k.2, v.0.map(Money), v.1.map(Money), v.2.map(Money),],
         )?;
     }

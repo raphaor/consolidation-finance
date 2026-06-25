@@ -1382,6 +1382,91 @@ mod tests {
         assert_eq!(out[0]["variant"], JsonValue::String("BASE".into()));
     }
 
+    /// `rate_set` est désormais entièrement flippée en clé technique
+    /// (`sat_exchange_rate.rate_set` incluse) → renommage autorisé, et l'intégrité
+    /// de `sat_exchange_rate` (qui stocke l'id, pas le code) est préservée.
+    /// (Chantier B1 — flip `sat_exchange_rate.rate_set`.)
+    #[test]
+    fn rename_code_rate_set_ok_integrite_sat() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        let rate_id: i64 = con
+            .query_row("SELECT id FROM dim_rate_set WHERE code='RATES'", [], |r| r.get(0))
+            .unwrap();
+        let rates_before: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_exchange_rate WHERE rate_set = ?",
+                [rate_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(rates_before > 0, "sat_exchange_rate peuplée par le seed");
+
+        // rate_set entièrement flippée → renommage autorisé (plus aucun bloquer).
+        rename_code(&con, "rate_sets", "RATES", "TAUX").expect("rate_set renommable");
+
+        // Le code a changé ; l'id est intact → aucune ligne orpheline.
+        assert!(resolve::resolve_id(&con, "dim_rate_set", "RATES").unwrap().is_none());
+        assert_eq!(
+            resolve::resolve_id(&con, "dim_rate_set", "TAUX").unwrap().unwrap(),
+            rate_id,
+            "même id après renommage"
+        );
+        let rates_after: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_exchange_rate WHERE rate_set = ?",
+                [rate_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rates_after, rates_before, "aucune ligne orpheline après renommage");
+    }
+
+    /// `sat_exchange_rate.rate_set` (FK migrée en clé technique) : round-trip
+    /// code↔id aux frontières du CRUD master data. (Chantier B1.)
+    #[test]
+    fn sat_exchange_rate_rate_set_round_trip() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // Stockage : la colonne contient un entier (id), pas le code 'RATES'.
+        let stored_is_int: bool = con
+            .query_row(
+                "SELECT typeof(rate_set) IN ('INTEGER','BIGINT','HUGEINT') \
+                 FROM sat_exchange_rate LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored_is_int, "rate_set doit être stockée en entier (id)");
+
+        // Écriture : write_db_value résout le code 'RATES' en son id.
+        let rate_id = resolve::resolve_id(&con, "dim_rate_set", "RATES")
+            .unwrap()
+            .expect("RATES existe");
+        let written =
+            write_db_value(&con, "sat_exchange_rate", "rate_set", &JsonValue::String("RATES".into()))
+                .unwrap();
+        assert!(
+            matches!(written, DbValue::BigInt(id) if id == rate_id),
+            "write_db_value('RATES') doit donner l'id de rate_set"
+        );
+        // Code inconnu : rejeté.
+        assert!(write_db_value(
+            &con,
+            "sat_exchange_rate",
+            "rate_set",
+            &JsonValue::String("NOPE".into())
+        )
+        .is_err());
+
+        // Lecture : translate_rows_out re-projette l'id en code 'RATES'.
+        let rows = run_query(&con, "SELECT rate_set FROM sat_exchange_rate", Vec::new()).unwrap();
+        let out = translate_rows_out(&con, "sat_exchange_rate", rows).unwrap();
+        assert_eq!(out[0]["rate_set"], JsonValue::String("RATES".into()));
+    }
+
     /// `true` si `api` apparaît dans la liste des tables navigables.
     fn table_listed(con: &Connection, api: &str) -> bool {
         // Reproduit le calcul de `list_tables` (synchrone, sans router) en

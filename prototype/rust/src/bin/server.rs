@@ -1399,6 +1399,11 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_consolidation_fk_to_id(&con) {
             eprintln!("   ⚠ migrate_consolidation_fk_to_id (non bloquant) : {e}");
         }
+        // Idem pour sat_exchange_rate.rate_set (PK → reconstruction de table).
+        // Rend la dimension `rate_set` entièrement flippée (renommable).
+        if let Err(e) = conso_engine::surrogate::migrate_sat_exchange_rate_fk_to_id(&con) {
+            eprintln!("   ⚠ migrate_sat_exchange_rate_fk_to_id (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");

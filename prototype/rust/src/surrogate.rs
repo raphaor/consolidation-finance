@@ -171,6 +171,38 @@ pub fn migrate_consolidation_fk_to_id(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Migration in-place de `sat_exchange_rate.rate_set` (option A, chantier B1) sur
+/// une base **existante** : convertit la colonne du stockage **code (TEXT)** vers
+/// la **clé technique (id, INTEGER)**. Idempotent (no-op si `rate_set` est déjà
+/// entier).
+///
+/// `rate_set` est dans la PK `(rate_set, currency_source, period)` →
+/// **reconstruction de table** (cf. [`migrate_consolidation_fk_to_id`]) : DuckDB
+/// interdit `ALTER … SET DATA TYPE … USING (sous-requête)` et le changement de
+/// type d'une colonne de PK est délicat. À appeler au démarrage serveur **après**
+/// [`ensure_ids`] (`dim_rate_set` doit déjà avoir son `id`).
+pub fn migrate_sat_exchange_rate_fk_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "sat_exchange_rate")? {
+        return Ok(());
+    }
+    if column_is_int(con, "sat_exchange_rate", "rate_set")? {
+        return Ok(()); // déjà migrée
+    }
+    let create_mig = crate::schema::DDL_SAT_EXCHANGE_RATE
+        .replace("sat_exchange_rate (", "sat_exchange_rate__mig (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         INSERT INTO sat_exchange_rate__mig
+            (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture)
+         SELECT (SELECT r.id FROM dim_rate_set r WHERE r.code = s.rate_set),
+                s.currency_source, s.period, s.taux_close, s.taux_moyen, s.taux_ouverture
+         FROM sat_exchange_rate s;
+         DROP TABLE sat_exchange_rate;
+         ALTER TABLE sat_exchange_rate__mig RENAME TO sat_exchange_rate;",
+    ))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +348,51 @@ mod tests {
 
         // Idempotent : second passage no-op (variant déjà entier).
         migrate_consolidation_fk_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn migrate_sat_exchange_rate_fk_to_id_convertit_les_codes_en_id() {
+        // Simule une base **existante** : sat_exchange_rate avec rate_set en TEXT
+        // (codes). On vérifie que la migration la reconstruit avec rate_set en id.
+        let con = setup(); // schéma neuf (sert pour dim_rate_set + seq + id)
+        con.execute_batch(
+            "INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES','Taux réels');",
+        )
+        .unwrap();
+
+        // Rétrograde sat_exchange_rate à l'ancien schéma (rate_set TEXT, code).
+        con.execute_batch(
+            "DROP TABLE sat_exchange_rate;
+             CREATE TABLE sat_exchange_rate (
+                rate_set TEXT, currency_source TEXT, period TEXT,
+                taux_close DECIMAL(18,8), taux_moyen DECIMAL(18,8), taux_ouverture DECIMAL(18,8),
+                PRIMARY KEY (rate_set, currency_source, period)
+             );
+             INSERT INTO sat_exchange_rate VALUES
+                ('RATES','USD','2024', 0.9, 0.95, 0.92);",
+        )
+        .unwrap();
+
+        migrate_sat_exchange_rate_fk_to_id(&con).expect("migration");
+
+        // rate_set est désormais l'id de 'RATES' ; la ligne est préservée.
+        let (rate_id, src): (i64, String) = con
+            .query_row(
+                "SELECT rate_set, currency_source FROM sat_exchange_rate",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("ligne présente après migration");
+        assert_eq!(src, "USD", "autres colonnes préservées");
+        assert_eq!(
+            rate_id,
+            crate::resolve::resolve_id(&con, "dim_rate_set", "RATES")
+                .unwrap()
+                .unwrap()
+        );
+
+        // Idempotent : second passage no-op (rate_set déjà entier).
+        migrate_sat_exchange_rate_fk_to_id(&con).expect("migration #2");
     }
 
     #[test]
