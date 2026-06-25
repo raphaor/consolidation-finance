@@ -54,6 +54,7 @@ pub mod money;
 pub mod pipeline;
 pub mod references;
 pub mod report;
+pub mod resolve;
 pub mod rules;
 pub mod schema;
 pub mod seed;

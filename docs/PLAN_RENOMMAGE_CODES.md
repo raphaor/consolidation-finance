@@ -180,11 +180,13 @@ Chaque étape est livrable, testée, et garde le pipeline **iso-résultat** (tes
 golden : la sortie consolidée ne bouge pas d'un centime). Chaque étape *backfill*
 depuis les données existantes (jamais de reseed).
 
-0. **Tests golden** : capturer la sortie consolidée actuelle (bilan + CR +
-   `dump_pipeline`) comme référence figée, à rejouer à chaque étape.
-1. **Ajouter `id` + `UNIQUE(code)`** à chaque dimension, sans rien casser (ids
-   non encore consommés ; FK/faits restent en codes). Non-breaking.
-2. **Couche de résolution** code↔id (§5) + tests batch.
+0. ✅ **Tests golden** : `tests/golden.rs` fige la sortie consolidée du seed
+   (projection métier `BUSINESS_SELECT`, invariante à la bascule code→id).
+1. ✅ **Ajouter `id`** à chaque dimension, sans rien casser (`src/surrogate.rs`,
+   `ensure_ids` ; ids non consommés ; FK/faits restent en codes). Non-breaking.
+   Unicité par séquence (pas d'index : DuckDB bloque alors `DROP COLUMN`) ; la
+   PK sur `id` viendra à l'étape 3/4.
+2. **Couche de résolution** code↔id (§5) + tests batch. ⬅️ *en cours*
 3. **Basculer les FK dim→dim** vers `_id` (petit ensemble : `entite_parent`,
    `sous_classe`, `flow_scheme`, FK de `dim_consolidation`…). Renommage déjà
    gratuit pour celles-là.
