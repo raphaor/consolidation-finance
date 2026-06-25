@@ -240,8 +240,22 @@ function RowForm({
   );
 }
 
-export function MasterDataPage() {
-  const [table, setTable] = useState<MasterTable>('accounts');
+interface MasterDataPageProps {
+  // Verrouille l'éditeur sur une seule table (dropdown masqué). Sert la page
+  // « Définitions » pointée sur `consolidations`.
+  fixedTable?: MasterTable;
+  // Tables retirées du sélecteur (ex. `consolidations`, éditée ailleurs).
+  hideTables?: string[];
+  // Titre de page (défaut « Master data »).
+  title?: string;
+}
+
+export function MasterDataPage({
+  fixedTable,
+  hideTables,
+  title,
+}: MasterDataPageProps = {}) {
+  const [table, setTable] = useState<MasterTable>(fixedTable ?? 'accounts');
   // Liste des tables navigables servie par `GET /api/md` (natives + car_* + lst_*).
   // Tant qu'elle n'est pas chargée, on retombe sur MASTER_TABLES (labels statiques).
   const [tableList, setTableList] = useState<TableSummary[]>([]);
@@ -535,32 +549,40 @@ export function MasterDataPage() {
     if (byKind['value_list']) {
       groups.push({ label: 'Listes de valeurs', items: byKind['value_list'] });
     }
+    if (hideTables && hideTables.length > 0) {
+      const hidden = new Set(hideTables);
+      return groups
+        .map((g) => ({ ...g, items: g.items.filter((t) => !hidden.has(t.table)) }))
+        .filter((g) => g.items.length > 0);
+    }
     return groups;
-  }, [tableList]);
+  }, [tableList, hideTables]);
 
   return (
     <section className="page">
       <div className="page__header">
-        <h1 className="page__title">Master data</h1>
+        <h1 className="page__title">{title ?? 'Master data'}</h1>
         <div className="page__actions">
-          <label className="field">
-            <span>Table</span>
-            <select
-              value={table}
-              onChange={(e) => setTable(e.target.value)}
-              disabled={loading || schemaLoading}
-            >
-              {groupedTables.map((g) => (
-                <optgroup key={g.label} label={g.label}>
-                  {g.items.map((t) => (
-                    <option key={t.table} value={t.table}>
-                      {t.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
+          {fixedTable === undefined && (
+            <label className="field">
+              <span>Table</span>
+              <select
+                value={table}
+                onChange={(e) => setTable(e.target.value)}
+                disabled={loading || schemaLoading}
+              >
+                {groupedTables.map((g) => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.items.map((t) => (
+                      <option key={t.table} value={t.table}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+          )}
           <button
             type="button"
             className="btn btn--primary"

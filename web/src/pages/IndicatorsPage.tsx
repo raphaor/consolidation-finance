@@ -31,31 +31,71 @@ const LEVELS = ['corporate', 'converted', 'consolidated'];
 const FUNCTIONS = ['MIN', 'MAX', 'SAFE_DIV', 'IF', 'ABS', 'ROUND'];
 const FORMATS = ['nombre', 'pourcentage', 'ratio'];
 
-type Tab = 'postes' | 'indicateurs';
+// Postes et Indicateurs sont désormais deux pages distinctes (groupe Calculs),
+// au même niveau que Coefficients — plus de sous-onglets internes. Chacune
+// charge seulement les données dont son volet a besoin.
 
-export function IndicatorsPage() {
-  const [tab, setTab] = useState<Tab>('postes');
+export function PostesPage() {
   const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
   const [customRefs, setCustomRefs] = useState<CustomReference[]>([]);
   const [nativeEnums, setNativeEnums] = useState<NativeEnum[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [d, c, r, e] = await Promise.all([
+          api.dimensions.list(),
+          api.characteristics.list(),
+          api.customReferences.list(),
+          api.nativeEnums(),
+        ]);
+        setDims(sortForDisplay(d, (x) => formatOptionLabel(x.name, x.label)));
+        setCharacteristics(c);
+        setCustomRefs(r);
+        setNativeEnums(e);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+  }, []);
+
+  return (
+    <div className="page">
+      <div className="page__header">
+        <h2>Postes</h2>
+        <p className="page__hint">
+          Postes = sélections agrégées sur fact_entry, briques de base des
+          indicateurs.
+        </p>
+      </div>
+      {error && <div className="banner banner--error">{error}</div>}
+
+      <PostesTab
+        dims={dims}
+        characteristics={characteristics}
+        customRefs={customRefs}
+        nativeEnums={nativeEnums}
+        onError={setError}
+      />
+    </div>
+  );
+}
+
+export function IndicateursPage() {
+  const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [consolidations, setConsolidations] = useState<ConsolidationSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [d, c, r, e, cons] = await Promise.all([
+        const [d, cons] = await Promise.all([
           api.dimensions.list(),
-          api.characteristics.list(),
-          api.customReferences.list(),
-          api.nativeEnums(),
           api.consolidations.list(),
         ]);
         setDims(sortForDisplay(d, (x) => formatOptionLabel(x.name, x.label)));
-        setCharacteristics(c);
-        setCustomRefs(r);
-        setNativeEnums(e);
         setConsolidations(sortForDisplay(cons, (x) => x.libelle));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -68,40 +108,13 @@ export function IndicatorsPage() {
       <div className="page__header">
         <h2>Indicateurs</h2>
         <p className="page__hint">
-          Postes = sélections agrégées sur fact_entry. Indicateurs = formules
-          combinant des postes, calculées à un grain. Un ratio n'est jamais sommé.
+          Indicateurs = formules combinant des postes, calculées à un grain. Un
+          ratio n'est jamais sommé.
         </p>
       </div>
       {error && <div className="banner banner--error">{error}</div>}
 
-      <div className="subtabs" style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button
-          type="button"
-          className={`tab ${tab === 'postes' ? 'tab--active' : ''}`}
-          onClick={() => setTab('postes')}
-        >
-          Postes
-        </button>
-        <button
-          type="button"
-          className={`tab ${tab === 'indicateurs' ? 'tab--active' : ''}`}
-          onClick={() => setTab('indicateurs')}
-        >
-          Indicateurs
-        </button>
-      </div>
-
-      {tab === 'postes' ? (
-        <PostesTab
-          dims={dims}
-          characteristics={characteristics}
-          customRefs={customRefs}
-          nativeEnums={nativeEnums}
-          onError={setError}
-        />
-      ) : (
-        <IndicateursTab dims={dims} consolidations={consolidations} onError={setError} />
-      )}
+      <IndicateursTab dims={dims} consolidations={consolidations} onError={setError} />
     </div>
   );
 }

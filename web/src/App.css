@@ -72,6 +72,15 @@
   border-bottom-color: var(--primary);
 }
 
+/* 2ᵉ niveau de navigation : sous-onglets du groupe actif. */
+.app__subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
 .app__main {
   flex: 1;
   padding: 24px;

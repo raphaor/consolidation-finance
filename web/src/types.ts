@@ -94,7 +94,7 @@ export interface Consolidation {
 }
 
 // Réponse de GET /api/consolidations — consolidation « dépliée » pour le
-// dropdown PipelinePage et les filtres partagés (Filters). Même forme que
+// dropdown ExecutionPage et les filtres partagés (Filters). Même forme que
 // `Consolidation` (les champs sont tous renseignés côté serveur).
 export interface ConsolidationSummary {
   id: number;

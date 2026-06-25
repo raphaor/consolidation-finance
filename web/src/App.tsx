@@ -1,20 +1,26 @@
-// Racine de l'application : gère l'onglet actif et expose le statut API
+// Racine de l'application : gère la page active et expose le statut API
 // via un hook de polling.
 
 import { useState } from 'react';
 import { Layout, type PageId } from './components/Layout';
 import { useHealth } from './hooks/useHealth';
+import {
+  PERIMETER_CONFIG,
+  RATES_CONFIG,
+  SCHEMES_CONFIG,
+} from './config/masterDetailConfigs';
 import { CaracteristiquesPage } from './pages/CaracteristiquesPage';
 import { CoefficientsPage } from './pages/CoefficientsPage';
 import { EcrituresPage } from './pages/EcrituresPage';
-import { IndicatorsPage } from './pages/IndicatorsPage';
+import { ExecutionPage } from './pages/ExecutionPage';
+import { IndicateursPage, PostesPage } from './pages/IndicatorsPage';
 import { ImportPage } from './pages/ImportPage';
+import { MaintenancePage } from './pages/MaintenancePage';
 import { MasterDataPage } from './pages/MasterDataPage';
-import { PipelinePage } from './pages/PipelinePage';
+import { MasterDetailPage } from './pages/MasterDetailPage';
 import { RapportsPage } from './pages/RapportsPage';
 import { RulesPage } from './pages/RulesPage';
 import { SaisiePage } from './pages/SaisiePage';
-import { SchemasJeuxPage } from './pages/SchemasJeuxPage';
 import './App.css';
 
 export default function App() {
@@ -23,17 +29,33 @@ export default function App() {
 
   return (
     <Layout active={page} onNavigate={setPage} health={health}>
+      {/* Restitution */}
       {page === 'rapports' && <RapportsPage />}
       {page === 'ecritures' && <EcrituresPage />}
-      {page === 'saisie' && <SaisiePage />}
-      {page === 'pipeline' && <PipelinePage />}
-      {page === 'masterdata' && <MasterDataPage />}
-      {page === 'schemas' && <SchemasJeuxPage />}
-      {page === 'caracteristiques' && <CaracteristiquesPage />}
-      {page === 'coefficients' && <CoefficientsPage />}
-      {page === 'indicateurs' && <IndicatorsPage />}
-      {page === 'regles' && <RulesPage />}
+      {/* Alimentation */}
       {page === 'import' && <ImportPage />}
+      {page === 'saisie' && <SaisiePage />}
+      {/* Consolidation */}
+      {page === 'definitions' && (
+        <MasterDataPage fixedTable="consolidations" title="Définitions de consolidation" />
+      )}
+      {page === 'perimetres' && (
+        <MasterDetailPage title="Jeux de périmètre" config={PERIMETER_CONFIG} />
+      )}
+      {page === 'taux' && <MasterDetailPage title="Jeux de taux" config={RATES_CONFIG} />}
+      {page === 'execution' && <ExecutionPage />}
+      {/* Calculs */}
+      {page === 'schemas' && (
+        <MasterDetailPage title="Schémas de flux" config={SCHEMES_CONFIG} />
+      )}
+      {page === 'regles' && <RulesPage />}
+      {page === 'coefficients' && <CoefficientsPage />}
+      {page === 'postes' && <PostesPage />}
+      {page === 'indicateurs' && <IndicateursPage />}
+      {/* Référentiel */}
+      {page === 'masterdata' && <MasterDataPage hideTables={['consolidations']} />}
+      {page === 'caracteristiques' && <CaracteristiquesPage />}
+      {page === 'maintenance' && <MaintenancePage />}
     </Layout>
   );
 }

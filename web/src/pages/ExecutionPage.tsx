@@ -1,10 +1,12 @@
-// Page « Pipeline » : sélection d'une consolidation, affichage des paramètres
-// dépliés en lecture seule, et exécution du pipeline (POST /api/run).
+// Page « Exécution » (groupe Consolidation) : sélection d'une consolidation,
+// affichage de ses paramètres en lecture seule, et exécution du pipeline
+// (POST /api/run). Les opérations destructives sur le magasin (reset, import de
+// paquet) vivent désormais dans Référentiel › Maintenance.
 //
 // La sélection alimente `api.run(consolidationId)`. Sans sélection, le serveur
 // choisit la première consolidation `'ouvert'` (rétro-compatibilité dev).
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type {
   ConsolidationSummary,
@@ -62,7 +64,7 @@ function paramRows(s: ConsolidationSummary): { label: string; value: string }[] 
   ];
 }
 
-export function PipelinePage() {
+export function ExecutionPage() {
   const [counts, setCounts] = useState<LevelCount[]>([]);
   const [result, setResult] = useState<PipelineRunResult | null>(null);
   const [status, setStatus] = useState<RunStatus>({ kind: 'idle' });
@@ -133,65 +135,12 @@ export function PipelinePage() {
     }
   }
 
-  async function reset() {
-    setStatus({ kind: 'running', label: 'Reset + réimport…' });
-    setResult(null);
-    try {
-      await api.reset();
-      setStatus({ kind: 'done' });
-      void loadCounts();
-    } catch (err) {
-      setStatus({
-        kind: 'error',
-        message: err instanceof Error ? err.message : 'erreur',
-      });
-    }
-  }
-
-  // Export complet → téléchargement d'un paquet JSON.
-  async function exportAll() {
-    setStatus({ kind: 'running', label: 'Export…' });
-    try {
-      const bundle = await api.backup.exportAll();
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], {
-        type: 'application/json',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `conso_export_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus({ kind: 'done' });
-    } catch (err) {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
-    }
-  }
-
-  // Import complet → remplace tout l'état depuis le paquet choisi.
-  async function importAll(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // autorise la re-sélection du même fichier
-    if (!file) return;
-    setStatus({ kind: 'running', label: 'Import du paquet…' });
-    setResult(null);
-    try {
-      const bundle = JSON.parse(await file.text());
-      await api.backup.importAll(bundle);
-      setStatus({ kind: 'done' });
-      void loadCounts();
-    } catch (err) {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
-    }
-  }
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = status.kind === 'running';
 
   return (
     <section className="page">
       <div className="page__header">
-        <h1 className="page__title">Pipeline de consolidation</h1>
+        <h1 className="page__title">Exécution de la consolidation</h1>
         <div className="page__actions">
           <button
             type="button"
@@ -200,45 +149,8 @@ export function PipelinePage() {
             disabled={busy || consolidations.length === 0}
             title={consolidations.length === 0 ? 'Aucune consolidation disponible' : undefined}
           >
-            {status.kind === 'running' && status.label.includes('pipeline')
-              ? status.label
-              : 'Lancer la consolidation'}
+            {busy ? 'Exécution du pipeline…' : 'Lancer la consolidation'}
           </button>
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={reset}
-            disabled={busy}
-          >
-            {status.kind === 'running' && status.label.includes('Reset')
-              ? status.label
-              : 'Reset + Reimport'}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={exportAll}
-            disabled={busy}
-            title="Télécharger un paquet JSON complet (référentiels + écritures + règles)"
-          >
-            Tout exporter
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={busy}
-            title="Restaurer l'état complet depuis un paquet exporté (remplace tout)"
-          >
-            Importer un paquet…
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json,.json"
-            style={{ display: 'none' }}
-            onChange={importAll}
-          />
         </div>
       </div>
 
