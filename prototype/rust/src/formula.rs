@@ -214,6 +214,14 @@ fn tokenize(input: &str) -> Result<Vec<Token>, String> {
                 out.push(Token::Semicolon);
                 i += 1;
             }
+            // Erreur fréquente (réflexe Excel anglophone) : on guide vers ';'.
+            ',' => {
+                return Err(
+                    "',' n'est pas le séparateur d'arguments : utilisez ';' \
+                     (ex. SAFE_DIV([a]; [b]))"
+                        .to_string(),
+                );
+            }
             '>' => {
                 if chars.get(i + 1) == Some(&'=') {
                     out.push(Token::Ge);
@@ -740,6 +748,13 @@ mod tests {
         assert!(parse("SAFE_DIV(1)").is_err());
         assert!(parse("MIN(1)").is_err());
         assert!(parse("MIN(1; 2; 3)").is_ok());
+    }
+
+    #[test]
+    fn virgule_guide_vers_point_virgule() {
+        // Réflexe Excel anglophone : la virgule doit produire un message clair.
+        let err = parse("SAFE_DIV(1, 2)").unwrap_err();
+        assert!(err.contains("';'"), "message doit pointer vers ';' : {err}");
     }
 
     #[test]

@@ -94,6 +94,15 @@ const SENS_CASE: &str = "CASE a.sous_classe \
     WHEN 'passif' THEN 'C' WHEN 'produits' THEN 'C' \
     WHEN 'actif' THEN 'D' WHEN 'charges' THEN 'D' ELSE '?' END";
 
+/// Avertissement de cohérence de l'à-nouveau (non bloquant), remonté au client
+/// pour affichage dans l'UI plutôt qu'en console (cf. docs/A_NOUVEAU.md §5.1).
+#[derive(Serialize)]
+struct CoherenceWarning {
+    kind: String,
+    entity: String,
+    detail: String,
+}
+
 /// Réponse `/api/run` : nombre de lignes produites à chaque étape du pipeline.
 #[derive(Serialize)]
 struct PipelineResult {
@@ -107,6 +116,9 @@ struct PipelineResult {
     ruleset: Option<String>,
     /// Rapport du ruleset, présent si `ruleset` est `Some`.
     ruleset_report: Option<RulesetReport>,
+    /// Avertissements de cohérence de l'à-nouveau (non bloquants). Tableau vide
+    /// si aucun ; remplace l'ancien `eprintln!` console.
+    a_nouveau_warnings: Vec<CoherenceWarning>,
 }
 
 /// Réponse `/api/reset` : statut + nombre d'écritures brutes rechargées.
@@ -636,6 +648,9 @@ async fn run_pipeline_handler(
 
         // 5b. À-nouveau : contrôle de cohérence **non bloquant** (cf.
         //     docs/A_NOUVEAU.md §5.1, A5 : statut `ouvert` toléré → on alerte).
+        //     Les anomalies sont remontées dans la réponse (UI) au lieu de la
+        //     console.
+        let mut a_nouveau_warnings: Vec<CoherenceWarning> = Vec::new();
         if let Some(a_nouveau_id) = params.a_nouveau_consolidation_id {
             match conso_engine::validate::check_a_nouveau_coherence(
                 &con,
@@ -643,17 +658,21 @@ async fn run_pipeline_handler(
                 a_nouveau_id,
                 &params.exercice,
             ) {
-                Ok(anomalies) if !anomalies.is_empty() => {
-                    eprintln!(
-                        "⚠ À-nouveau (conso {consolidation_id} ← {a_nouveau_id}) : {} incohérence(s) de périmètre :",
-                        anomalies.len()
-                    );
-                    for a in &anomalies {
-                        eprintln!("   - [{}] {} : {}", a.kind, a.entity, a.detail);
-                    }
+                Ok(anomalies) => {
+                    a_nouveau_warnings = anomalies
+                        .into_iter()
+                        .map(|a| CoherenceWarning {
+                            kind: a.kind.to_string(),
+                            entity: a.entity,
+                            detail: a.detail,
+                        })
+                        .collect();
                 }
-                Ok(_) => {}
-                Err(e) => eprintln!("⚠ contrôle de cohérence à-nouveau échoué : {e}"),
+                Err(e) => a_nouveau_warnings.push(CoherenceWarning {
+                    kind: "controle_echoue".to_string(),
+                    entity: String::new(),
+                    detail: format!("contrôle de cohérence à-nouveau échoué : {e}"),
+                }),
             }
         }
 
@@ -671,6 +690,7 @@ async fn run_pipeline_handler(
             consolidation: consolidation_id,
             ruleset: ruleset_code,
             ruleset_report,
+            a_nouveau_warnings,
         }
     };
     Ok(Json(result))

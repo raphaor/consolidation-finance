@@ -6,7 +6,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { api } from '../api';
-import type { ConsolidationSummary, LevelCount, PipelineCounts } from '../types';
+import type {
+  ConsolidationSummary,
+  LevelCount,
+  PipelineCounts,
+  PipelineRunResult,
+} from '../types';
 import { formatInt, formatOptionLabel } from '../utils/format';
 
 type RunStatus =
@@ -59,7 +64,7 @@ function paramRows(s: ConsolidationSummary): { label: string; value: string }[] 
 
 export function PipelinePage() {
   const [counts, setCounts] = useState<LevelCount[]>([]);
-  const [result, setResult] = useState<PipelineCounts | null>(null);
+  const [result, setResult] = useState<PipelineRunResult | null>(null);
   const [status, setStatus] = useState<RunStatus>({ kind: 'idle' });
   const [loadingCounts, setLoadingCounts] = useState(false);
 
@@ -276,6 +281,25 @@ export function PipelinePage() {
         {status.kind === 'done' && 'Terminé.'}
         {status.kind === 'error' && `Erreur : ${status.message}`}
       </div>
+
+      {/* Avertissements de cohérence de l'à-nouveau (non bloquants) remontés par
+          /api/run, affichés ici plutôt qu'en console serveur. */}
+      {result && result.a_nouveau_warnings.length > 0 && (
+        <div className="alert alert--warning" style={{ marginTop: 12 }}>
+          <strong>
+            ⚠ À-nouveau : {result.a_nouveau_warnings.length} incohérence(s) de
+            périmètre (non bloquant)
+          </strong>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+            {result.a_nouveau_warnings.map((w, i) => (
+              <li key={`${w.kind}-${w.entity}-${i}`}>
+                {w.entity && <code>{w.entity}</code>} {w.detail}{' '}
+                <span className="muted">[{w.kind}]</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <ol className="steps">
         {STEPS.map((step, idx) => {

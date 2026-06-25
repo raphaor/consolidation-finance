@@ -30,7 +30,7 @@ import type {
   LevelCount,
   MasterTable,
   NativeEnum,
-  PipelineCounts,
+  PipelineRunResult,
   ReferenceInfo,
   ReportFilters,
   RuleDetail,
@@ -151,8 +151,8 @@ export const api = {
   },
   run: (consolidationId?: number) =>
     consolidationId !== undefined
-      ? postJsonRaw<PipelineCounts>('/run', { consolidation_id: consolidationId })
-      : postJson<PipelineCounts>('/run'),
+      ? postJsonRaw<PipelineRunResult>('/run', { consolidation_id: consolidationId })
+      : postJson<PipelineRunResult>('/run'),
   reset: () => postJson<{ status: string; entries: number }>('/reset'),
   // Sauvegarde / restauration : paquet JSON complet de l'état (référentiels +
   // écritures + règles + dimensions custom). `importAll` remplace tout.

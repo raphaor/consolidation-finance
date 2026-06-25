@@ -1,7 +1,11 @@
-import type { BilanRow, FlowCode } from '../types';
-import { FLOW_COLUMNS } from '../types';
+import type { BilanRow } from '../types';
 
-export type Pivot = Map<string, Record<FlowCode, number>>;
+// Les colonnes de flux ne sont plus figées : le rapport passe la liste des flux
+// à afficher (catalogue `dim_flow` filtré sur le motif Fxx, cf. RapportsPage).
+// Les enregistrements de montants sont donc indexés par code de flux (string).
+export type FlowRecord = Record<string, number>;
+
+export type Pivot = Map<string, FlowRecord>;
 
 // Signe du sens comptable pour le total Σ(C) − Σ(D) : créditeur +1, débiteur −1,
 // inconnu 0. Au bilan ce total tend vers 0 (équilibre actif/passif) ; en P&L il
@@ -10,31 +14,30 @@ function sensSign(sens: BilanRow['sens']): number {
   return sens === 'C' ? 1 : sens === 'D' ? -1 : 0;
 }
 
+function emptyFlowRecord(flowColumns: string[]): FlowRecord {
+  return Object.fromEntries(flowColumns.map((f) => [f, 0]));
+}
+
 export interface PivotResult {
   pivot: Pivot;
   accounts: string[];
-  totals: Record<FlowCode, number>;
+  totals: FlowRecord;
   // Total signé Σ(C) − Σ(D) par flux (ligne de total des rapports).
-  signedTotals: Record<FlowCode, number>;
+  signedTotals: FlowRecord;
 }
 
-export function buildPivot(rows: BilanRow[]): PivotResult {
+export function buildPivot(rows: BilanRow[], flowColumns: string[]): PivotResult {
+  const known = new Set(flowColumns);
   const pivot: Pivot = new Map();
-  const totals = Object.fromEntries(
-    FLOW_COLUMNS.map((f) => [f, 0]),
-  ) as Record<FlowCode, number>;
-  const signedTotals = Object.fromEntries(
-    FLOW_COLUMNS.map((f) => [f, 0]),
-  ) as Record<FlowCode, number>;
+  const totals = emptyFlowRecord(flowColumns);
+  const signedTotals = emptyFlowRecord(flowColumns);
 
   for (const row of rows) {
-    if (!FLOW_COLUMNS.includes(row.flow as FlowCode)) continue;
-    const flow = row.flow as FlowCode;
+    if (!known.has(row.flow)) continue;
+    const flow = row.flow;
     let line = pivot.get(row.account);
     if (!line) {
-      line = Object.fromEntries(
-        FLOW_COLUMNS.map((f) => [f, 0]),
-      ) as Record<FlowCode, number>;
+      line = emptyFlowRecord(flowColumns);
       pivot.set(row.account, line);
     }
     line[flow] += row.amount;
@@ -52,45 +55,42 @@ export function buildPivot(rows: BilanRow[]): PivotResult {
 // nature. Sert au rapport « Bilan détaillé par nature » (lignes compte
 // dépliables → sous-lignes par nature).
 
-function emptyFlowRecord(): Record<FlowCode, number> {
-  return Object.fromEntries(FLOW_COLUMNS.map((f) => [f, 0])) as Record<
-    FlowCode,
-    number
-  >;
-}
-
 export interface AccountDetail {
-  total: Record<FlowCode, number>; // total compte (somme des natures)
-  natures: { nature: string; values: Record<FlowCode, number> }[]; // trié par code
+  total: FlowRecord; // total compte (somme des natures)
+  natures: { nature: string; values: FlowRecord }[]; // trié par code
 }
 
 export interface NaturePivotResult {
   byAccount: Map<string, AccountDetail>;
   accounts: string[]; // codes comptes triés
-  totals: Record<FlowCode, number>; // totaux généraux (tous comptes)
-  signedTotals: Record<FlowCode, number>; // total signé Σ(C) − Σ(D) par flux
+  totals: FlowRecord; // totaux généraux (tous comptes)
+  signedTotals: FlowRecord; // total signé Σ(C) − Σ(D) par flux
 }
 
-export function buildNaturePivot(rows: BilanRow[]): NaturePivotResult {
+export function buildNaturePivot(
+  rows: BilanRow[],
+  flowColumns: string[],
+): NaturePivotResult {
+  const known = new Set(flowColumns);
   // account -> nature -> Record<flow, montant>
-  const acc = new Map<string, Map<string, Record<FlowCode, number>>>();
-  const accTotals = new Map<string, Record<FlowCode, number>>();
-  const totals = emptyFlowRecord();
-  const signedTotals = emptyFlowRecord();
+  const acc = new Map<string, Map<string, FlowRecord>>();
+  const accTotals = new Map<string, FlowRecord>();
+  const totals = emptyFlowRecord(flowColumns);
+  const signedTotals = emptyFlowRecord(flowColumns);
 
   for (const row of rows) {
-    if (!FLOW_COLUMNS.includes(row.flow as FlowCode)) continue;
-    const flow = row.flow as FlowCode;
+    if (!known.has(row.flow)) continue;
+    const flow = row.flow;
 
     let natures = acc.get(row.account);
     if (!natures) {
       natures = new Map();
       acc.set(row.account, natures);
-      accTotals.set(row.account, emptyFlowRecord());
+      accTotals.set(row.account, emptyFlowRecord(flowColumns));
     }
     let line = natures.get(row.nature);
     if (!line) {
-      line = emptyFlowRecord();
+      line = emptyFlowRecord(flowColumns);
       natures.set(row.nature, line);
     }
     line[flow] += row.amount;

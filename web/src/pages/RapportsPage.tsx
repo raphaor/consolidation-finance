@@ -1,23 +1,32 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { BilanRow, Level, ReportFilters } from '../types';
-import { FLOW_COLUMNS, LEVELS } from '../types';
+import { LEVELS } from '../types';
 import { Filters } from '../components/Filters';
-import { buildPivot, buildNaturePivot } from '../utils/pivot';
-import { formatAmount } from '../utils/format';
+import { buildPivot, buildNaturePivot, type FlowRecord } from '../utils/pivot';
+import { compareText, formatAmount } from '../utils/format';
 import { usePersistentState } from '../utils/usePersistentState';
 
 type ReportType = 'bilan' | 'cr';
+
+// Colonnes de flux affichées : dérivées dynamiquement du catalogue `dim_flow`,
+// restreintes au motif « Fxx » (F suivi de chiffres : F00…F99). Un flux hors
+// motif (ex. `FIC`) n'apparaît donc pas en colonne de rapport.
+const FLOW_PATTERN = /^F\d+$/;
 
 // Contrôle de cohérence de clôture : F99 doit égaler la somme des autres flux
 // qui s'y reportent (cf. docs/FLUX_CONSO.md). On affiche l'écart F99 − Σ(autres
 // flux), attendu nul. Remplace l'ancienne colonne « Total compte » (qui sommait
 // tous les flux F99 inclus — redondant avec F99 lui-même).
 const CLOSING_FLOW = 'F99';
-const OTHER_FLOWS = FLOW_COLUMNS.filter((f) => f !== CLOSING_FLOW);
 
-function closingControl(line: Record<string, number>): number {
-  return line[CLOSING_FLOW] - OTHER_FLOWS.reduce((sum, f) => sum + line[f], 0);
+function closingControl(line: FlowRecord, flowColumns: string[]): number {
+  const closing = line[CLOSING_FLOW] ?? 0;
+  const others = flowColumns.reduce(
+    (sum, f) => (f === CLOSING_FLOW ? sum : sum + (line[f] ?? 0)),
+    0,
+  );
+  return closing - others;
 }
 
 export function RapportsPage() {
@@ -37,6 +46,9 @@ export function RapportsPage() {
   const [period, setPeriod] = usePersistentState('rapports.period', '');
   const [nature, setNature] = usePersistentState('rapports.nature', '');
   const [rows, setRows] = useState<BilanRow[]>([]);
+  // Flux affichés en colonnes : catalogue `dim_flow` filtré sur le motif Fxx,
+  // trié (F00 < F01 < F20 … grâce au tri numérique naturel de compareText).
+  const [flowColumns, setFlowColumns] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Comptes dépliés dans le rapport détaillé (état éphémère, par code compte).
@@ -82,8 +94,35 @@ export function RapportsPage() {
     void load();
   }, [load]);
 
-  const { pivot, accounts, signedTotals } = useMemo(() => buildPivot(rows), [rows]);
-  const naturePivot = useMemo(() => buildNaturePivot(rows), [rows]);
+  // Charge une fois le catalogue des flux et retient ceux du motif Fxx, triés.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const flows = (await api.masterData.list('flows')) as { code: string }[];
+        if (cancelled) return;
+        const cols = flows
+          .map((f) => String(f.code ?? ''))
+          .filter((c) => FLOW_PATTERN.test(c))
+          .sort(compareText);
+        setFlowColumns(cols);
+      } catch {
+        if (!cancelled) setFlowColumns([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const { pivot, accounts, signedTotals } = useMemo(
+    () => buildPivot(rows, flowColumns),
+    [rows, flowColumns],
+  );
+  const naturePivot = useMemo(
+    () => buildNaturePivot(rows, flowColumns),
+    [rows, flowColumns],
+  );
 
   const allExpanded =
     naturePivot.accounts.length > 0 &&
@@ -178,7 +217,7 @@ export function RapportsPage() {
             <thead>
               <tr>
                 <th className="grid__rowhead">Compte / Nature</th>
-                {FLOW_COLUMNS.map((flow) => (
+                {flowColumns.map((flow) => (
                   <th key={flow} className="num">
                     {flow}
                   </th>
@@ -191,14 +230,14 @@ export function RapportsPage() {
             <tbody>
               {naturePivot.accounts.length === 0 && !loading && (
                 <tr>
-                  <td className="grid__empty" colSpan={FLOW_COLUMNS.length + 2}>
+                  <td className="grid__empty" colSpan={flowColumns.length + 2}>
                     Aucune donnée pour cette sélection.
                   </td>
                 </tr>
               )}
               {naturePivot.accounts.map((account) => {
                 const detail = naturePivot.byAccount.get(account)!;
-                const accControl = closingControl(detail.total);
+                const accControl = closingControl(detail.total, flowColumns);
                 const isOpen = expanded.has(account);
                 return (
                   <Fragment key={account}>
@@ -214,7 +253,7 @@ export function RapportsPage() {
                           {isOpen ? '▾' : '▸'} {account}
                         </button>
                       </td>
-                      {FLOW_COLUMNS.map((flow) => (
+                      {flowColumns.map((flow) => (
                         <td key={flow} className="num">
                           {detail.total[flow] !== 0
                             ? formatAmount(detail.total[flow])
@@ -227,13 +266,13 @@ export function RapportsPage() {
                     </tr>
                     {isOpen &&
                       detail.natures.map((nat) => {
-                        const natControl = closingControl(nat.values);
+                        const natControl = closingControl(nat.values, flowColumns);
                         return (
                           <tr key={`${account}|${nat.nature}`} className="tree-child">
                             <td className="grid__rowhead grid__rowhead--child">
                               {nat.nature}
                             </td>
-                            {FLOW_COLUMNS.map((flow) => (
+                            {flowColumns.map((flow) => (
                               <td key={flow} className="num">
                                 {nat.values[flow] !== 0
                                   ? formatAmount(nat.values[flow])
@@ -257,7 +296,7 @@ export function RapportsPage() {
                   >
                     Total (C − D)
                   </td>
-                  {FLOW_COLUMNS.map((flow) => (
+                  {flowColumns.map((flow) => (
                     <td key={flow} className="num num--strong">
                       {naturePivot.signedTotals[flow] !== 0
                         ? formatAmount(naturePivot.signedTotals[flow])
@@ -265,7 +304,7 @@ export function RapportsPage() {
                     </td>
                   ))}
                   <td className="num num--strong">
-                    {formatAmount(closingControl(naturePivot.signedTotals))}
+                    {formatAmount(closingControl(naturePivot.signedTotals, flowColumns))}
                   </td>
                 </tr>
               </tfoot>
@@ -278,7 +317,7 @@ export function RapportsPage() {
             <thead>
               <tr>
                 <th className="grid__rowhead">Compte</th>
-                {FLOW_COLUMNS.map((flow) => (
+                {flowColumns.map((flow) => (
                   <th key={flow} className="num">
                     {flow}
                   </th>
@@ -291,7 +330,7 @@ export function RapportsPage() {
             <tbody>
               {accounts.length === 0 && !loading && (
                 <tr>
-                  <td className="grid__empty" colSpan={FLOW_COLUMNS.length + 2}>
+                  <td className="grid__empty" colSpan={flowColumns.length + 2}>
                     Aucune donnée pour cette sélection.
                   </td>
                 </tr>
@@ -301,12 +340,12 @@ export function RapportsPage() {
                 return (
                   <tr key={account}>
                     <td className="grid__rowhead">{account}</td>
-                    {FLOW_COLUMNS.map((flow) => (
+                    {flowColumns.map((flow) => (
                       <td key={flow} className="num">
                         {line[flow] !== 0 ? formatAmount(line[flow]) : ''}
                       </td>
                     ))}
-                    <td className="num num--strong">{formatAmount(closingControl(line))}</td>
+                    <td className="num num--strong">{formatAmount(closingControl(line, flowColumns))}</td>
                   </tr>
                 );
               })}
@@ -320,13 +359,13 @@ export function RapportsPage() {
                   >
                     Total (C − D)
                   </td>
-                  {FLOW_COLUMNS.map((flow) => (
+                  {flowColumns.map((flow) => (
                     <td key={flow} className="num num--strong">
                       {signedTotals[flow] !== 0 ? formatAmount(signedTotals[flow]) : ''}
                     </td>
                   ))}
                   <td className="num num--strong">
-                    {formatAmount(closingControl(signedTotals))}
+                    {formatAmount(closingControl(signedTotals, flowColumns))}
                   </td>
                 </tr>
               </tfoot>

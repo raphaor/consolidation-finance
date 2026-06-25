@@ -273,6 +273,12 @@
   color: var(--ok);
 }
 
+.alert--warning {
+  background: #fff6e6;
+  border-color: #f0cf8a;
+  color: #8a5a00;
+}
+
 .muted {
   color: var(--text-muted);
 }

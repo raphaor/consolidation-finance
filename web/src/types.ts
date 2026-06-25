@@ -58,6 +58,21 @@ export interface PipelineCounts {
   consolidated: number;
 }
 
+// Avertissement de cohérence de l'à-nouveau (non bloquant), remonté par /api/run
+// pour affichage dans l'UI (au lieu de la console serveur).
+export interface CoherenceWarning {
+  kind: string;
+  entity: string;
+  detail: string;
+}
+
+export interface PipelineRunResult extends PipelineCounts {
+  consolidation: number;
+  ruleset: string | null;
+  ruleset_report: RulesetReport | null;
+  a_nouveau_warnings: CoherenceWarning[];
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -128,19 +143,8 @@ export interface ReportFilters {
   nature?: string;
 }
 
-// Catalogue des flux attendus en colonnes du bilan par flux
-// (voir docs/FLUX_CONSO.md).
-export const FLOW_COLUMNS = [
-  'F00',
-  'F01',
-  'F20',
-  'F80',
-  'F81',
-  'F98',
-  'F99',
-] as const;
-
-export type FlowCode = (typeof FLOW_COLUMNS)[number];
+// Les colonnes de flux du rapport ne sont plus figées : elles sont dérivées
+// dynamiquement du catalogue `dim_flow` (motif Fxx) côté RapportsPage.
 
 export const LEVELS = [
   'corporate',
