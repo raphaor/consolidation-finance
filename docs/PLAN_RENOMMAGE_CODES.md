@@ -216,7 +216,15 @@ depuis les données existantes (jamais de reseed).
    pipeline + reports. *La grosse étape.*
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
 6. **Basculer les JSON en ids** via l'éditeur (§6) → rôle 3 réglé.
-7. **Endpoint `rename` + UI** (devenu trivial : un `UPDATE` de la colonne `code`).
+7. ✅ **Endpoint `rename` + UI** (livré en avance) : `POST /api/md/{table}/rename`
+   (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
+   refuse si une référence cible encore le code (liste les blocages). Effectif dès
+   qu'une dimension est entièrement flippée — aujourd'hui **`variant`**. S'étend
+   automatiquement aux suivantes. ⚠️ Garde basée sur le graphe ; **pas encore** de
+   scan des codes enfouis dans JSON/`app_config` (rôle 3) — à ajouter avant de
+   rendre renommables les dimensions présentes dans ces contenus.
+   Robustesse base : `CHECKPOINT` après migrations/import/reset/rename (sinon WAL
+   DuckDB irrejouable au redémarrage). Import B1-aware (restaure un export en codes).
 8. **Retirer les chemins code-based** résiduels + finaliser la migration
    in-place versionnée (§7).
 
