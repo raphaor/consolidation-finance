@@ -1,5 +1,5 @@
-code,libelle,classe
-actif,Actif,bilan
-passif,Passif,bilan
-charges,Charges,resultat
-produits,Produits,resultat
+code,libelle,classe,sens
+actif,Actif,bilan,D
+passif,Passif,bilan,C
+charges,Charges,resultat,D
+produits,Produits,resultat,C

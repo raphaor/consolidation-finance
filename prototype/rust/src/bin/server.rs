@@ -87,12 +87,10 @@ struct BilanRow {
     amount: Decimal,
 }
 
-/// Dérivation SQL du sens comptable depuis `dim_account.sous_classe`.
-/// Créditeur (C) : passif, produits ; Débiteur (D) : actif, charges.
-/// Une sous-classe inconnue/nulle retombe sur `'?'` (exclue des totaux signés).
-const SENS_CASE: &str = "CASE a.sous_classe \
-    WHEN 'passif' THEN 'C' WHEN 'produits' THEN 'C' \
-    WHEN 'actif' THEN 'D' WHEN 'charges' THEN 'D' ELSE '?' END";
+// Sens comptable (Q44) : désormais user-driven via `dim_sous_classe.sens`
+// (colonne C/D). Les rapports bilan/P&L signent via un LEFT JOIN sur cette
+// colonne (COALESCE '?' si NULL). L'ancien CASE en dur `SENS_CASE` est supprimé
+// — `sous_classe` devient renommable (plus de code en dur référençant ses valeurs).
 
 /// Avertissement de cohérence de l'à-nouveau (non bloquant), remonté au client
 /// pour affichage dans l'UI plutôt qu'en console (cf. docs/A_NOUVEAU.md §5.1).
@@ -299,9 +297,10 @@ async fn get_bilan(
             &q.nature,
         );
         let sql = format!(
-            "SELECT e.account, e.flow, e.nature, {SENS_CASE} AS sens, SUM(e.amount) AS amount
+            "SELECT e.account, e.flow, e.nature, COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
+             LEFT JOIN dim_sous_classe sc ON sc.code = a.sous_classe
              WHERE e.level = ? AND a.classe = 'bilan' {fsql}{of_which}
              GROUP BY e.account, e.flow, e.nature, a.sous_classe
              ORDER BY e.account, e.flow, e.nature"
@@ -353,12 +352,13 @@ async fn get_compte_resultat(
             &q.nature,
         );
         let sql = format!(
-            "SELECT e.account, e.flow, e.nature, {SENS_CASE} AS sens, SUM(e.amount) AS amount
-             FROM fact_entry e
-             JOIN dim_account a ON a.code = e.account
-             WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
-             GROUP BY e.account, e.flow, e.nature, a.sous_classe
-             ORDER BY e.account, e.flow, e.nature"
+             "SELECT e.account, e.flow, e.nature, COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
+              FROM fact_entry e
+              JOIN dim_account a ON a.code = e.account
+              LEFT JOIN dim_sous_classe sc ON sc.code = a.sous_classe
+              WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
+              GROUP BY e.account, e.flow, e.nature, a.sous_classe
+              ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
         params.extend(fparams);
@@ -1408,6 +1408,11 @@ async fn main() {
         // dimension `perimeter_set` entièrement flippée (renommable).
         if let Err(e) = conso_engine::surrogate::migrate_sat_perimeter_fk_to_id(&con) {
             eprintln!("   ⚠ migrate_sat_perimeter_fk_to_id (non bloquant) : {e}");
+        }
+        // Q44 : colonne `sens` sur dim_sous_classe (user-driven) + backfill des
+        // codes natifs (retire le dur SENS_CASE des rapports).
+        if let Err(e) = conso_engine::surrogate::ensure_sous_classe_sens(&con) {
+            eprintln!("   ⚠ ensure_sous_classe_sens (non bloquant) : {e}");
         }
     } else {
         if force_reseed {

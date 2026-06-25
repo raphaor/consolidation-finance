@@ -164,10 +164,11 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         use_explicit_schema: false,
     },
     // 8. dim_sous_classe : sous-classes de compte (réf. de dim_account).
+    //    `sens` (Q44) est optionnel (C/D) — absent du CSV ⇒ NULL.
     CsvMapping {
         file: "sous_classes.csv",
         table: "dim_sous_classe",
-        columns: &["code", "libelle", "classe"],
+        columns: &["code", "libelle", "classe", "sens"],
         casts: &[],
         use_explicit_schema: false,
     },

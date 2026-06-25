@@ -105,12 +105,14 @@ const PERIODS: &[(&str, &str, &str, &str, &str, &str)] = &[
     ),
 ];
 
-/// Sous-classes de comptes : (code, libelle, classe).
-const SOUS_CLASSES: &[(&str, &str, &str)] = &[
-    ("actif", "Actif", "bilan"),
-    ("passif", "Passif", "bilan"),
-    ("charges", "Charges", "resultat"),
-    ("produits", "Produits", "resultat"),
+/// Sous-classes de comptes : (code, libelle, classe, sens).
+/// `sens` (Q44) : C créditeur / D débiteur — pilotait autrefois le `SENS_CASE`
+/// en dur dans server.rs ; désormais user-driven via cette colonne.
+const SOUS_CLASSES: &[(&str, &str, &str, &str)] = &[
+    ("actif", "Actif", "bilan", "D"),
+    ("passif", "Passif", "bilan", "C"),
+    ("charges", "Charges", "resultat", "D"),
+    ("produits", "Produits", "resultat", "C"),
 ];
 
 /// Plan de compte : (code, libelle, classe, sous_classe).
@@ -870,8 +872,8 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for sc in SOUS_CLASSES {
         con.execute(
-            "INSERT INTO dim_sous_classe (code, libelle, classe) VALUES (?, ?, ?)",
-            params![sc.0, sc.1, sc.2],
+            "INSERT INTO dim_sous_classe (code, libelle, classe, sens) VALUES (?, ?, ?, ?)",
+            params![sc.0, sc.1, sc.2, sc.3],
         )?;
     }
     for a in ACCOUNTS {

@@ -233,7 +233,12 @@ pub const DDL_DIM_SOUS_CLASSE: &str = "\
 CREATE TABLE dim_sous_classe (
     code    TEXT PRIMARY KEY,
     libelle TEXT,
-    classe  TEXT CHECK (classe IN ('bilan', 'resultat', 'flux'))
+    classe  TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
+    -- Sens comptable user-driven (Q44) : 'C' créditeur (passif, produits),
+    -- 'D' débiteur (actif, charges). NULL = exclu des totaux signés des rapports.
+    -- Remplace le CASE en dur `SENS_CASE` (server.rs) — les rapports signent via
+    -- un JOIN sur cette colonne. Rend `sous_classe` renommable (plus de dur).
+    sens    TEXT CHECK (sens IN ('C', 'D'))
 );";
 
 /// 5. dim_flow : catalogue des flux (cf. docs/FLUX_CONSO.md §6).

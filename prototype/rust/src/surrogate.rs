@@ -235,6 +235,27 @@ pub fn migrate_sat_perimeter_fk_to_id(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Migration Q44 : ajoute la colonne `sens` à `dim_sous_classe` sur une base
+/// existante et **backfille** les codes natifs (traduit une fois l'ancien dur
+/// `SENS_CASE` en données). Idempotent. Après cela, `sens` est user-driven.
+pub fn ensure_sous_classe_sens(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_sous_classe")? {
+        return Ok(());
+    }
+    if column_exists(con, "dim_sous_classe", "sens")? {
+        return Ok(()); // déjà migrée
+    }
+    con.execute("ALTER TABLE dim_sous_classe ADD COLUMN sens TEXT", [])?;
+    // Backfill unique des codes natifs (passif/produits → C, actif/charges → D),
+    // équivalent à l'ancien `SENS_CASE` de server.rs. Les autres sous-classes
+    // (utilisateur) restent NULL jusqu'à saisie.
+    con.execute_batch(
+        "UPDATE dim_sous_classe SET sens = 'C' WHERE code IN ('passif', 'produits');
+         UPDATE dim_sous_classe SET sens = 'D' WHERE code IN ('actif', 'charges');",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,6 +489,67 @@ mod tests {
 
         // Idempotent.
         migrate_sat_perimeter_fk_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn ensure_sous_classe_sens_backfille_les_codes_natifs() {
+        // Base existante : dim_sous_classe sans la colonne `sens`.
+        let con = Connection::open_in_memory().unwrap();
+        con.execute_batch(
+            "CREATE TABLE dim_sous_classe (code TEXT PRIMARY KEY, libelle TEXT, classe TEXT);
+             INSERT INTO dim_sous_classe VALUES
+                ('actif','Actif','bilan'), ('passif','Passif','bilan'),
+                ('charges','Charges','resultat'), ('produits','Produits','resultat'),
+                ('CUSTOM','Perso','bilan');", // utilisateur → reste NULL
+        )
+        .unwrap();
+
+        ensure_sous_classe_sens(&con).expect("migration sens");
+
+        let sens_of = |code: &str| -> String {
+            con.query_row(
+                "SELECT COALESCE(sens,'?') FROM dim_sous_classe WHERE code=?",
+                [code],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(sens_of("actif"), "D");
+        assert_eq!(sens_of("charges"), "D");
+        assert_eq!(sens_of("passif"), "C");
+        assert_eq!(sens_of("produits"), "C");
+        assert_eq!(sens_of("CUSTOM"), "?", "sous-classe utilisateur non backfillée");
+
+        // Idempotent.
+        ensure_sous_classe_sens(&con).expect("migration #2");
+    }
+
+    /// Q44 : le sens user-driven (`dim_sous_classe.sens`) reproduit exactement
+    /// l'ancien `SENS_CASE` codé en dur, sur tous les comptes seedés.
+    #[test]
+    fn sens_data_driven_equivaut_au_case_historique() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        let diff: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM (
+                    SELECT a.code,
+                           COALESCE(sc.sens, '?') AS sens_new,
+                           CASE a.sous_classe
+                               WHEN 'passif' THEN 'C' WHEN 'produits' THEN 'C'
+                               WHEN 'actif'  THEN 'D' WHEN 'charges' THEN 'D'
+                               ELSE '?' END AS sens_old
+                    FROM dim_account a
+                    LEFT JOIN dim_sous_classe sc ON sc.code = a.sous_classe
+                ) WHERE sens_new IS DISTINCT FROM sens_old",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            diff, 0,
+            "le sens user-driven doit coïncider avec le CASE historique sur tout le seed"
+        );
     }
 
     #[test]

@@ -223,7 +223,7 @@ const TABLES: &[TableDef] = &[
         api_name: "sous_classes",
         label: "Sous-classes",
         sql_name: "dim_sous_classe",
-        columns: &["code", "libelle", "classe"],
+        columns: &["code", "libelle", "classe", "sens"],
         pk: &["code"],
         auto_pk: false,
     },
