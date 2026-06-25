@@ -21,10 +21,8 @@ import {
   useState,
 } from 'react';
 import { api } from '../api';
-import {
-  DimRefProvider,
-  useDimValues,
-} from '../hooks/useDimValues';
+import { useDimValues } from '../hooks/useDimValues';
+import { DimRefProvider } from '../components/DimRefProvider';
 import type { DimensionInfo, EntryInput, ReferenceInfo } from '../types';
 import { formatAmount, formatInt, formatOptionLabel } from '../utils/format';
 import { usePersistentState } from '../utils/usePersistentState';

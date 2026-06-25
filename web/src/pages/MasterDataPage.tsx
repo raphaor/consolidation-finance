@@ -86,7 +86,7 @@ function columnSchemaToColumnDef(cs: ColumnSchema): ColumnDef {
 // - les colonnes dynamiques du schéma (caractéristiques N1, références directes
 //   patron B, attributs N2 des `car_*`) non déjà présentes dans la définition
 //   statique.
-export function buildTableDef(
+function buildTableDef(
   schema: TableSchema,
   staticDef: TableDef | undefined,
 ): TableDef {

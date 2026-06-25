@@ -11,7 +11,6 @@ import {
   useContext,
   useEffect,
   useState,
-  type ReactNode,
 } from 'react';
 import { api } from '../api';
 import { compareText, formatOptionLabel } from '../utils/format';
@@ -146,19 +145,6 @@ export function useDimValues(dim: string): { values: DimValue[]; loading: boolea
   }, [dim, dimToTable]);
 
   return { values, loading };
-}
-
-/// Provider qui charge le graphe de références API une seule fois et expose le
-/// mapping à tous les `useDimValues` descendants via le contexte.
-export function DimRefProvider({
-  children,
-  references,
-}: {
-  children: ReactNode;
-  references: ReferenceInfo[] | null;
-}) {
-  const mapping = references ? buildDimToTable(references) : DIM_TO_TABLE_FALLBACK;
-  return <DimRefContext.Provider value={mapping}>{children}</DimRefContext.Provider>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
