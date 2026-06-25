@@ -417,6 +417,35 @@ export function MasterDataPage() {
     [table, tableDef, load],
   );
 
+  // Colonne « code » renommable : la PK non auto-générée (ex. `code`,
+  // `code_iso`). Absente pour les tables à PK technique auto (ex. consolidations
+  // dont l'identité est l'id) → pas de renommage proposé.
+  const codeCol = useMemo(
+    () => tableDef?.columns.find((c) => c.pk && !c.auto)?.name ?? null,
+    [tableDef],
+  );
+
+  const handleRename = useCallback(
+    async (row: Row) => {
+      if (codeCol === null) return;
+      const oldCode = String(row[codeCol] ?? '');
+      const newCode = window.prompt(
+        `Nouveau code pour « ${oldCode} » ?\n\n` +
+          `Renommage possible uniquement si plus aucune référence ne pointe vers ce code.`,
+        oldCode,
+      );
+      if (newCode === null || newCode.trim() === '' || newCode === oldCode) return;
+      try {
+        await api.masterData.rename(table, oldCode, newCode.trim());
+        setNotice({ kind: 'success', text: `Code renommé : ${oldCode} → ${newCode.trim()}` });
+        await load();
+      } catch (err) {
+        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      }
+    },
+    [table, codeCol, load],
+  );
+
   const columns = useMemo<RTColumnDef<Row>[]>(() => {
     if (tableDef === null) return [];
     const cols: RTColumnDef<Row>[] = tableDef.columns.map((col) => ({
@@ -437,6 +466,16 @@ export function MasterDataPage() {
           >
             Éditer
           </button>
+          {codeCol !== null && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              title="Changer le code de cet objet (si plus aucune référence ne le cite)"
+              onClick={() => void handleRename(info.row.original)}
+            >
+              Renommer
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--sm btn--danger"
@@ -448,7 +487,7 @@ export function MasterDataPage() {
       ),
     });
     return cols;
-  }, [tableDef, handleDelete]);
+  }, [tableDef, handleDelete, handleRename, codeCol]);
 
   const tableState = useReactTable({
     data,

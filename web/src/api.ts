@@ -181,6 +181,14 @@ export const api = {
       const qs = new URLSearchParams(pk).toString();
       return deleteJson<{ deleted: number }>(`/md/${table}?${qs}`);
     },
+    // Renommage de code (chantier B1, étape 7) : possible uniquement si plus
+    // aucune référence ne pointe vers le code (sinon le serveur refuse en
+    // listant les blocages).
+    rename: (table: MasterTable, oldCode: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(`/md/${table}/rename`, {
+        old: oldCode,
+        new: newCode,
+      }),
   },
   importEntries: (file: File) => {
     const form = new FormData();
