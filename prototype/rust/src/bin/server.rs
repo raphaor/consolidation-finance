@@ -1389,6 +1389,13 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::ensure_ids(&con) {
             eprintln!("   ⚠ ensure_ids surrogate (non bloquant) : {e}");
         }
+        // Migration in-place (chantier B1, étape 3) : reconstruit dim_consolidation
+        // en convertissant ses FK à contrat code (phase/perimeter_set/variant/
+        // rate_set) du TEXT vers la clé technique (id), sur une base existante.
+        // Idempotent ; à exécuter après ensure_ids.
+        if let Err(e) = conso_engine::surrogate::migrate_consolidation_fk_to_id(&con) {
+            eprintln!("   ⚠ migrate_consolidation_fk_to_id (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");

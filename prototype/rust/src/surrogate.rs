@@ -112,6 +112,65 @@ pub fn ensure_ids(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// `true` si la colonne `(table, column)` est de type entier (déjà migrée).
+fn column_is_int(con: &Connection, table: &str, column: &str) -> duckdb::Result<bool> {
+    let data_type: String = con.query_row(
+        "SELECT data_type FROM information_schema.columns \
+         WHERE table_schema = 'main' AND table_name = ? AND column_name = ?",
+        [table, column],
+        |row| row.get(0),
+    )?;
+    Ok(data_type.to_uppercase().contains("INT"))
+}
+
+/// Migration in-place des **FK à contrat code** de `dim_consolidation` (option A,
+/// chantier B1, étape 3) sur une base **existante** : convertit `phase`,
+/// `perimeter_set`, `variant`, `rate_set` du stockage **code (TEXT)** vers la
+/// **clé technique (id, INTEGER)**. Idempotent (no-op si `variant` est déjà
+/// entier).
+///
+/// Nécessaire car le changement de DDL (TEXT→INTEGER) ne s'applique qu'aux bases
+/// **neuves** (`create_schema`) ; une base persistée garde ses colonnes TEXT.
+/// À appeler au démarrage serveur **après** [`ensure_ids`] (les dimensions cibles
+/// doivent déjà avoir leur `id`).
+///
+/// **Reconstruction de table** plutôt qu'`ALTER COLUMN` : DuckDB interdit une
+/// sous-requête dans `ALTER … SET DATA TYPE … USING` (et le changement de type
+/// d'une colonne prise dans la contrainte `UNIQUE` est délicat). On recrée donc
+/// la table au nouveau schéma puis on réinjecte en résolvant les codes→ids,
+/// `id` préservés.
+pub fn migrate_consolidation_fk_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_consolidation")? {
+        return Ok(());
+    }
+    if column_is_int(con, "dim_consolidation", "variant")? {
+        return Ok(()); // déjà migrée
+    }
+    // Table neuve au schéma cible (FK en INTEGER), réinjection avec résolution
+    // code→id des 4 FK flippées ; les autres colonnes sont reprises telles quelles.
+    let create_mig = crate::schema::DDL_DIM_CONSOLIDATION
+        .replace("dim_consolidation (", "dim_consolidation__mig (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         INSERT INTO dim_consolidation__mig
+            (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
+             perimeter_period, rate_set, rate_period, ruleset_code,
+             a_nouveau_consolidation_id, statut)
+         SELECT c.id, c.libelle,
+                (SELECT s.id FROM dim_scenario_category s WHERE s.code = c.phase),
+                c.exercice,
+                (SELECT p.id FROM dim_perimeter_set p WHERE p.code = c.perimeter_set),
+                (SELECT v.id FROM dim_variant v WHERE v.code = c.variant),
+                c.presentation_currency, c.perimeter_period,
+                (SELECT r.id FROM dim_rate_set r WHERE r.code = c.rate_set),
+                c.rate_period, c.ruleset_code, c.a_nouveau_consolidation_id, c.statut
+         FROM dim_consolidation c;
+         DROP TABLE dim_consolidation;
+         ALTER TABLE dim_consolidation__mig RENAME TO dim_consolidation;",
+    ))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +247,75 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1, "une seule colonne id sur dim_account");
+    }
+
+    #[test]
+    fn migrate_consolidation_fk_to_id_convertit_les_codes_en_id() {
+        // Simule une base **existante** (ancien schéma) : dim_consolidation avec
+        // ses FK en TEXT (codes). On vérifie que la migration la reconstruit avec
+        // les FK en id, en préservant l'id de la consolidation et la contrainte
+        // UNIQUE.
+        let con = setup(); // schéma neuf (sert pour les dimensions cibles + seq)
+        // Dimensions cibles avec leurs id (ensure_ids l'a fait au create_schema).
+        con.execute_batch(
+            "INSERT INTO dim_scenario_category (code, libelle) VALUES ('REEL','Réel');
+             INSERT INTO dim_variant (code, libelle) VALUES ('BASE','Base');
+             INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL','Périmètre');
+             INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES','Taux réels');",
+        )
+        .unwrap();
+
+        // Rétrograde dim_consolidation à l'ancien schéma (FK en TEXT) avec une
+        // ligne en codes.
+        con.execute_batch(
+            "DROP TABLE dim_consolidation;
+             CREATE TABLE dim_consolidation (
+                id INTEGER PRIMARY KEY, libelle TEXT, phase TEXT, exercice TEXT,
+                perimeter_set TEXT, variant TEXT, presentation_currency TEXT,
+                perimeter_period TEXT, rate_set TEXT, rate_period TEXT, ruleset_code TEXT,
+                a_nouveau_consolidation_id INTEGER, statut TEXT,
+                UNIQUE (phase, exercice, perimeter_set, variant, presentation_currency));
+             INSERT INTO dim_consolidation VALUES
+                (1,'Réel','REEL','2024','PERIM_REEL','BASE','EUR','2024','RATES','2024',
+                 NULL, NULL, 'ouvert');",
+        )
+        .unwrap();
+
+        migrate_consolidation_fk_to_id(&con).expect("migration");
+
+        // Les 4 FK sont désormais des entiers = id de leur cible ; id préservé.
+        let (phase, perim, variant, rate, id): (i64, i64, i64, i64, i64) = con
+            .query_row(
+                "SELECT phase, perimeter_set, variant, rate_set, id FROM dim_consolidation",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .expect("FK migrées en entiers");
+        assert_eq!(id, 1, "id préservé");
+        assert_eq!(
+            phase,
+            crate::resolve::resolve_id(&con, "dim_scenario_category", "REEL").unwrap().unwrap()
+        );
+        assert_eq!(
+            perim,
+            crate::resolve::resolve_id(&con, "dim_perimeter_set", "PERIM_REEL").unwrap().unwrap()
+        );
+        assert_eq!(
+            variant,
+            crate::resolve::resolve_id(&con, "dim_variant", "BASE").unwrap().unwrap()
+        );
+        assert_eq!(
+            rate,
+            crate::resolve::resolve_id(&con, "dim_rate_set", "RATES").unwrap().unwrap()
+        );
+        // exercice (non flippé) reste un code.
+        let exercice: String = con
+            .query_row("SELECT exercice FROM dim_consolidation", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(exercice, "2024");
+
+        // Idempotent : second passage no-op (variant déjà entier).
+        migrate_consolidation_fk_to_id(&con).expect("migration #2");
     }
 
     #[test]

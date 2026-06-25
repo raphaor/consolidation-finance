@@ -1055,9 +1055,14 @@ async fn get_references(
         .into_iter()
         .map(|r| ReferenceDto {
             table: sql_to_api(&r.table),
-            column: r.column,
+            column: r.column.clone(),
             target_table: sql_to_api(&r.target_table),
-            target_column: r.target_column,
+            // FK à contrat code : on expose la colonne **code** (et non `id`), pour
+            // que le front (qui manipule des codes) reste aligné — cf. table_schema.
+            target_column: r
+                .code_contract()
+                .map(String::from)
+                .unwrap_or(r.target_column),
             required: r.required,
         })
         .collect();
