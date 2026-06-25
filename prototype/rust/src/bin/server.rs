@@ -716,6 +716,9 @@ async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetR
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
             .map_err(db_err)?;
+        // Flushe le DDL du reset dans le fichier (WAL propre) — cf. CHECKPOINT
+        // au démarrage.
+        let _ = con.execute("CHECKPOINT", []);
         n
     };
     Ok(Json(ResetResult {
@@ -1445,6 +1448,15 @@ async fn main() {
                 eprintln!("⚠ Aucune consolidation 'ouvert' trouvée — pipeline initial sauté.");
             }
         }
+    }
+
+    // Force un CHECKPOINT : flushe le DDL des migrations / de l'init dans le
+    // fichier .duckdb et vide le WAL. Sans cela, un arrêt non propre (Ctrl+C,
+    // kill) laisserait dans le WAL des opérations DDL (ex. ALTER … SET DEFAULT
+    // nextval) que DuckDB ne sait pas toujours rejouer → base illisible au
+    // redémarrage (« GetDefaultDatabase … »). Non bloquant.
+    if let Err(e) = con.execute("CHECKPOINT", []) {
+        eprintln!("   ⚠ CHECKPOINT au démarrage (non bloquant) : {e}");
     }
 
     let state = Arc::new(AppState {

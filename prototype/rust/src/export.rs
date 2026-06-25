@@ -147,6 +147,11 @@ async fn import_all(
         let n_coef = insert_table(&con, "dim_coefficient", obj.get("dim_coefficient"))?;
         counts.insert("dim_coefficient".to_string(), JsonValue::Number(n_coef.into()));
 
+        // Flushe tout le DDL (create_schema) + les données importées dans le
+        // fichier .duckdb (WAL propre) : évite une base illisible si le serveur
+        // est tué ensuite (cf. CHECKPOINT au démarrage de server.rs).
+        let _ = con.execute("CHECKPOINT", []);
+
         JsonValue::Object(counts)
     };
 
