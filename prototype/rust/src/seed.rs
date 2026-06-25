@@ -881,7 +881,8 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         // schéma par défaut est dérivé de la classe à la conversion (cf.
         // pipeline::convert), surchargeable ensuite via le CRUD.
         con.execute(
-            "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES (?, ?, ?, ?)",
+            "INSERT INTO dim_account (code, libelle, classe, sous_classe) \
+             VALUES (?, ?, ?, (SELECT id FROM dim_sous_classe WHERE code = ?))",
             params![a.0, a.1, a.2, a.3],
         )?;
     }
@@ -1143,9 +1144,9 @@ mod tests {
         crate::schema::create_schema(&con).expect("create_schema");
         con.execute_batch(
             "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES \
-                ('10','Capital et réserves','bilan','passif'), \
-                ('101','Capital','bilan','passif'), \
-                ('1011','Capital souscrit','bilan','passif');",
+                ('10','Capital et réserves','bilan',NULL), \
+                ('101','Capital','bilan',NULL), \
+                ('1011','Capital souscrit','bilan',NULL);",
         )
         .expect("seed accounts");
 

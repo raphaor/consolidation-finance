@@ -650,6 +650,35 @@ fn selection_via_ref_filtre_par_reference_directe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  13b. Sélection par FK native ri() (id-aware) : `sous_classe` est stockée en
+//      id (B1). La sélection `ref: sous_classe` doit joindre la cible sur l'id
+//      et filtrer sur le code utilisateur — 1er cas id-aware post-flip.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn selection_via_sous_classe_id_aware() {
+    let con = engine();
+
+    // 200 = actif, 100 = passif (cf. seed ACCOUNTS).
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // actif → match
+    put(&con, "M", "100", "F20", None, "0LIASS", 100.0, "converted"); // passif → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","ref":"sous_classe","op":"=","val":"actif"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"SCACTIF"}}}]}"#,
+    );
+
+    assert_eq!(run_one(&con, "R"), 1, "un seul compte est de sous_classe actif");
+    assert_eq!(scount(&con, "nature='SCACTIF' AND account='200'"), 1);
+    assert_eq!(scount(&con, "nature='SCACTIF' AND account='100'"), 0, "passif exclu");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Coefficients d'élimination IC corporate (N / N-1 / Var).
 //
 //  Vérifie la mécanique : facteur = Min(1, INTEG_PA / INTEG_EN), taux N-1 lu via

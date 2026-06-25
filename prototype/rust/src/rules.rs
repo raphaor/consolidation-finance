@@ -878,9 +878,14 @@ fn dest_expr(
             // Mode `map_ref` : valeur tirée d'une référence directe via l'alias
             // `mdr_<ref>` (master data de la dimension écrite, cf. exec_operation).
             // `ref` est validé (alphanumérique + existence) avant interpolation.
+            // FK native ri() : la colonne hôte est un id → on lit le code via la
+            // jointure cible `mdrt_<ref>` (ajoutée dans exec_operation).
             "map_ref" => {
                 let r = d.ref_field.clone().unwrap_or_default();
-                format!("mdr_{r}.\"{r}\"")
+                match references::ref_code_contract(dim, &r) {
+                    Some((_, code_col)) => format!("mdrt_{r}.\"{code_col}\""),
+                    None => format!("mdr_{r}.\"{r}\""),
+                }
             }
             _ => format!("e.{dim}"),
         },
@@ -1207,9 +1212,17 @@ fn exec_operation(
         // (la master data existe toujours), écrivant un `NULL` dans fact_entry
         // (rejeté par la contrainte NOT NULL). Symétrique au comportement `map`
         // (qui exclut les membres non classés via le double JOIN sur car_<via>).
+        // FK native ri() : la colonne hôte stocke un id → on joint la cible sur
+        // l'id (alias mdrt_<ref>) pour lire le code (cf. dest_expr map_ref).
+        let target_join = match references::ref_code_contract(&host_dim, r) {
+            Some((target_table, _)) => {
+                format!("\nJOIN {target_table} mdrt_{r}\n  ON mdrt_{r}.id = mdr_{r}.\"{r}\"")
+            }
+            None => String::new(),
+        };
         joins.push_str(&format!(
             "\nJOIN {host_table} mdr_{r}\n  ON mdr_{r}.{host_key} = e.{host_dim}\
-             \n  AND mdr_{r}.\"{r}\" IS NOT NULL"
+             \n  AND mdr_{r}.\"{r}\" IS NOT NULL{target_join}"
         ));
     }
 
@@ -1319,9 +1332,16 @@ fn exec_operation(
                 "selection ref : dimension hôte sans master data : {host_dim}"
             ))
         })?;
+        // FK native ri() : colonne hôte = id → jointure cible sur id (smdrt_<rf>).
+        let target_join = match references::ref_code_contract(host_dim, rf) {
+            Some((target_table, _)) => {
+                format!("\nJOIN {target_table} smdrt_{rf}\n  ON smdrt_{rf}.id = smdr_{rf}.\"{rf}\"")
+            }
+            None => String::new(),
+        };
         joins.push_str(&format!(
             "\nJOIN {host_table} smdr_{rf}\n  ON smdr_{rf}.{host_key} = e.{host_dim}\
-             \n  AND smdr_{rf}.\"{rf}\" IS NOT NULL"
+             \n  AND smdr_{rf}.\"{rf}\" IS NOT NULL{target_join}"
         ));
     }
     // JOINs enums natifs de sélection : dim_<host> smda_<host>_<attr>.
@@ -1348,7 +1368,12 @@ fn exec_operation(
         let operand = if let Some(via) = &sel.via {
             format!("scg_{via}.code")
         } else if let Some(rf) = &sel.ref_field {
-            format!("smdr_{rf}.\"{rf}\"")
+            // FK native ri() : on compare le code utilisateur au code de la cible
+            // (joint via smdrt_<rf>) ; sinon lecture directe de la colonne hôte.
+            match references::ref_code_contract(&sel.dim, rf) {
+                Some((_, code_col)) => format!("smdrt_{rf}.\"{code_col}\""),
+                None => format!("smdr_{rf}.\"{rf}\""),
+            }
         } else if let Some(attr) = &sel.attr {
             format!("smda_{}_{}.{}", sel.dim, attr, attr)
         } else {

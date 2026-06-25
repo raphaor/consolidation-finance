@@ -134,7 +134,7 @@ pub const REFERENCES: &[Reference] = &[
     ),
     r("dim_entity", "entite_parent", "dim_entity", "code"),
     // dim_account (compte_parent est désormais une référence directe dynamique)
-    r("dim_account", "sous_classe", "dim_sous_classe", "code"),
+    ri("dim_account", "sous_classe", "dim_sous_classe", "code", false),
     // Schéma de flux du compte (nullable : NULL = défaut dérivé de la classe).
     r("dim_account", "flow_scheme", "dim_flow_scheme", "code"),
     // dim_flow est désormais une dimension nue (code, libelle) : tout le
@@ -288,6 +288,23 @@ pub fn target_master(con: &Connection, target: &str) -> Option<(String, String)>
         return Some((crate::value_lists::value_table(target), "code".to_string()));
     }
     None
+}
+
+/// Pour une référence directe `(host_dim, column)` : si c'est une **FK native
+/// migrée en clé technique** (`ri()`), renvoie `(table_cible, colonne_code)` —
+/// le contrat à utiliser pour **joindre sur l'id** (`cible.id = hôte.<column>`)
+/// tout en lisant/écrivant le **code** (le contrat externe). `None` pour une
+/// référence user code-keyed (patron B, colonne TEXT : lecture directe).
+///
+/// Sert au moteur de règles (`rules.rs`) pour rendre la traversée `ref` /
+/// `map_ref` **id-aware** : une FK native flippée stocke un id, donc le JOIN
+/// cible se fait sur `id` et la valeur échangée est le `code`. Les références
+/// user (patron B) restent en TEXT, lues directement.
+pub fn ref_code_contract(host_dim: &str, column: &str) -> Option<(&'static str, &'static str)> {
+    let host_table = dimension_master(host_dim)?.0;
+    REFERENCES.iter().find(|r| {
+        r.table == host_table && r.column == column && r.target_display_column.is_some()
+    }).map(|r| (r.target_table, r.target_display_column.unwrap()))
 }
 
 /// `true` si les registres des caractéristiques existent (faux au tout premier

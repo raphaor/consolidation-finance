@@ -1414,6 +1414,10 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::ensure_sous_classe_sens(&con) {
             eprintln!("   ⚠ ensure_sous_classe_sens (non bloquant) : {e}");
         }
+        // B1 : bascule dim_account.sous_classe du code vers l'id (FK native).
+        if let Err(e) = conso_engine::surrogate::migrate_account_sous_classe_to_id(&con) {
+            eprintln!("   ⚠ migrate_account_sous_classe_to_id (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");

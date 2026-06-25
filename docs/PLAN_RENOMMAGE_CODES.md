@@ -29,11 +29,15 @@ codes-renommables, branche `feat/renommage-codes`, voir
   `sat_perimeter` : aucun changement SQL dans `aggregate`/`consolidate`/`a_nouveau`,
   et `validate.rs`/`rules.rs` se **simplifient** (un JOIN `dim_perimeter_set` en
   moins, comparaison id=id directe).
-- Robustesse : migration in-place par **reconstruction de table**, **import
-  B1-aware**, **`CHECKPOINT`** anti-corruption WAL (cf. §7 + §10). Couverture
-  **loader** ajoutée (`tests/loader.rs`) : le fresh-init serveur (`load_all`)
-  n'était pas testé jusqu'ici — sa résolution code→id l'est désormais.
-- État : **129 tests unit + 38 intégration verts, golden inchangé**.
+  **`sous_classe` également** (4ᵉ) : `dim_account.sous_classe` en `id`. 1ʳᵉ **FK
+  native traversable** flippée → mécanisme **id-aware** dans `rules.rs` (cf. §3).
+  Préalable Q44 livré : `SENS_CASE` retiré du code, `sens` user-driven sur
+  `dim_sous_classe` (plus de valeur native structurante à préserver).
+- Robustesse : migration in-place par **reconstruction de table** (satellites PK),
+  **add+update+drop+rename** (`dim_account.sous_classe`, hors PK — préserve les
+  colonnes custom runtime), **import B1-aware**, **`CHECKPOINT`** anti-corruption
+  WAL (cf. §7 + §10). Couverture **loader** ajoutée (`tests/loader.rs`).
+- État : **132 tests unit + 39 intégration verts, golden inchangé**.
 
 ### Modules clés (où regarder)
 - `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) +
@@ -89,20 +93,20 @@ codes-renommables, branche `feat/renommage-codes`, voir
   dans ces contenus (ex. `methode` est dans le scope d'une règle seedée).
 
 ### Prochaine étape (au choix de l'utilisateur)
-Carte de coût des **dimensions de config** (cf. §8.3) — `rate_set` et
-`perimeter_set` sont **faites** :
-- **`ruleset`** : la plus propre des restantes (2 FK : `dim_consolidation.
-  ruleset_code` + `dim_ruleset_item.ruleset_code` ; pas de rôle-3, pas de
-  traversée native, pas de PK composite sur satellite).
+Carte de coût des **dimensions de config** (cf. §8.3) — `rate_set`,
+`perimeter_set` et `sous_classe` sont **faites** :
 - **`flow_scheme`** : vue `v_flow_behavior` + défauts en dur `RESULTAT`/`BILAN`
-  + `sat_flow_scheme_item.scheme` (PK composite).
-- **`sous_classe`** : `SENS_CASE` (server.rs, non testé) + réf. native traversable.
+  (→ retirer, Q45) + `sat_flow_scheme_item.scheme` (PK composite). Mécanisme
+  id-aware règles **réutilisable** depuis `sous_classe` (cf. §3).
+- **`ruleset`** : 5 handlers custom (`server.rs`) + `dim_ruleset_item` (PK) —
+  volumineux mais mécanique. **À faire en dernier** (avec une modif métier
+  supplémentaire, décision utilisateur).
 - **`method`** : nécessite d'abord le **rôle 3** (scope de règle `methode='globale'`).
 - **`phase` / `exercice` / devises** : sur `fact_entry` → **étape 4** (la grosse).
 
-Recommandation : `ruleset` (enchaînement le plus court, même profil que
-`rate_set`), puis `flow_scheme` / `sous_classe`. L'**étape 4 (fact_entry)** reste
-le jalon majeur (rend entités/comptes renommables).
+Recommandation : `flow_scheme` (le mécanisme id-aware est en place depuis
+`sous_classe` ; reste à data-driver les défauts Q45), puis rôle 3 → `method`, puis
+l'**étape 4 (fact_entry)** — le jalon majeur (rend entités/comptes renommables).
 
 ### Hors chantier (ne pas committer)
 Travail parallèle non-committé sur l'ergonomie des règles : `web/src/App.css`,
@@ -314,18 +318,26 @@ depuis les données existantes (jamais de reseed).
        `dim_perimeter_set` en moins). → `perimeter_set` est **renommable** (3ᵉ).
        ⚠ Effet de bord : `coefficients::perimeter_fields` captait `perimeter_set`
        (devenu INTEGER) comme opérande — corrigé en excluant les colonnes-clés.
-   - ⚠️ **À smoke-tester par l'utilisateur** : `GET /api/consolidations` et le
-     dropdown PipelinePage (server.rs non couvert par `cargo test` ; un bug
-     `variant`/String y a déjà été trouvé puis corrigé).
-   - ⏭️ **FK restantes du lot consolidation** : `exercice`, `presentation_currency`,
-     `perimeter_period`, `rate_period` (→ **réordonner** seed + loader : `dim_period`
-     et `dim_currency` avant `dim_consolidation`), `ruleset_code` (→ résoudre dans
-     le handler `run`).
-   - ⏭️ **FK entity/account** : `dim_entity.{devise_fonctionnelle (convert.rs),
-     entite_parent}`, `dim_account.{sous_classe (SENS_CASE), flow_scheme (vue
-     v_flow_behavior + défauts RESULTAT/BILAN)}`. Spécificité : ce sont des
-     **références natives traversables** (`NATIVE_MASTER_REFS`/`map_ref`) → décider
-     entre rendre la traversée id-aware ou retirer ces FK de la traversée.
+     - ✅ **Dimension `sous_classe` entièrement flippée** : `dim_account.sous_classe`
+       en `id` (migration add+update+drop+rename, hors PK — préserve les colonnes
+       custom runtime). → `sous_classe` est **renommable** (4ᵉ).
+       **Mécanisme id-aware (réutilisable)** : 1ʳᵉ FK native traversable flippée.
+       `references::ref_code_contract(host_dim, col)` détecte les FK `ri()` ;
+       `rules.rs` ajoute un `JOIN <cible> ON cible.id = hôte.<col>` (alias
+       `mdrt_<ref>` / `smdrt_<ref>`) et lit/écrit le **code** au lieu de la colonne
+       id. Sites : sélection `ref` (JOIN + opérande), destination `map_ref`
+       (JOIN + `dest_expr`). La validation reste sur la colonne code (`target_master`).
+       Préalable Q44 : `SENS_CASE` retiré, `sens` user-driven sur `dim_sous_classe`.
+    - ⚠️ **À smoke-tester par l'utilisateur** : `GET /api/consolidations` et le
+      dropdown PipelinePage (server.rs non couvert par `cargo test` ; un bug
+      `variant`/String y a déjà été trouvé puis corrigé).
+    - ⏭️ **FK restantes du lot consolidation** : `exercice`, `presentation_currency`,
+      `perimeter_period`, `rate_period` (→ **réordonner** seed + loader : `dim_period`
+      et `dim_currency` avant `dim_consolidation`), `ruleset_code` (→ résoudre dans
+      le handler `run`).
+    - ⏭️ **FK entity/account restantes** : `dim_entity.{devise_fonctionnelle,
+      entite_parent}`, `dim_account.flow_scheme`. Le mécanisme id-aware étant en
+      place, `flow_scheme` suit le même patron (après data-driving des défauts Q45).
 4. **Basculer `fact_entry` en ids** : réécrire la frontière étape A + jointures
    pipeline + reports. *La grosse étape.*
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
@@ -334,7 +346,7 @@ depuis les données existantes (jamais de reseed).
    (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
    refuse si une référence cible encore le code (liste les blocages). Effectif dès
    qu'une dimension est entièrement flippée — aujourd'hui **`variant`**,
-   **`rate_set`** et **`perimeter_set`**. S'étend
+   **`rate_set`**, **`perimeter_set`** et **`sous_classe`**. S'étend
    automatiquement aux suivantes. ⚠️ Garde basée sur le graphe ; **pas encore** de
    scan des codes enfouis dans JSON/`app_config` (rôle 3) — à ajouter avant de
    rendre renommables les dimensions présentes dans ces contenus (ex. `methode`).

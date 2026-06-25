@@ -166,7 +166,7 @@ CREATE TABLE dim_account (
     code               TEXT PRIMARY KEY,
     libelle            TEXT,
     classe             TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
-    sous_classe        TEXT,           -- référence dim_sous_classe.code
+    sous_classe        INTEGER,        -- FK dim_sous_classe.id (clé technique B1 ; contrat code)
     flow_scheme        TEXT            -- référence dim_flow_scheme.code ; NULL = défaut dérivé de la classe (cf. pipeline::convert / docs/QUESTIONS_OUVERTES.md Q32)
 );";
 

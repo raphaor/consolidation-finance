@@ -256,6 +256,32 @@ pub fn ensure_sous_classe_sens(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Migration B1 : bascule `dim_account.sous_classe` du code (TEXT) vers la clé
+/// technique (id, INTEGER) sur une base existante. Idempotent.
+///
+/// Contrairement aux satellites (PK → reconstruction), `sous_classe` est une
+/// colonne simple hors PK/UNIQUE : on utilise **add temp + update + drop +
+/// rename**, qui préserve les colonnes custom runtime (références directes
+/// patron B ajoutées par `custom_references::reapply`). La table cible
+/// `dim_sous_classe` doit déjà avoir son `id` (cf. [`ensure_ids`]).
+pub fn migrate_account_sous_classe_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_account")? {
+        return Ok(());
+    }
+    if column_is_int(con, "dim_account", "sous_classe")? {
+        return Ok(()); // déjà migrée
+    }
+    con.execute_batch(
+        "ALTER TABLE dim_account ADD COLUMN sous_classe__b1 INTEGER;
+         UPDATE dim_account SET sous_classe__b1 = (
+             SELECT sc.id FROM dim_sous_classe sc WHERE sc.code = dim_account.sous_classe
+         ) WHERE dim_account.sous_classe IS NOT NULL;
+         ALTER TABLE dim_account DROP COLUMN sous_classe;
+         ALTER TABLE dim_account RENAME COLUMN sous_classe__b1 TO sous_classe;",
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,7 +551,9 @@ mod tests {
     }
 
     /// Q44 : le sens user-driven (`dim_sous_classe.sens`) reproduit exactement
-    /// l'ancien `SENS_CASE` codé en dur, sur tous les comptes seedés.
+    /// l'ancien `SENS_CASE` codé en dur, sur tous les comptes seedés. Sous B1,
+    /// `dim_account.sous_classe` est un id — on résout le code via JOIN sur id,
+    /// puis on compare la colonne `sens` au CASE historique appliqué au code.
     #[test]
     fn sens_data_driven_equivaut_au_case_historique() {
         let con = setup();
@@ -534,13 +562,13 @@ mod tests {
             .query_row(
                 "SELECT COUNT(*) FROM (
                     SELECT a.code,
-                           COALESCE(sc.sens, '?') AS sens_new,
-                           CASE a.sous_classe
+                           sc.sens AS sens_new,
+                           CASE sc.code
                                WHEN 'passif' THEN 'C' WHEN 'produits' THEN 'C'
                                WHEN 'actif'  THEN 'D' WHEN 'charges' THEN 'D'
                                ELSE '?' END AS sens_old
                     FROM dim_account a
-                    LEFT JOIN dim_sous_classe sc ON sc.code = a.sous_classe
+                    LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
                 ) WHERE sens_new IS DISTINCT FROM sens_old",
                 [],
                 |r| r.get(0),
@@ -550,6 +578,47 @@ mod tests {
             diff, 0,
             "le sens user-driven doit coïncider avec le CASE historique sur tout le seed"
         );
+    }
+
+    #[test]
+    fn migrate_account_sous_classe_to_id_convertit_les_codes() {
+        // Base existante : dim_account avec sous_classe TEXT (codes), + une colonne
+        // custom runtime (patron B) qui doit survivre à la migration.
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_sous_classe (code, libelle, classe) VALUES
+                ('actif','Actif','bilan'),('passif','Passif','bilan');
+             ALTER TABLE dim_account ADD COLUMN compte_parent TEXT;
+             DROP TABLE dim_account;
+             CREATE TABLE dim_account (
+                code TEXT PRIMARY KEY, libelle TEXT, classe TEXT,
+                sous_classe TEXT, flow_scheme TEXT, compte_parent TEXT
+             );
+             INSERT INTO dim_account VALUES
+                ('10','Cap','bilan','passif',NULL,'ROOT'),
+                ('101','Capital','bilan','actif',NULL,'10');",
+        )
+        .unwrap();
+
+        migrate_account_sous_classe_to_id(&con).expect("migration");
+
+        let (sc, parent): (i64, String) = con
+            .query_row(
+                "SELECT sous_classe, compte_parent FROM dim_account WHERE code='101'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(parent, "10", "colonne custom préservée");
+        assert_eq!(
+            sc,
+            crate::resolve::resolve_id(&con, "dim_sous_classe", "actif")
+                .unwrap()
+                .unwrap(),
+            "sous_classe résolu en id"
+        );
+        // Idempotent.
+        migrate_account_sous_classe_to_id(&con).expect("migration #2");
     }
 
     #[test]
