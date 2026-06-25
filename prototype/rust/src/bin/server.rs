@@ -1404,6 +1404,11 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_sat_exchange_rate_fk_to_id(&con) {
             eprintln!("   ⚠ migrate_sat_exchange_rate_fk_to_id (non bloquant) : {e}");
         }
+        // Idem pour sat_perimeter.perimeter_set (PK → reconstruction). Rend la
+        // dimension `perimeter_set` entièrement flippée (renommable).
+        if let Err(e) = conso_engine::surrogate::migrate_sat_perimeter_fk_to_id(&con) {
+            eprintln!("   ⚠ migrate_sat_perimeter_fk_to_id (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");

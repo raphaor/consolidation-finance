@@ -927,7 +927,7 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute(
             "INSERT INTO sat_perimeter \
              (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ((SELECT id FROM dim_perimeter_set WHERE code = ?), ?, ?, ?, ?, ?, ?, ?)",
             params![k.0, k.1, k.2, k.3, Money(v.0), Money(v.1), v.2, v.3],
         )?;
     }

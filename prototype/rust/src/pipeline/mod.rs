@@ -64,7 +64,12 @@ pub struct ConvertParams {
     /// Devise pivot applicative (tous les taux stockés convertissent vers elle).
     pub pivot_currency: String,
     /// Jeu de périmètre du run (clé dans `sat_perimeter`).
-    pub perimeter_set: String,
+    ///
+    /// **Id technique** (chantier B1) : `sat_perimeter.perimeter_set` est stockée
+    /// en id. Contrairement à `phase`/`rate_set` (résolus en code pour leurs
+    /// consommateurs code-based), `perimeter_set` reste en id — ses seuls
+    /// consommateurs sont les jointures sur `sat_perimeter` (désormais id=id).
+    pub perimeter_set: i64,
     /// Période du périmètre (défaut = exercice).
     pub perimeter_period: String,
     /// Jeu de taux à utiliser (clé dans `sat_exchange_rate`).
@@ -93,17 +98,17 @@ impl ConvertParams {
             rate_set,
             rate_period,
             a_nouveau_consolidation_id,
-        ): (String, String, String, String, String, String, String, Option<i64>) = con.query_row(
-            // phase / perimeter_set / rate_set sont stockés en clé technique (id,
-            // chantier B1) : résolus id→code par JOIN pour que le pipeline reste
-            // code-based (jointures sur satellites en codes inchangées).
+        ): (String, String, String, i64, String, String, String, Option<i64>) = con.query_row(
+            // phase / rate_set sont stockés en clé technique (id, chantier B1)
+            // et résolus id→code par JOIN (leurs consommateurs restent code-based).
+            // perimeter_set est aussi un id mais **non résolu** : sat_perimeter est
+            // désormais id-keyed → on passe l'id directement aux jointures pipeline.
             "SELECT sc.code, c.exercice, c.presentation_currency,
-                    ps.code, c.perimeter_period,
+                    c.perimeter_set, c.perimeter_period,
                     rs.code, c.rate_period,
                     c.a_nouveau_consolidation_id
              FROM dim_consolidation c
              LEFT JOIN dim_scenario_category sc ON sc.id = c.phase
-             LEFT JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set
              LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
              WHERE c.id = ?",
             [consolidation_id],
@@ -112,7 +117,7 @@ impl ConvertParams {
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, String>(6)?,

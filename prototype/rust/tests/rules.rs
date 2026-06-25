@@ -301,7 +301,7 @@ fn coefficient_constant_et_multiplicateur() {
 fn coefficient_pct_integration_lit_le_perimetre() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND perimeter_set = 'PERIM_REEL'",
+        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL')",
         [],
     )
     .expect("set pct_integration B");
@@ -407,7 +407,7 @@ fn selection_in_et_is_not_null() {
 fn scope_filtre_sur_methode_entite() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND perimeter_set = 'PERIM_REEL'",
+        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL')",
         [],
     )
     .expect("set methode B");
@@ -664,7 +664,7 @@ fn selection_via_ref_filtre_par_reference_directe() {
 fn set_pct_n(con: &Connection, entity: &str, pct: f64) {
     con.execute(
         "UPDATE sat_perimeter SET pct_integration = ?, pct_interet = ? \
-         WHERE perimeter_set = 'PERIM_REEL' AND entity = ? AND period = '2024'",
+         WHERE perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL') AND entity = ? AND period = '2024'",
         duckdb::params![pct, pct, entity],
     )
     .unwrap_or_else(|e| panic!("set_pct_n({entity}): {e}"));
@@ -703,7 +703,7 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
         con.execute(
             "INSERT INTO sat_perimeter \
                 (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-             VALUES ('PSET_N1', ?, '2023', 'globale', ?, ?, false, false)",
+             VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), ?, '2023', 'globale', ?, ?, false, false)",
             duckdb::params![entity, pct, pct],
         )
         .expect("sat_perimeter N-1");

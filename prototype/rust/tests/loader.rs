@@ -47,3 +47,42 @@ fn load_all_resout_rate_set_code_vers_id() {
         .unwrap();
     assert_eq!(stray, 0, "rate_set est un entier sur toutes les lignes");
 }
+
+/// `load_all` charge `perimeter.csv` (où `perimeter_set` est un code) en résolvant
+/// le code vers l'id de `dim_perimeter_set` : `sat_perimeter.perimeter_set` contient
+/// l'entier. (Chantier B1 — flip `sat_perimeter.perimeter_set`.)
+#[test]
+fn load_all_resout_perimeter_set_code_vers_id() {
+    let con = Connection::open_in_memory().expect("open_in_memory");
+    create_schema(&con).expect("create_schema");
+    load_all(&con, &data_dir()).expect("load_all");
+
+    // Au moins un jeu de périmètre chargé.
+    let perim_id = con
+        .query_row::<i64, _, _>(
+            "SELECT id FROM dim_perimeter_set ORDER BY id LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    // sat_perimeter.perimeter_set contient l'id résolu, pas le code.
+    let n: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM sat_perimeter WHERE perimeter_set = ?",
+            [perim_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(n > 0, "des lignes périmètre chargées avec perimeter_set = id");
+
+    let stray: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM sat_perimeter \
+             WHERE typeof(perimeter_set) NOT IN ('INTEGER','BIGINT','HUGEINT')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stray, 0, "perimeter_set est un entier sur toutes les lignes");
+}

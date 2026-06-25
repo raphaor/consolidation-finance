@@ -273,7 +273,7 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
         INSERT INTO sat_perimeter
             (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
         SELECT
-            'PERIM_REEL', e.code, '2024',
+            (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL'), e.code, '2024',
             CASE WHEN e.rn % 7 = 0 THEN 'proportionnelle' ELSE 'globale' END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,

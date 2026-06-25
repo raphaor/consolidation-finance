@@ -81,7 +81,7 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
 
          INSERT INTO sat_perimeter
             (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
-         VALUES ('PERIM_CUR','M','2025','globale',1.0,1.0,FALSE,FALSE);",
+         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025','globale',1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed période + périmètre CUR");
     // dim_consolidation CUR : a_nouveau_consolidation_id pointe vers REEL.
@@ -218,8 +218,8 @@ fn coherence_signale_divergences_et_orphelins() {
     con.execute_batch(
         "INSERT INTO sat_perimeter
             (perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie)
-         VALUES ('PERIM_CUR','M','2025','globale',1.0,1.0,FALSE,FALSE),
-                ('PERIM_CUR','NEW','2025','globale',1.0,1.0,FALSE,FALSE);",
+         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025','globale',1.0,1.0,FALSE,FALSE),
+                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'NEW','2025','globale',1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed périmètre CUR");
 
@@ -259,9 +259,9 @@ fn coherence_ok_quand_perimetre_aligne() {
     con.execute_batch(
         "INSERT INTO sat_perimeter
             (perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie)
-         VALUES ('PERIM_CUR','M','2025','globale',1.0,1.0,FALSE,FALSE),
-                ('PERIM_CUR','A','2025','globale',1.0,1.0,FALSE,FALSE),
-                ('PERIM_CUR','B','2025','globale',1.0,1.0,FALSE,FALSE);",
+         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025','globale',1.0,1.0,FALSE,FALSE),
+                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'A','2025','globale',1.0,1.0,FALSE,FALSE),
+                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'B','2025','globale',1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed périmètre CUR");
 

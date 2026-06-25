@@ -1467,6 +1467,91 @@ mod tests {
         assert_eq!(out[0]["rate_set"], JsonValue::String("RATES".into()));
     }
 
+    /// `perimeter_set` entièrement flippée (`sat_perimeter.perimeter_set` incluse)
+    /// → renommage autorisé, intégrité de `sat_perimeter` préservée. (Chantier B1.)
+    #[test]
+    fn rename_code_perimeter_set_ok_integrite_sat() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        let perim_code: String = con
+            .query_row("SELECT code FROM dim_perimeter_set LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        let perim_id: i64 = con
+            .query_row("SELECT id FROM dim_perimeter_set LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        let before: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_perimeter WHERE perimeter_set = ?",
+                [perim_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(before > 0, "sat_perimeter peuplée par le seed");
+
+        rename_code(&con, "perimeter_sets", &perim_code, "PERIM_X").expect("perimeter_set renommable");
+
+        assert!(resolve::resolve_id(&con, "dim_perimeter_set", &perim_code)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            resolve::resolve_id(&con, "dim_perimeter_set", "PERIM_X")
+                .unwrap()
+                .unwrap(),
+            perim_id,
+            "même id après renommage"
+        );
+        let after: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_perimeter WHERE perimeter_set = ?",
+                [perim_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, before, "aucune ligne orpheline après renommage");
+    }
+
+    /// `sat_perimeter.perimeter_set` (FK migrée en clé technique) : round-trip
+    /// code↔id aux frontières du CRUD master data. (Chantier B1.)
+    #[test]
+    fn sat_perimeter_perimeter_set_round_trip() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        let stored_is_int: bool = con
+            .query_row(
+                "SELECT typeof(perimeter_set) IN ('INTEGER','BIGINT','HUGEINT') \
+                 FROM sat_perimeter LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored_is_int, "perimeter_set stocké en entier (id)");
+
+        let (perim_code, perim_id): (String, i64) = con
+            .query_row(
+                "SELECT code, id FROM dim_perimeter_set LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let written = write_db_value(
+            &con,
+            "sat_perimeter",
+            "perimeter_set",
+            &JsonValue::String(perim_code.clone()),
+        )
+        .unwrap();
+        assert!(
+            matches!(written, DbValue::BigInt(id) if id == perim_id),
+            "write_db_value('{perim_code}') doit donner l'id"
+        );
+
+        let rows = run_query(&con, "SELECT perimeter_set FROM sat_perimeter", Vec::new()).unwrap();
+        let out = translate_rows_out(&con, "sat_perimeter", rows).unwrap();
+        assert_eq!(out[0]["perimeter_set"], JsonValue::String(perim_code.into()));
+    }
+
     /// `true` si `api` apparaît dans la liste des tables navigables.
     fn table_listed(con: &Connection, api: &str) -> bool {
         // Reproduit le calcul de `list_tables` (synchrone, sans router) en

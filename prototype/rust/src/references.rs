@@ -140,12 +140,10 @@ pub const REFERENCES: &[Reference] = &[
     // dim_flow est désormais une dimension nue (code, libelle) : tout le
     // comportement (taux, écart, report, à-nouveau) vit dans sat_flow_scheme_item.
     // sat_perimeter (perimeter_set/entity/period = PK ; methode obligatoire)
-    rq(
-        "sat_perimeter",
-        "perimeter_set",
-        "dim_perimeter_set",
-        "code",
-    ),
+    // `perimeter_set` migrée en clé technique (chantier B1) : stockée en id,
+    // contrat externe = code. Rend la dimension `perimeter_set` entièrement
+    // flippée (renommable).
+    ri("sat_perimeter", "perimeter_set", "dim_perimeter_set", "code", true),
     rq("sat_perimeter", "entity", "dim_entity", "code"),
     rq("sat_perimeter", "period", "dim_period", "code"),
     rq("sat_perimeter", "methode", "dim_method", "code"),

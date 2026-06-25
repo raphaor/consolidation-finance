@@ -23,16 +23,23 @@ codes-renommables, branche `feat/renommage-codes`, voir
   reconstruction in-place), `convert.rs` joint sur l'id (résolu une fois dans la
   CTE `params`), seed/bench + import CSV + loader résolvent code→id. 2ᵉ dimension
   renommable après `variant`.
+  **`perimeter_set` également** (3ᵉ) : `sat_perimeter.perimeter_set` en `id`
+  (reconstruction). Stratégie différente — `ConvertParams.perimeter_set` passe en
+  `i64` (au lieu de code) car ses seuls consommateurs sont les jointures
+  `sat_perimeter` : aucun changement SQL dans `aggregate`/`consolidate`/`a_nouveau`,
+  et `validate.rs`/`rules.rs` se **simplifient** (un JOIN `dim_perimeter_set` en
+  moins, comparaison id=id directe).
 - Robustesse : migration in-place par **reconstruction de table**, **import
   B1-aware**, **`CHECKPOINT`** anti-corruption WAL (cf. §7 + §10). Couverture
   **loader** ajoutée (`tests/loader.rs`) : le fresh-init serveur (`load_all`)
   n'était pas testé jusqu'ici — sa résolution code→id l'est désormais.
-- État : **126 tests unit + 37 intégration verts, golden inchangé**.
+- État : **129 tests unit + 38 intégration verts, golden inchangé**.
 
 ### Modules clés (où regarder)
 - `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) +
-  `migrate_consolidation_fk_to_id` + `migrate_sat_exchange_rate_fk_to_id`
-  (reconstructions in-place). Le **registre `SURROGATE_DIMS`**.
+  `migrate_consolidation_fk_to_id` + `migrate_sat_exchange_rate_fk_to_id` +
+  `migrate_sat_perimeter_fk_to_id` (reconstructions in-place). Le **registre
+  `SURROGATE_DIMS`**.
 - `src/resolve.rs` — résolution code↔id (unitaire + cartes batch).
 - `src/references.rs` — `Reference.target_display_column` + constructeur `ri()`
   (FK « id en stockage, code en contrat »). Patron de tout flip.
@@ -69,6 +76,12 @@ codes-renommables, branche `feat/renommage-codes`, voir
   `validate_csv_references` doivent être rendus ri()-aware à la main. Le validateur
   compare le CSV à la **colonne de contrat** (`target_display_column` = code),
   pas à la colonne de stockage (`id`) — sinon tout est marqué invalide.
+- **Colonne-clé `INTEGER` captée comme « mesure »** : `coefficients::perimeter_fields`
+  whiteliste les colonnes numériques de `sat_perimeter`. Sous B1, `perimeter_set`
+  est `INTEGER` → il serait capté comme faux opérande de coefficient. **Fix** :
+  exclure les colonnes listées dans le graphe `references_for("sat_perimeter")`.
+  Piège générique : toute colonne FK passant `TEXT→INTEGER` peut être avalée par
+  un filtre « colonnes numériques » data-driven.
 - **Rôle 3 (codes dans le JSON)** : non traité. La garde de `rename_code`
   s'appuie sur le **graphe de références uniquement** — pas encore de scan des
   codes dans `dim_rule.definition` / `dim_coefficient.expression` / indicateurs /
@@ -76,18 +89,20 @@ codes-renommables, branche `feat/renommage-codes`, voir
   dans ces contenus (ex. `methode` est dans le scope d'une règle seedée).
 
 ### Prochaine étape (au choix de l'utilisateur)
-Carte de coût des **dimensions de config** (cf. §8.3) — `rate_set` est **faite** :
-- **`perimeter_set`** : la plus propre des restantes (pas de rôle-3, pas de
-  traversée native). Coût : jointures pipeline (`aggregate`/`consolidate`/
-  `a_nouveau`/`validate`/`rules`) + rebuild `sat_perimeter` (PK).
+Carte de coût des **dimensions de config** (cf. §8.3) — `rate_set` et
+`perimeter_set` sont **faites** :
+- **`ruleset`** : la plus propre des restantes (2 FK : `dim_consolidation.
+  ruleset_code` + `dim_ruleset_item.ruleset_code` ; pas de rôle-3, pas de
+  traversée native, pas de PK composite sur satellite).
+- **`flow_scheme`** : vue `v_flow_behavior` + défauts en dur `RESULTAT`/`BILAN`
+  + `sat_flow_scheme_item.scheme` (PK composite).
+- **`sous_classe`** : `SENS_CASE` (server.rs, non testé) + réf. native traversable.
 - **`method`** : nécessite d'abord le **rôle 3** (scope de règle `methode='globale'`).
-- **`sous_classe`** : `SENS_CASE` (server.rs, non testé) + réf. native.
-- **`flow_scheme`** : vue `v_flow_behavior` + défauts en dur `RESULTAT`/`BILAN`.
 - **`phase` / `exercice` / devises** : sur `fact_entry` → **étape 4** (la grosse).
 
-Recommandation : `perimeter_set` (suit `rate_set` comme prochaine dimension « sans
-rôle-3 ni traversée native »), OU attaquer **l'étape 4 (fact_entry)** si
-l'objectif est de rendre entités/comptes renommables.
+Recommandation : `ruleset` (enchaînement le plus court, même profil que
+`rate_set`), puis `flow_scheme` / `sous_classe`. L'**étape 4 (fact_entry)** reste
+le jalon majeur (rend entités/comptes renommables).
 
 ### Hors chantier (ne pas committer)
 Travail parallèle non-committé sur l'ergonomie des règles : `web/src/App.css`,
@@ -289,7 +304,16 @@ depuis les données existantes (jamais de reseed).
     - ✅ **Dimension `rate_set` entièrement flippée** : `sat_exchange_rate.rate_set`
       (PK → `migrate_sat_exchange_rate_fk_to_id`, reconstruction) + `convert.rs`
       (jointures sur id, résolu dans la CTE `params`) + import CSV (`import_rates`)
-      + loader. → `rate_set` est **renommable** (2ᵉ dimension après `variant`).
+       + loader. → `rate_set` est **renommable** (2ᵉ dimension après `variant`).
+     - ✅ **Dimension `perimeter_set` entièrement flippée** : `sat_perimeter.
+       perimeter_set` (PK → `migrate_sat_perimeter_fk_to_id`, reconstruction).
+       Variante stratégique : `ConvertParams.perimeter_set` basculé en `i64`
+       (au lieu de code) — ses consommateurs (`aggregate`/`consolidate`/
+       `a_nouveau`) joignent `sat_perimeter` directement, **sans modif SQL** ;
+       `validate.rs`/`rules.rs` se simplifient (sous-requête id=id, un JOIN
+       `dim_perimeter_set` en moins). → `perimeter_set` est **renommable** (3ᵉ).
+       ⚠ Effet de bord : `coefficients::perimeter_fields` captait `perimeter_set`
+       (devenu INTEGER) comme opérande — corrigé en excluant les colonnes-clés.
    - ⚠️ **À smoke-tester par l'utilisateur** : `GET /api/consolidations` et le
      dropdown PipelinePage (server.rs non couvert par `cargo test` ; un bug
      `variant`/String y a déjà été trouvé puis corrigé).
@@ -309,8 +333,8 @@ depuis les données existantes (jamais de reseed).
 7. ✅ **Endpoint `rename` + UI** (livré en avance) : `POST /api/md/{table}/rename`
    (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
    refuse si une référence cible encore le code (liste les blocages). Effectif dès
-   qu'une dimension est entièrement flippée — aujourd'hui **`variant`** et
-   **`rate_set`** (sat_exchange_rate incluse). S'étend
+   qu'une dimension est entièrement flippée — aujourd'hui **`variant`**,
+   **`rate_set`** et **`perimeter_set`**. S'étend
    automatiquement aux suivantes. ⚠️ Garde basée sur le graphe ; **pas encore** de
    scan des codes enfouis dans JSON/`app_config` (rôle 3) — à ajouter avant de
    rendre renommables les dimensions présentes dans ces contenus (ex. `methode`).

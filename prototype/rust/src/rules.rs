@@ -1059,7 +1059,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_ent\n  \
                 ON p_ent.entity = e.entity\n \
-                AND p_ent.perimeter_set = (SELECT ps.code FROM dim_consolidation c JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set WHERE c.id = e.consolidation_id)\n \
+                AND p_ent.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c WHERE c.id = e.consolidation_id)\n \
                 AND p_ent.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "entity") {
@@ -1073,7 +1073,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_part\n  \
                 ON p_part.entity = e.partner\n \
-                AND p_part.perimeter_set = (SELECT ps.code FROM dim_consolidation c JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set WHERE c.id = e.consolidation_id)\n \
+                AND p_part.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c WHERE c.id = e.consolidation_id)\n \
                 AND p_part.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "partner") {
@@ -1087,7 +1087,7 @@ fn exec_operation(
         joins.push_str(
             "\nJOIN sat_perimeter p_share\n  \
                 ON p_share.entity = e.share\n \
-                AND p_share.perimeter_set = (SELECT ps.code FROM dim_consolidation c JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set WHERE c.id = e.consolidation_id)\n \
+                AND p_share.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c WHERE c.id = e.consolidation_id)\n \
                 AND p_share.period = e.entry_period",
         );
         for c in scope.iter().filter(|c| c.target == "share") {
@@ -1123,9 +1123,8 @@ fn exec_operation(
                 "\nLEFT JOIN sat_perimeter {alias}\n  \
                     ON {alias}.entity = e.{key_col}\n \
                     AND {alias}.perimeter_set = (\
-                        SELECT ps.code FROM dim_consolidation s_cur \
+                        SELECT s_an.perimeter_set FROM dim_consolidation s_cur \
                         JOIN dim_consolidation s_an ON s_an.id = s_cur.a_nouveau_consolidation_id \
-                        JOIN dim_perimeter_set ps ON ps.id = s_an.perimeter_set \
                         WHERE s_cur.id = e.consolidation_id)\n \
                     AND {alias}.period = (\
                         SELECT s_an.exercice FROM dim_consolidation s_cur \

@@ -293,7 +293,7 @@ CREATE TABLE dim_method (
 /// (entrée / sortie) pour l'exercice courant.
 pub const DDL_SAT_PERIMETER: &str = "\
 CREATE TABLE sat_perimeter (
-    perimeter_set   TEXT,          -- FK dim_perimeter_set : version du périmètre (cf. Q35)
+    perimeter_set   INTEGER,       -- FK dim_perimeter_set.id (clé technique B1 ; contrat code)
     entity          TEXT,
     period          TEXT,          -- correspond au Entry_period (exercice clôturé)
     methode         TEXT,          -- FK dim_method.code (intégrité via references.rs, pas de CHECK : les méthodes sont pilotables)

@@ -203,6 +203,38 @@ pub fn migrate_sat_exchange_rate_fk_to_id(con: &Connection) -> duckdb::Result<()
     Ok(())
 }
 
+/// Migration in-place de `sat_perimeter.perimeter_set` (option A, chantier B1)
+/// sur une base **existante** : convertit la colonne du stockage **code (TEXT)**
+/// vers la **clé technique (id, INTEGER)**. Idempotent (no-op si déjà entier).
+///
+/// `perimeter_set` est dans la PK `(perimeter_set, entity, period)` →
+/// **reconstruction de table** (cf. [`migrate_consolidation_fk_to_id`]). À appeler
+/// au démarrage serveur **après** [`ensure_ids`] (`dim_perimeter_set` doit avoir
+/// son `id`). Rend la dimension `perimeter_set` entièrement flippée (renommable).
+pub fn migrate_sat_perimeter_fk_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "sat_perimeter")? {
+        return Ok(());
+    }
+    if column_is_int(con, "sat_perimeter", "perimeter_set")? {
+        return Ok(()); // déjà migrée
+    }
+    let create_mig = crate::schema::DDL_SAT_PERIMETER
+        .replace("sat_perimeter (", "sat_perimeter__mig (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         INSERT INTO sat_perimeter__mig
+            (perimeter_set, entity, period, methode,
+             pct_interet, pct_integration, entree, sortie)
+         SELECT (SELECT p.id FROM dim_perimeter_set p WHERE p.code = s.perimeter_set),
+                s.entity, s.period, s.methode,
+                s.pct_interet, s.pct_integration, s.entree, s.sortie
+         FROM sat_perimeter s;
+         DROP TABLE sat_perimeter;
+         ALTER TABLE sat_perimeter__mig RENAME TO sat_perimeter;",
+    ))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,6 +425,49 @@ mod tests {
 
         // Idempotent : second passage no-op (rate_set déjà entier).
         migrate_sat_exchange_rate_fk_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn migrate_sat_perimeter_fk_to_id_convertit_les_codes_en_id() {
+        // Simule une base existante : sat_perimeter avec perimeter_set en TEXT.
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL','Périmètre');",
+        )
+        .unwrap();
+
+        con.execute_batch(
+            "DROP TABLE sat_perimeter;
+             CREATE TABLE sat_perimeter (
+                perimeter_set TEXT, entity TEXT, period TEXT, methode TEXT,
+                pct_interet DECIMAL(10,4), pct_integration DECIMAL(10,4),
+                entree BOOLEAN DEFAULT FALSE, sortie BOOLEAN DEFAULT FALSE,
+                PRIMARY KEY (perimeter_set, entity, period)
+             );
+             INSERT INTO sat_perimeter VALUES
+                ('PERIM_REEL','E1','2024','globale',1.0,1.0,FALSE,FALSE);",
+        )
+        .unwrap();
+
+        migrate_sat_perimeter_fk_to_id(&con).expect("migration");
+
+        let (perim_id, entity): (i64, String) = con
+            .query_row(
+                "SELECT perimeter_set, entity FROM sat_perimeter",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("ligne présente après migration");
+        assert_eq!(entity, "E1", "autres colonnes préservées");
+        assert_eq!(
+            perim_id,
+            crate::resolve::resolve_id(&con, "dim_perimeter_set", "PERIM_REEL")
+                .unwrap()
+                .unwrap()
+        );
+
+        // Idempotent.
+        migrate_sat_perimeter_fk_to_id(&con).expect("migration #2");
     }
 
     #[test]
