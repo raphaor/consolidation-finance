@@ -678,5 +678,9 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
     //    Idempotent (INSERT OR IGNORE) ; les coefficients utilisateur survivent.
     crate::coefficients::seed_builtins(con)?;
 
+    // 9. Doter chaque dimension d'un `id` technique (chantier B1, étape 1).
+    //    Idempotent ; non-breaking (les `id` ne sont pas encore consommés).
+    crate::surrogate::ensure_ids(con)?;
+
     Ok(())
 }

@@ -1354,6 +1354,12 @@ async fn main() {
         if let Err(e) = indicators::ensure_schema(&con) {
             eprintln!("   ⚠ ensure_schema indicateurs (non bloquant) : {e}");
         }
+        // Migration in-place (chantier B1, étape 1) : dote chaque dimension d'un
+        // `id` technique en backfillant les lignes existantes, sans reset ni
+        // perte des objets présents.
+        if let Err(e) = conso_engine::surrogate::ensure_ids(&con) {
+            eprintln!("   ⚠ ensure_ids surrogate (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");

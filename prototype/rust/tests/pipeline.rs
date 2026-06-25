@@ -573,7 +573,7 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
             ('F20','Variation'),('F99','Clôture'),
             ('F10','Intermédiaire'),('F88','Clôture intermédiaire');
 
-         INSERT INTO dim_flow_scheme VALUES ('TEST','Schéma de test');
+         INSERT INTO dim_flow_scheme (code, libelle) VALUES ('TEST','Schéma de test');
          INSERT INTO sat_flow_scheme_item
             (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) VALUES
             ('TEST','F20','avg',NULL,'F99',NULL),
@@ -590,7 +590,7 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
 
     // dim_nature minimale pour le test (2 codes : liasse + ajustement).
     con.execute_batch(
-        "INSERT INTO dim_nature VALUES
+        "INSERT INTO dim_nature (code, libelle, rules) VALUES
             ('0LIASS','Liasse',NULL),
             ('1AJUST','Ajustement',NULL);",
     )
@@ -887,7 +887,7 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
 
     // Natures de test pour les préfixes 2/3/4 (staging cible, cf. A_NOUVEAU §4 bis).
     con.execute_batch(
-        "INSERT INTO dim_nature VALUES
+        "INSERT INTO dim_nature (code, libelle, rules) VALUES
             ('2TEST','Test converti (fonctionnel)',NULL),
             ('3TEST','Test consolidé avant %',NULL),
             ('4TEST','Test consolidé après %',NULL);",

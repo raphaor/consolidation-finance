@@ -159,16 +159,16 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
         -- Config applicative + nouvelles dimensions référentielles (SPEC v2).
         INSERT INTO app_config VALUES ('pivot_currency', 'EUR');
 
-        INSERT INTO dim_scenario_category VALUES
+        INSERT INTO dim_scenario_category (code, libelle) VALUES
             ('REEL', 'Réel'),
             ('BUDGET', 'Budget'),
             ('PREV', 'Prévision');
 
-        INSERT INTO dim_variant VALUES ('BASE', 'Base');
+        INSERT INTO dim_variant (code, libelle) VALUES ('BASE', 'Base');
 
-        INSERT INTO dim_rate_set VALUES ('RATES', 'Taux réels');
+        INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES', 'Taux réels');
 
-        INSERT INTO dim_perimeter_set VALUES ('PERIM_REEL', 'Périmètre réel 2024');
+        INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL', 'Périmètre réel 2024');
 
         -- dim_consolidation : objet composite (PK technique auto `id`). L'id est
         -- alloué par nextval (déterministe 1 sur base fraîche) — `load_params(&con, 1)`
@@ -181,7 +181,7 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             (nextval('seq_consolidation'), 'Réel', 'REEL', '2024', 'PERIM_REEL', 'BASE', 'EUR',
              '2024', 'RATES', '2024', NULL, NULL, 'ouvert');
 
-        INSERT INTO dim_period VALUES
+        INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut) VALUES
             ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
             ('2024','Exercice 2024','exercice','2024-01-01','2024-12-31','ouvert');
 
@@ -224,7 +224,7 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             ('F98','Sortie périmètre'),
             ('F99','Clôture');
 
-        INSERT INTO dim_flow_scheme VALUES
+        INSERT INTO dim_flow_scheme (code, libelle) VALUES
             ('BILAN','Schéma bilan'),
             ('RESULTAT','Schéma résultat');
 
@@ -246,14 +246,14 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             ('RESULTAT','F98','avg',NULL,'F99',NULL),
             ('RESULTAT','F99','avg',NULL,'F99',NULL);
 
-        INSERT INTO dim_currency VALUES
+        INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES
             ('EUR','Euro',2),
             ('USD','Dollar US',2),
             ('GBP','Livre sterling',2),
             ('CHF','Franc suisse',2),
             ('JPY','Yen',0);
 
-        INSERT INTO dim_nature VALUES
+        INSERT INTO dim_nature (code, libelle, rules) VALUES
             ('0LIASS','Liasse',NULL),
             ('1AJUST','Ajustement',NULL);
         "

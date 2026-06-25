@@ -58,6 +58,7 @@ pub mod rules;
 pub mod schema;
 pub mod seed;
 pub mod state;
+pub mod surrogate;
 pub mod validate;
 pub mod value_lists;
 

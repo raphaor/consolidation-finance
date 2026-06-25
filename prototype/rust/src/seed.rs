@@ -808,19 +808,25 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     // --- Nouvelles dimensions référentielles (avant dim_scenario) ---
     for c in SCENARIO_CATEGORIES {
         con.execute(
-            "INSERT INTO dim_scenario_category VALUES (?, ?)",
+            "INSERT INTO dim_scenario_category (code, libelle) VALUES (?, ?)",
             params![c.0, c.1],
         )?;
     }
     for v in VARIANTS {
-        con.execute("INSERT INTO dim_variant VALUES (?, ?)", params![v.0, v.1])?;
+        con.execute(
+            "INSERT INTO dim_variant (code, libelle) VALUES (?, ?)",
+            params![v.0, v.1],
+        )?;
     }
     for r in RATE_SETS {
-        con.execute("INSERT INTO dim_rate_set VALUES (?, ?)", params![r.0, r.1])?;
+        con.execute(
+            "INSERT INTO dim_rate_set (code, libelle) VALUES (?, ?)",
+            params![r.0, r.1],
+        )?;
     }
     for ps in PERIMETER_SETS {
         con.execute(
-            "INSERT INTO dim_perimeter_set VALUES (?, ?)",
+            "INSERT INTO dim_perimeter_set (code, libelle) VALUES (?, ?)",
             params![ps.0, ps.1],
         )?;
     }
@@ -840,19 +846,23 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for e in ENTITIES {
         con.execute(
-            "INSERT INTO dim_entity VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO dim_entity \
+             (code, libelle, devise_fonctionnelle, entite_parent, statut) \
+             VALUES (?, ?, ?, ?, ?)",
             params![e.0, e.1, e.2, e.3, e.4],
         )?;
     }
     for p in PERIODS {
         con.execute(
-            "INSERT INTO dim_period VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO dim_period \
+             (code, libelle, type, date_debut, date_fin, statut) \
+             VALUES (?, ?, ?, ?, ?, ?)",
             params![p.0, p.1, p.2, p.3, p.4, p.5],
         )?;
     }
     for sc in SOUS_CLASSES {
         con.execute(
-            "INSERT INTO dim_sous_classe VALUES (?, ?, ?)",
+            "INSERT INTO dim_sous_classe (code, libelle, classe) VALUES (?, ?, ?)",
             params![sc.0, sc.1, sc.2],
         )?;
     }
@@ -873,7 +883,7 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for s in FLOW_SCHEMES {
         con.execute(
-            "INSERT INTO dim_flow_scheme VALUES (?, ?)",
+            "INSERT INTO dim_flow_scheme (code, libelle) VALUES (?, ?)",
             params![s.0, s.1],
         )?;
     }
@@ -887,19 +897,19 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     }
     for c in CURRENCIES {
         con.execute(
-            "INSERT INTO dim_currency VALUES (?, ?, ?)",
+            "INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES (?, ?, ?)",
             params![c.0, c.1, c.2],
         )?;
     }
     for n in NATURES {
         con.execute(
-            "INSERT INTO dim_nature VALUES (?, ?, ?)",
+            "INSERT INTO dim_nature (code, libelle, rules) VALUES (?, ?, ?)",
             params![n.0, n.1, n.2],
         )?;
     }
     for m in METHODS {
         con.execute(
-            "INSERT INTO dim_method VALUES (?, ?, ?)",
+            "INSERT INTO dim_method (code, libelle, consolidated) VALUES (?, ?, ?)",
             params![m.0, m.1, m.2],
         )?;
     }
