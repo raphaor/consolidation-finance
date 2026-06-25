@@ -1,11 +1,83 @@
 # Plan d'action — Codes renommables via clés techniques (option B1)
 
-> Statut : **plan validé, non implémenté** (branche `feat/renommage-codes`).
-> Décision prise : **option B1** — chaque objet gagne un `id` technique immuable ;
-> le `code` devient un libellé mutable. Voir §2 pour l'argumentaire A vs B.
-> Contrainte forte : la bascule se fait par **migration in-place qui traduit les
-> objets existants** (on ne repart **pas** du seed par défaut ; on préserve la
-> base courante et les éditions utilisateur). Voir §7.
+> Statut : **en cours** (branche `feat/renommage-codes`).
+> Décision : **option B1** — chaque objet gagne un `id` technique immuable ;
+> le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
+> in-place en §7.
+
+## 0. Reprise rapide (dernière session : 2026-06-25)
+
+**Point de départ d'une prochaine session.** Donner : « Reprends le chantier
+codes-renommables, branche `feat/renommage-codes`, voir
+`docs/PLAN_RENOMMAGE_CODES.md` §0 ».
+
+### Où on en est
+- **Le renommage fonctionne de bout en bout** (validé en UI : `variant` renommé
+  en `V1`). C'est la preuve de l'approche : `POST /api/md/{table}/rename`, gardé
+  par une vérification de sûreté, + bouton « Renommer » dans Master Data.
+- Fait : **étapes 0, 1, 2** (golden / `id` partout / résolution code↔id),
+  **étape 3 partielle** (FK `dim_consolidation` flippées : `variant`, `phase`,
+  `perimeter_set`, `rate_set`), **étape 7** (renommage, livré en avance).
+- Robustesse : migration in-place par **reconstruction de table**, **import
+  B1-aware**, **`CHECKPOINT`** anti-corruption WAL (cf. §7 + §10).
+- État : **123 tests unit + 36 intégration verts, golden inchangé**.
+
+### Modules clés (où regarder)
+- `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) + `migrate_consolidation_fk_to_id`
+  (reconstruction in-place). Le **registre `SURROGATE_DIMS`**.
+- `src/resolve.rs` — résolution code↔id (unitaire + cartes batch).
+- `src/references.rs` — `Reference.target_display_column` + constructeur `ri()`
+  (FK « id en stockage, code en contrat »). Patron de tout flip.
+- `src/masterdata.rs` — traduction code↔id aux frontières (`write_db_value`,
+  `translate_rows_out`, `validate_references`, `get_references`, `table_schema`)
+  + **`rename_code`** (+ route `/rename`).
+- `src/export.rs` — `import_db_value` (import B1-aware).
+
+### Patron pour flipper une FK (réutilisable)
+1. `references.rs` : passer la réf. en `ri(table, col, target, display, required)`.
+2. `schema.rs` : colonne `TEXT → INTEGER`.
+3. `seed.rs` / `bench.rs` / tests : `(SELECT id FROM <target> WHERE code = ?)`.
+4. Loader : automatique (build_insert_sql lit `ri()`).
+5. **Lecteurs internes** : résoudre id→code (ou joindre sur id) — pipeline,
+   reports, `validate.rs`, `rules.rs`, et **`server.rs`** (⚠ voir gotchas).
+6. **Migration in-place** : reconstruction si la colonne est dans une PK/UNIQUE
+   (cf. `migrate_consolidation_fk_to_id`), sinon add temp + update + drop + rename.
+7. `cargo test` (golden = filet) **+ smoke-test serveur par l'utilisateur**.
+
+### Gotchas (durement appris)
+- **`server.rs` n'est PAS couvert par `cargo test`** : chaque flip touchant un
+  endpoint HTTP (`list_consolidations`, handler `run`, `/api/bilan`,
+  `/api/entries`) doit être **smoke-testé par l'utilisateur**. Deux bugs runtime
+  y ont échappé aux tests verts.
+- **WAL DuckDB** : le DDL de migration (`ALTER … SET DEFAULT nextval`, CREATE/
+  RENAME) n'est pas toujours rejouable → un arrêt non propre rend la base
+  illisible. Toujours `CHECKPOINT` après migration/init/import/reset. Récup d'une
+  base cassée : supprimer le `.duckdb.wal`.
+- **`ALTER … SET DATA TYPE … USING (sous-requête)` est interdit** par DuckDB →
+  migration par reconstruction de table.
+- **Rôle 3 (codes dans le JSON)** : non traité. La garde de `rename_code`
+  s'appuie sur le **graphe de références uniquement** — pas encore de scan des
+  codes dans `dim_rule.definition` / `dim_coefficient.expression` / indicateurs /
+  `app_config`. À faire **avant** de rendre renommables les dimensions citées
+  dans ces contenus (ex. `methode` est dans le scope d'une règle seedée).
+
+### Prochaine étape (au choix de l'utilisateur)
+Carte de coût des **dimensions de config** (cf. §8.3) :
+- **`rate_set`** : la plus propre (pas de rôle-3, pas de traversée native). Coût :
+  chirurgie `convert.rs` (jointures de taux) + rebuild `sat_exchange_rate` (PK).
+- **`perimeter_set`** : jointures pipeline (`aggregate`/`consolidate`/`a_nouveau`/
+  `validate`/`rules`) + rebuild `sat_perimeter`.
+- **`method`** : nécessite d'abord le **rôle 3** (scope de règle `methode='globale'`).
+- **`sous_classe`** : `SENS_CASE` (server.rs, non testé) + réf. native.
+- **`flow_scheme`** : vue `v_flow_behavior` + défauts en dur `RESULTAT`/`BILAN`.
+- **`phase` / `exercice` / devises** : sur `fact_entry` → **étape 4** (la grosse).
+
+Recommandation : `rate_set` pour enchaîner vite et sûrement, OU attaquer
+**l'étape 4 (fact_entry)** si l'objectif est de rendre entités/comptes renommables.
+
+### Hors chantier (ne pas committer)
+Travail parallèle non-committé sur l'ergonomie des règles : `web/src/App.css`,
+`web/src/pages/RulesPage.tsx`. **Laisser tel quel.**
 
 ## 1. Le problème
 
