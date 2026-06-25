@@ -188,14 +188,23 @@ depuis les données existantes (jamais de reseed).
    PK sur `id` viendra à l'étape 3/4.
 2. ✅ **Couche de résolution** code↔id (`src/resolve.rs` : `resolve_id`/`code_of`
    + cartes batch) + tests.
-3. **Basculer les FK dim→dim** vers `_id` (petit ensemble : `entite_parent`,
-   `sous_classe`, `flow_scheme`, FK de `dim_consolidation`…). Renommage déjà
-   gratuit pour celles-là. ⬅️ *prochaine étape — début des réécritures invasives*
-   - ⚠️ ces FK sont **couplées** : `account.flow_scheme` est joint dans la vue
-     `v_flow_behavior` à `sat_flow_scheme_item.scheme` (+ défauts en dur
-     `RESULTAT`/`BILAN`) ; `account.sous_classe` pilote `SENS_CASE` (report.rs) ;
-     toutes sont dans `references.rs` + le seed des FK natives. À basculer de
-     façon **coordonnée**, golden + suite complète comme filet à chaque cut.
+3. **Basculer les FK dim→dim** vers l'`id`. ⬅️ *en cours — mécanisme générique
+   livré, flips FK par FK*
+   - ✅ **Mécanisme option A** (contrat externe = code, stockage = id) : champ
+     `references::Reference::target_display_column` + constructeur `ri()` ;
+     traduction code↔id aux frontières dans `masterdata` (`write_db_value`,
+     `translate_rows_out`, validation, dropdowns, health) ; résolution à l'import
+     (`loader`). Une FK flippée = `ri()` + colonne `TEXT→INTEGER` + résolution au
+     seed/loader + (si lue par un consommateur interne) résolution là-bas.
+   - ✅ **1ʳᵉ FK flippée** : `dim_consolidation.variant` (non lue par le pipeline →
+     pilote idéal). Round-trip code↔id testé.
+   - ⏭️ **FK restantes** : `dim_consolidation.{phase, exercice, perimeter_set,
+     presentation_currency, perimeter_period, rate_set, rate_period, ruleset_code}`
+     (→ `load_params` doit résoudre id→code, le pipeline joint les satellites en
+     code) ; `dim_entity.{devise_fonctionnelle (convert.rs), entite_parent}` ;
+     `dim_account.{sous_classe (SENS_CASE), flow_scheme (vue v_flow_behavior +
+     défauts RESULTAT/BILAN)}`. Chacune : flip + résolution dans son lecteur,
+     golden + suite comme filet.
 4. **Basculer `fact_entry` en ids** : réécrire la frontière étape A + jointures
    pipeline + reports. *La grosse étape.*
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
