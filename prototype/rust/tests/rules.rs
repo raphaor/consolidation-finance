@@ -679,7 +679,8 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2023', 'REEL', '2023', 'PSET_N1', 'BASE', 'EUR', \
+         VALUES (nextval('seq_consolidation'), 'Réel 2023', 'REEL', '2023', 'PSET_N1', \
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
                  '2023', 'RATES', '2023', NULL, NULL, 'verrouillé')",
         [],
     )

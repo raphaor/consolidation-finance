@@ -27,7 +27,87 @@ use serde_json::{Map, Value as JsonValue};
 use std::sync::Arc;
 
 use crate::references;
+use crate::resolve;
 use crate::state::{db_err, lock_con, AppError, AppState};
+
+// ─────────── FK à contrat code (option A, chantier B1) — traduction code↔id ──────
+//
+// Une FK migrée en clé technique stocke un `id` mais expose un **code** à l'API
+// (cf. `references::Reference::target_display_column`). Ces helpers traduisent
+// code→id à l'écriture (create/update/loader) et id→code à la lecture (list/fetch),
+// pour que l'UI et les CSV restent inchangés (ils manipulent des codes).
+
+/// Cible `(table, colonne_code)` si `(sql_name, col)` est une FK à contrat code.
+fn code_contract_fk(
+    con: &duckdb::Connection,
+    sql_name: &str,
+    col: &str,
+) -> Option<(String, String)> {
+    references::all_references(con)
+        .into_iter()
+        .find(|r| r.table == sql_name && r.column == col && r.target_display_column.is_some())
+        .map(|r| (r.target_table, r.target_display_column.unwrap()))
+}
+
+/// Valeur à **écrire** pour une colonne : pour une FK à contrat code, résout le
+/// code entrant en `id` (et le rejette s'il n'existe pas) ; sinon, conversion
+/// JSON→DB directe. Vide/NULL ⇒ `NULL`.
+fn write_db_value(
+    con: &duckdb::Connection,
+    sql_name: &str,
+    col: &str,
+    v: &JsonValue,
+) -> Result<DbValue, AppError> {
+    if let Some((target, _display)) = code_contract_fk(con, sql_name, col) {
+        return match v {
+            JsonValue::String(s) if !s.is_empty() => {
+                let id = resolve::resolve_id(con, &target, s)
+                    .map_err(db_err)?
+                    .ok_or_else(|| {
+                        AppError::bad_request(format!(
+                            "référence invalide : {col} = '{s}' (absent de {target})"
+                        ))
+                    })?;
+                Ok(DbValue::BigInt(id))
+            }
+            _ => Ok(DbValue::Null),
+        };
+    }
+    Ok(json_to_db_value(v))
+}
+
+/// Re-projette les colonnes FK à contrat code des lignes lues : `id` (stocké) →
+/// `code` (affiché). L'API renvoie donc des codes, l'UI reste inchangée.
+fn translate_rows_out(
+    con: &duckdb::Connection,
+    sql_name: &str,
+    rows: Vec<JsonValue>,
+) -> Result<Vec<JsonValue>, AppError> {
+    let fks: Vec<(String, String)> = references::all_references(con)
+        .into_iter()
+        .filter(|r| r.table == sql_name && r.target_display_column.is_some())
+        .map(|r| (r.column, r.target_table))
+        .collect();
+    if fks.is_empty() {
+        return Ok(rows);
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for mut row in rows {
+        if let Some(obj) = row.as_object_mut() {
+            for (col, target) in &fks {
+                if let Some(id) = obj.get(col).and_then(JsonValue::as_i64) {
+                    let code = resolve::code_of(con, target, id).map_err(db_err)?;
+                    obj.insert(
+                        col.clone(),
+                        code.map(JsonValue::String).unwrap_or(JsonValue::Null),
+                    );
+                }
+            }
+        }
+        out.push(row);
+    }
+    Ok(out)
+}
 
 struct TableDef {
     api_name: &'static str,
@@ -459,7 +539,8 @@ fn select_all(def: &OwnedTableDef, con: &duckdb::Connection) -> Result<Vec<JsonV
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!("SELECT {cols} FROM {}", def.sql_name);
-    run_query(con, &sql, Vec::new())
+    let rows = run_query(con, &sql, Vec::new())?;
+    translate_rows_out(con, &def.sql_name, rows)
 }
 
 fn fetch_one(
@@ -482,6 +563,7 @@ fn fetch_one(
     let sql = format!("SELECT {cols} FROM {} WHERE {where_clause}", def.sql_name);
     let params: Vec<DbValue> = pk_vals.iter().map(|(_, v)| json_to_db_value(v)).collect();
     let rows = run_query(con, &sql, params)?;
+    let rows = translate_rows_out(con, &def.sql_name, rows)?;
     Ok(rows.into_iter().next())
 }
 
@@ -545,10 +627,13 @@ fn validate_references(
                 }
             }
         }
-        if !references::value_exists(con, &r.target_table, &r.target_column, s).map_err(db_err)? {
+        // FK à contrat code : on valide le **code** entrant contre la colonne
+        // d'affichage (code) de la cible, même si le stockage est en `id`.
+        let check_col = r.code_contract().unwrap_or(r.target_column.as_str());
+        if !references::value_exists(con, &r.target_table, check_col, s).map_err(db_err)? {
             bad.push(format!(
                 "{} = '{}' (absent de {}.{})",
-                r.column, s, r.target_table, r.target_column
+                r.column, s, r.target_table, check_col
             ));
         }
     }
@@ -636,7 +721,7 @@ async fn create(
                 }
                 if let Some(v) = obj.get(col.as_str()) {
                     cols.push(quote_ident(col));
-                    vals.push(json_to_db_value(v));
+                    vals.push(write_db_value(&con, &def.sql_name, col, v)?);
                 }
             }
             if cols.is_empty() {
@@ -665,7 +750,7 @@ async fn create(
             for col in &def.columns {
                 if let Some(v) = obj.get(col.as_str()) {
                     cols.push(quote_ident(col));
-                    vals.push(json_to_db_value(v));
+                    vals.push(write_db_value(&con, &def.sql_name, col, v)?);
                 }
             }
             if cols.is_empty() {
@@ -719,7 +804,7 @@ async fn update(
             }
             if let Some(v) = obj.get(col.as_str()) {
                 sets.push(format!("{} = ?", quote_ident(col)));
-                vals.push(json_to_db_value(v));
+                vals.push(write_db_value(&con, &def.sql_name, col, v)?);
             }
         }
         if !sets.is_empty() {
@@ -914,7 +999,13 @@ async fn table_schema(
             let pk = def.pk.iter().any(|p| p == name);
             let fk = refs.iter().find(|r| r.column == *name).map(|r| FkTarget {
                 table: sql_to_api(&r.target_table),
-                column: r.target_column.clone(),
+                // FK à contrat code : on expose la colonne d'affichage (code) afin
+                // que le dropdown propose/soumette des codes, même si le stockage
+                // est en `id` (traduit côté serveur).
+                column: r
+                    .code_contract()
+                    .map(String::from)
+                    .unwrap_or_else(|| r.target_column.clone()),
                 required: r.required,
             });
             ColumnSchema {
@@ -1041,8 +1132,16 @@ async fn get_data_health(
         let tt = r.target_table.as_str();
         let tc = r.target_column.as_str();
         let tbl = r.table.as_str();
+        // Cibles en clé technique (`id` entier) : pas de comparaison `<> ''`
+        // (la colonne source est un entier, pas du texte). La jointure se fait
+        // entier↔entier. Pour les cibles code (texte), on garde le filtre vide.
+        let empty_filter = if tc == "id" {
+            String::new()
+        } else {
+            format!("AND e.\"{col}\" <> '' ")
+        };
         let where_orphan = format!(
-            "e.\"{col}\" IS NOT NULL AND e.\"{col}\" <> '' \
+            "e.\"{col}\" IS NOT NULL {empty_filter} \
              AND NOT EXISTS (SELECT 1 FROM {tt} t WHERE t.\"{tc}\" = e.\"{col}\")"
         );
         let count_sql =
@@ -1107,6 +1206,51 @@ mod tests {
         let con = Connection::open_in_memory().expect("open in-memory");
         crate::schema::create_schema(&con).expect("create_schema");
         con
+    }
+
+    /// FK migrée en clé technique (option A, chantier B1) : `dim_consolidation.variant`
+    /// est **stockée en id** mais le contrat reste le **code**. On vérifie le
+    /// round-trip aux frontières : écriture code→id et lecture id→code.
+    #[test]
+    fn fk_contrat_code_variant_round_trip() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // Stockage : la colonne `variant` contient bien un entier (id), pas 'BASE'.
+        let stored_is_int: bool = con
+            .query_row(
+                "SELECT typeof(variant) IN ('INTEGER','BIGINT','HUGEINT') \
+                 FROM dim_consolidation LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored_is_int, "variant doit être stockée en entier (id)");
+
+        // Écriture : write_db_value résout le code 'BASE' en son id.
+        let variant_id = resolve::resolve_id(&con, "dim_variant", "BASE")
+            .unwrap()
+            .expect("BASE existe");
+        let written =
+            write_db_value(&con, "dim_consolidation", "variant", &JsonValue::String("BASE".into()))
+                .unwrap();
+        assert!(
+            matches!(written, DbValue::BigInt(id) if id == variant_id),
+            "write_db_value('BASE') doit donner l'id de variant"
+        );
+        // Code inconnu : rejeté.
+        assert!(write_db_value(
+            &con,
+            "dim_consolidation",
+            "variant",
+            &JsonValue::String("ZZZ".into())
+        )
+        .is_err());
+
+        // Lecture : translate_rows_out re-projette l'id en code 'BASE'.
+        let rows = run_query(&con, "SELECT variant FROM dim_consolidation", Vec::new()).unwrap();
+        let out = translate_rows_out(&con, "dim_consolidation", rows).unwrap();
+        assert_eq!(out[0]["variant"], JsonValue::String("BASE".into()));
     }
 
     /// `true` si `api` apparaît dans la liste des tables navigables.

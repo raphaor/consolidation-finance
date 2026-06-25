@@ -40,6 +40,8 @@
 use duckdb::Connection;
 use std::path::Path;
 
+use crate::references;
+
 /// Description d'un chargement CSV → table.
 ///
 /// - `columns` : colonnes sélectionnées **dans l'ordre du SELECT** (et de la
@@ -306,12 +308,29 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
 ///
 /// Le SQL produit est identique à celui des 15 INSERT historiques codés en dur.
 fn build_insert_sql(m: &CsvMapping, csv_path: &str) -> String {
+    // Le CSV fournit des **codes** ; une colonne migrée en clé technique (option A,
+    // chantier B1) est résolue code→id par sous-requête sur sa dimension cible.
+    // Le reader est aliasé `src` pour permettre la corrélation.
     let select_cols: Vec<String> = m
         .columns
         .iter()
-        .map(|col| match m.casts.iter().find(|(c, _)| c == col) {
-            Some((_, ty)) => format!("CAST({col} AS {ty})"),
-            None => (*col).to_string(),
+        .map(|col| {
+            if let Some(r) = references::REFERENCES.iter().find(|r| {
+                r.table == m.table && r.column == *col && r.target_display_column.is_some()
+            }) {
+                let display = r.target_display_column.unwrap();
+                // Code → id : INNER lookup ; code absent ⇒ NULL (cohérent avec la
+                // nullabilité ; la validation des données le signalerait).
+                format!(
+                    "(SELECT t.id FROM {} t WHERE t.\"{}\" = src.\"{}\")",
+                    r.target_table, display, col
+                )
+            } else {
+                match m.casts.iter().find(|(c, _)| c == col) {
+                    Some((_, ty)) => format!("CAST(src.\"{col}\" AS {ty})"),
+                    None => format!("src.\"{col}\""),
+                }
+            }
         })
         .collect();
 
@@ -332,7 +351,7 @@ fn build_insert_sql(m: &CsvMapping, csv_path: &str) -> String {
     // Liste de colonnes **explicite** : robuste si la table porte des colonnes
     // hors CSV (ex. `stg_entry.source`, non-dimensionnelle) — elles restent NULL.
     format!(
-        "INSERT INTO {} ({}) SELECT {} FROM {}",
+        "INSERT INTO {} ({}) SELECT {} FROM {} AS src",
         m.table,
         m.columns.join(", "),
         select_cols.join(", "),

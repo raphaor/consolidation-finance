@@ -88,7 +88,8 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2025', 'REEL', '2025', 'PERIM_CUR', 'BASE', 'EUR', \
+         VALUES (nextval('seq_consolidation'), 'Réel 2025', 'REEL', '2025', 'PERIM_CUR', \
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
                  '2025', 'RATES', '2025', NULL, ?, 'ouvert')",
         [reel_id],
     )
@@ -192,7 +193,8 @@ fn snapshot_reel_et_cur() -> Connection {
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2025', 'REEL', '2025', 'PERIM_CUR', 'BASE', 'EUR', \
+         VALUES (nextval('seq_consolidation'), 'Réel 2025', 'REEL', '2025', 'PERIM_CUR', \
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
                  '2025', 'RATES', '2025', NULL, ?, 'ouvert')",
         [reel_id],
     )

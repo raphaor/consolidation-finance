@@ -118,7 +118,7 @@ CREATE TABLE dim_consolidation (
     phase                       TEXT,   -- FK dim_scenario_category ('REEL', 'BUDGET'…)
     exercice                    TEXT,   -- FK dim_period ('2024') — sélectionne la remontée
     perimeter_set               TEXT,   -- FK dim_perimeter_set
-    variant                     TEXT,   -- FK dim_variant ('BASE')
+    variant                     INTEGER,-- FK dim_variant.id (clé technique, chantier B1 ; contrat externe = code 'BASE')
     presentation_currency       TEXT,   -- FK dim_currency ('EUR')
     -- Hors clé (paramètres de traitement) :
     perimeter_period            TEXT,   -- FK dim_period (défaut = exercice)

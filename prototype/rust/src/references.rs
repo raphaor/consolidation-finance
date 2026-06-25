@@ -25,7 +25,16 @@ pub struct Reference {
     pub table: &'static str,
     pub column: &'static str,
     pub target_table: &'static str,
+    /// Colonne **de stockage** de la cible (clé physique). `"code"`/`"code_iso"`
+    /// pour les FK historiques ; `"id"` pour les FK migrées en clé technique
+    /// (chantier B1).
     pub target_column: &'static str,
+    /// Colonne **de contrat** de la cible (ce que l'UI/CSV/API échangent). `None`
+    /// = identique à `target_column` (FK code classique, ou FK id en contrat
+    /// int de bout en bout comme `a_nouveau_consolidation_id`). `Some("code")` =
+    /// FK migrée en `id` mais dont le contrat externe reste le **code** (option A,
+    /// cf. `docs/PLAN_RENOMMAGE_CODES.md`) : on traduit code↔id aux frontières.
+    pub target_display_column: Option<&'static str>,
     pub required: bool,
 }
 
@@ -41,6 +50,7 @@ const fn r(
         column,
         target_table,
         target_column,
+        target_display_column: None,
         required: false,
     }
 }
@@ -57,7 +67,28 @@ const fn rq(
         column,
         target_table,
         target_column,
+        target_display_column: None,
         required: true,
+    }
+}
+
+/// Référence **migrée en clé technique** (option A) : stockée en `id`, mais le
+/// contrat externe reste le **code** `display`. Traduite code↔id aux frontières
+/// (CRUD, loader, validation, dropdowns). `required` = colonne non-nullable.
+const fn ri(
+    table: &'static str,
+    column: &'static str,
+    target_table: &'static str,
+    display: &'static str,
+    required: bool,
+) -> Reference {
+    Reference {
+        table,
+        column,
+        target_table,
+        target_column: "id",
+        target_display_column: Some(display),
+        required,
     }
 }
 
@@ -81,7 +112,9 @@ pub const REFERENCES: &[Reference] = &[
         "dim_currency",
         "code_iso",
     ),
-    r("dim_consolidation", "variant", "dim_variant", "code"),
+    // FK migrée en clé technique (chantier B1, étape 3) : stockée en id, contrat
+    // externe = code. Première FK dim→dim flippée (pilote du mécanisme générique).
+    ri("dim_consolidation", "variant", "dim_variant", "code", false),
     r("dim_consolidation", "ruleset_code", "dim_ruleset", "code"),
     r("dim_consolidation", "rate_set", "dim_rate_set", "code"),
     r("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code"),
@@ -172,6 +205,10 @@ pub struct OwnedReference {
     pub column: String,
     pub target_table: String,
     pub target_column: String,
+    /// Cf. [`Reference::target_display_column`]. `None` pour toutes les
+    /// références dynamiques (caractéristiques N1/N2, patron B) qui restent
+    /// code-keyed.
+    pub target_display_column: Option<String>,
     pub required: bool,
 }
 
@@ -182,8 +219,16 @@ impl OwnedReference {
             column: r.column.to_string(),
             target_table: r.target_table.to_string(),
             target_column: r.target_column.to_string(),
+            target_display_column: r.target_display_column.map(|s| s.to_string()),
             required: r.required,
         }
+    }
+
+    /// `Some(colonne_code)` si cette référence est une FK migrée en `id` dont le
+    /// contrat externe reste le code (option A) — déclenche la traduction code↔id
+    /// aux frontières (CRUD, loader, validation, dropdowns). `None` sinon.
+    pub fn code_contract(&self) -> Option<&str> {
+        self.target_display_column.as_deref()
     }
 }
 
@@ -212,7 +257,11 @@ pub fn secondary_master_data(dim: &str) -> Option<(&'static str, &'static str)> 
             if r.target_table == "dim_" {
                 continue;
             }
-            return Some((r.target_table, r.target_column));
+            // Clé naturelle pour la résolution de valeurs : la colonne **code**.
+            // Pour une FK migrée en `id` (contrat code), c'est `target_display_column`,
+            // pas `target_column` (= "id"). Sinon `target_column` (code/code_iso).
+            let key = r.target_display_column.unwrap_or(r.target_column);
+            return Some((r.target_table, key));
         }
     }
     None
@@ -281,6 +330,7 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
                         column: code.clone(),
                         target_table: format!("car_{code}"),
                         target_column: "code".to_string(),
+                        target_display_column: None,
                         required: false,
                     });
                 }
@@ -308,6 +358,7 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
                         column: name,
                         target_table: tt,
                         target_column: tc,
+                        target_display_column: None,
                         required: false,
                     });
                 }
@@ -338,6 +389,7 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
                             column,
                             target_table: tt.to_string(),
                             target_column: tc.to_string(),
+                            target_display_column: None,
                             required: false,
                         });
                     }
@@ -402,7 +454,8 @@ pub const NATIVE_MASTER_REFS: &[(&str, &str, &str)] = &[
     ("consolidation", "perimeter_period", "period"),
     ("consolidation", "rate_period", "period"),
     ("consolidation", "presentation_currency", "currency"),
-    ("consolidation", "variant", "variant"),
+    // `variant` retirée : migrée en clé technique (ri() dans REFERENCES), donc
+    // plus une référence native code-keyed (éviterait un doublon de graphe).
     ("consolidation", "ruleset_code", "ruleset"),
     ("consolidation", "rate_set", "rate_set"),
     ("consolidation", "perimeter_set", "perimeter_set"),
