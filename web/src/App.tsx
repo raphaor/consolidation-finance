@@ -11,6 +11,7 @@ import {
 } from './config/masterDetailConfigs';
 import { CaracteristiquesPage } from './pages/CaracteristiquesPage';
 import { CoefficientsPage } from './pages/CoefficientsPage';
+import { DimensionsPage } from './pages/DimensionsPage';
 import { EcrituresPage } from './pages/EcrituresPage';
 import { ExecutionPage } from './pages/ExecutionPage';
 import { IndicateursPage, PostesPage } from './pages/IndicatorsPage';
@@ -53,6 +54,7 @@ export default function App() {
       {page === 'postes' && <PostesPage />}
       {page === 'indicateurs' && <IndicateursPage />}
       {/* Référentiel */}
+      {page === 'dimensions' && <DimensionsPage />}
       {page === 'masterdata' && (
         <MasterDataPage
           // Tables à foyer dédié ailleurs (principe « une table = un seul foyer ») :

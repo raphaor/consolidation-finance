@@ -62,6 +62,16 @@ const DIMENSION_TABLES = new Set<string>([
   'natures', //             nature
 ]);
 
+// Dimensions empruntant les valeurs d'une autre dimension (pas de table propre) :
+// `partner` / `share` partagent le référentiel `entities`. On les expose ici comme
+// **vues en lecture** sur la table empruntée, pour les retrouver dans Master data ;
+// leur édition se fait dans la table cible (Entités). `table` est l'identifiant de
+// vue (distinct), `resolves` la table master data réellement chargée.
+const DIMENSION_VIEWS: Record<string, { label: string; resolves: string }> = {
+  partner: { label: 'Partenaire (→ Entités)', resolves: 'entities' },
+  share: { label: 'Titre (→ Entités)', resolves: 'entities' },
+};
+
 // ───────────── Construction runtime d'un TableDef depuis le schéma ─────────────
 
 // Capitalise un identifiant technique pour fallback de libellé : `compte_parent`
@@ -366,14 +376,17 @@ export function MasterDataPage({
     setLoading(true);
     setError(null);
     try {
+      // Vue de dimension empruntée (partner/share) : on charge la table cible
+      // (entities) tout en gardant `table` comme identifiant de vue.
+      const sqlTable = DIMENSION_VIEWS[table]?.resolves ?? table;
       // Schéma runtime + données en parallèle. Le schéma apporte les colonnes
       // dynamiques (caractéristiques + patron B) absentes de MASTER_TABLES.
       const [schemaResult, rows] = await Promise.all([
-        api.masterData.schema(table),
-        api.masterData.list(table),
+        api.masterData.schema(sqlTable),
+        api.masterData.list(sqlTable),
       ]);
       setSchema(schemaResult);
-      const staticDef = MASTER_TABLES.find((t) => t.table === table);
+      const staticDef = MASTER_TABLES.find((t) => t.table === sqlTable);
       const def = buildTableDef(schemaResult, staticDef);
       setTableDef(def);
 
@@ -448,6 +461,11 @@ export function MasterDataPage({
     [table, tableDef, load],
   );
 
+  // Vue en lecture seule (dimension empruntée : partner/share → entities) :
+  // pas d'ajout / édition / suppression ici — l'édition se fait dans la table cible.
+  const view = DIMENSION_VIEWS[table];
+  const isView = view !== undefined;
+
   // Colonne « code » renommable : la PK non auto-générée (ex. `code`,
   // `code_iso`). Absente pour les tables à PK technique auto (ex. consolidations
   // dont l'identité est l'id) → pas de renommage proposé.
@@ -484,6 +502,8 @@ export function MasterDataPage({
       accessorKey: col.name,
       cell: (info) => renderCell(col, info.getValue()),
     }));
+    // Vue en lecture seule : pas de colonne d'actions (édition dans la table cible).
+    if (isView) return cols;
     cols.push({
       id: '__actions',
       header: 'Actions',
@@ -518,7 +538,7 @@ export function MasterDataPage({
       ),
     });
     return cols;
-  }, [tableDef, handleDelete, handleRename, codeCol]);
+  }, [tableDef, handleDelete, handleRename, codeCol, isView]);
 
   const tableState = useReactTable({
     data,
@@ -559,8 +579,15 @@ export function MasterDataPage({
     const natives = tableList.filter((t) => t.kind === 'native');
     const dims = natives.filter((t) => DIMENSION_TABLES.has(t.table));
     const refs = natives.filter((t) => !DIMENSION_TABLES.has(t.table));
+    // Vues des dimensions empruntées (partner/share) rattachées au groupe Dimensions.
+    const views: TableSummary[] = Object.entries(DIMENSION_VIEWS).map(([t, v]) => ({
+      table: t,
+      label: v.label,
+      kind: 'native' as const,
+    }));
+    const dimItems = [...dims, ...views];
     const groups: { label: string; items: TableSummary[] }[] = [];
-    if (dims.length > 0) groups.push({ label: 'Dimensions', items: dims });
+    if (dimItems.length > 0) groups.push({ label: 'Dimensions', items: dimItems });
     if (refs.length > 0) {
       groups.push({ label: 'Référentiels de paramétrage', items: refs });
     }
@@ -598,14 +625,16 @@ export function MasterDataPage({
               </select>
             </label>
           )}
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => setFormState({ mode: 'create' })}
-            disabled={loading || schemaLoading || tableDef === null}
-          >
-            Ajouter
-          </button>
+          {!isView && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setFormState({ mode: 'create' })}
+              disabled={loading || schemaLoading || tableDef === null}
+            >
+              Ajouter
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -637,6 +666,13 @@ export function MasterDataPage({
           <span className="muted"> (table SQL : {schema.sql_name})</span>
         )}
       </div>
+
+      {view && (
+        <div className="alert alert--warning" role="status">
+          Vue en lecture seule : « {view.label.split(' (')[0]} » emprunte les valeurs de cette
+          table. Pour les modifier, éditez la table cible directement.
+        </div>
+      )}
 
       {error && <div className="alert alert--error">Erreur : {error}</div>}
       {notice && (

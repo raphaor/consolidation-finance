@@ -25,6 +25,7 @@ export type PageId =
   | 'postes'
   | 'indicateurs'
   // Référentiel
+  | 'dimensions'
   | 'masterdata'
   | 'caracteristiques'
   | 'maintenance';
@@ -79,6 +80,7 @@ const GROUPS: Group[] = [
     id: 'referentiel',
     label: 'Référentiel',
     pages: [
+      { id: 'dimensions', label: 'Dimensions' },
       { id: 'masterdata', label: 'Master data' },
       { id: 'caracteristiques', label: 'Attributs de dimension' },
       { id: 'maintenance', label: 'Maintenance' },
