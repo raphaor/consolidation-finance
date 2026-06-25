@@ -228,8 +228,19 @@ function AttributsTab({
   notifyErr: (err: unknown) => void;
   reloadAll: () => Promise<void>;
 }) {
+  // La page se consulte **par dimension** : on choisit d'abord une dimension de
+  // faits, puis on voit (et crée) ses attributs. `dim` étant toujours un axe
+  // d'écriture (les `dims` viennent des références `stg_entry`), les emprunts dont
+  // l'hôte n'est pas une dimension de faits (ex. FK natives `consolidation.*`)
+  // n'apparaissent jamais. Cf. typologie « une table = un seul foyer ».
+  const [dim, setDim] = useState('');
   const [selected, setSelected] = useState<Selection>(null);
   const [creating, setCreating] = useState(false);
+
+  // Changer de dimension réinitialise l'attribut sélectionné.
+  useEffect(() => {
+    setSelected(null);
+  }, [dim]);
 
   const selectedChar = useMemo(
     () => (selected?.kind === 'char' ? chars.find((c) => c.code === selected.code) ?? null : null),
@@ -240,16 +251,10 @@ function AttributsTab({
     [selected, refs],
   );
 
-  // On ne montre que les attributs portés par les **dimensions de faits** (les
-  // axes d'écriture, dérivés des références `stg_entry`). Les emprunts dont l'hôte
-  // est un objet de paramétrage (ex. FK natives `consolidation.phase`,
-  // `consolidation.rate_set`…) n'ont pas leur place ici : leur foyer est la
-  // définition de la consolidation. Cf. typologie « une table = un seul foyer ».
-  const dimSet = useMemo(() => new Set(dims.map((d) => d.dim)), [dims]);
-  const visibleRefs = useMemo(
-    () => refs.filter((r) => dimSet.has(r.host_dimension)),
-    [refs, dimSet],
-  );
+  // Attributs de la dimension courante : caractéristiques de base `dim` + emprunts
+  // hôtés par `dim`.
+  const dimChars = useMemo(() => chars.filter((c) => c.base_dimension === dim), [chars, dim]);
+  const dimRefs = useMemo(() => refs.filter((r) => r.host_dimension === dim), [refs, dim]);
 
   const deleteChar = async (code: string) => {
     if (!window.confirm(`Supprimer la caractéristique « ${code} » et ses valeurs ?`)) return;
@@ -275,123 +280,148 @@ function AttributsTab({
     }
   };
 
-  const empty = chars.length === 0 && visibleRefs.length === 0;
+  const empty = dimChars.length === 0 && dimRefs.length === 0;
 
   return (
     <>
-      <div className="attr-layout">
-        {/* ── Liste unifiée ── */}
-        <div>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => setCreating(true)}
-            style={{ marginBottom: 10 }}
-          >
+      {/* Sélecteur de dimension : on consulte les attributs dimension par dimension. */}
+      <div className="attr-dimbar">
+        <label className="field">
+          <span>Dimension</span>
+          <select value={dim} onChange={(e) => setDim(e.target.value)}>
+            <option value="" disabled>
+              — choisir une dimension —
+            </option>
+            {dims.map((d) => (
+              <option key={d.dim} value={d.dim}>
+                {d.dim}
+              </option>
+            ))}
+          </select>
+        </label>
+        {dim !== '' && (
+          <button type="button" className="btn btn--primary" onClick={() => setCreating(true)}>
             + Nouvel attribut
           </button>
+        )}
+      </div>
 
-          <div className="attr-list">
-            {empty && <div className="attr-empty">Aucun attribut de dimension.</div>}
+      {dim === '' ? (
+        <div className="rule-section">
+          <p className="muted" style={{ margin: 0 }}>
+            Choisissez une dimension pour voir et gérer ses attributs.
+          </p>
+        </div>
+      ) : (
+        <div className="attr-layout">
+          {/* ── Attributs de la dimension ── */}
+          <div>
+            <div className="attr-list">
+              {empty && <div className="attr-empty">Aucun attribut sur « {dim} ».</div>}
 
-            {chars.map((c) => {
-              const active = selected?.kind === 'char' && selected.code === c.code;
-              return (
-                <div
-                  key={`char-${c.code}`}
-                  className={`attr-item ${active ? 'is-selected' : ''}`}
-                  onClick={() => setSelected({ kind: 'char', code: c.code })}
-                >
-                  <div className="attr-item__head">
-                    <span className="attr-item__code">{c.code}</span>
-                    <span className="attr-badge attr-badge--char">caractéristique</span>
-                    <button
-                      type="button"
-                      className="attr-item__del"
-                      aria-label={`Supprimer ${c.code}`}
-                      title="Supprimer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void deleteChar(c.code);
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="attr-item__recap">{recapChar(c)}</div>
-                </div>
-              );
-            })}
-
-            {visibleRefs.map((r) => {
-              const id = refId(r);
-              const active = selected?.kind === 'ref' && selected.id === id;
-              return (
-                <div
-                  key={`ref-${id}`}
-                  className={`attr-item ${active ? 'is-selected' : ''}`}
-                  onClick={() => setSelected({ kind: 'ref', id })}
-                >
-                  <div className="attr-item__head">
-                    <span className="attr-item__code">{r.column}</span>
-                    <span className={`attr-badge ${r.native ? 'attr-badge--native' : 'attr-badge--ref'}`}>
-                      {r.native ? 'emprunt natif' : 'emprunt'}
-                    </span>
-                    {!r.native && (
+              {dimChars.map((c) => {
+                const active = selected?.kind === 'char' && selected.code === c.code;
+                return (
+                  <div
+                    key={`char-${c.code}`}
+                    className={`attr-item ${active ? 'is-selected' : ''}`}
+                    onClick={() => setSelected({ kind: 'char', code: c.code })}
+                  >
+                    <div className="attr-item__head">
+                      <span className="attr-item__code">{c.code}</span>
+                      <span className="attr-badge attr-badge--char">caractéristique</span>
                       <button
                         type="button"
                         className="attr-item__del"
-                        aria-label={`Supprimer ${id}`}
+                        aria-label={`Supprimer ${c.code}`}
                         title="Supprimer"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void deleteRef(r);
+                          void deleteChar(c.code);
                         }}
                       >
                         ✕
                       </button>
-                    )}
+                    </div>
+                    <div className="attr-item__recap">{recapChar(c)}</div>
                   </div>
-                  <div className="attr-item__recap">{recapRef(r)}</div>
-                </div>
-              );
-            })}
+                );
+              })}
+
+              {dimRefs.map((r) => {
+                const id = refId(r);
+                const active = selected?.kind === 'ref' && selected.id === id;
+                return (
+                  <div
+                    key={`ref-${id}`}
+                    className={`attr-item ${active ? 'is-selected' : ''}`}
+                    onClick={() => setSelected({ kind: 'ref', id })}
+                  >
+                    <div className="attr-item__head">
+                      <span className="attr-item__code">{r.column}</span>
+                      <span
+                        className={`attr-badge ${r.native ? 'attr-badge--native' : 'attr-badge--ref'}`}
+                      >
+                        {r.native ? 'emprunt natif' : 'emprunt'}
+                      </span>
+                      {!r.native && (
+                        <button
+                          type="button"
+                          className="attr-item__del"
+                          aria-label={`Supprimer ${id}`}
+                          title="Supprimer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void deleteRef(r);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <div className="attr-item__recap">{recapRef(r)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Détail de la sélection ── */}
+          <div>
+            {selectedChar ? (
+              <CharacteristicDetail
+                char={selectedChar}
+                dims={dims}
+                lists={lists}
+                isList={isList}
+                loadOptions={loadOptions}
+                onNotice={onNotice}
+                notifyErr={notifyErr}
+                onChanged={reloadAll}
+              />
+            ) : selectedRef ? (
+              <ReferenceDetail
+                reference={selectedRef}
+                loadOptions={loadOptions}
+                onNotice={onNotice}
+                notifyErr={notifyErr}
+              />
+            ) : (
+              <div className="rule-section">
+                <p className="muted" style={{ margin: 0 }}>
+                  Sélectionnez un attribut à gauche pour le détailler, ou créez-en un nouveau sur
+                  «&nbsp;{dim}&nbsp;».
+                </p>
+              </div>
+            )}
           </div>
         </div>
-
-        {/* ── Détail de la sélection ── */}
-        <div>
-          {selectedChar ? (
-            <CharacteristicDetail
-              char={selectedChar}
-              dims={dims}
-              lists={lists}
-              isList={isList}
-              loadOptions={loadOptions}
-              onNotice={onNotice}
-              notifyErr={notifyErr}
-              onChanged={reloadAll}
-            />
-          ) : selectedRef ? (
-            <ReferenceDetail
-              reference={selectedRef}
-              loadOptions={loadOptions}
-              onNotice={onNotice}
-              notifyErr={notifyErr}
-            />
-          ) : (
-            <div className="rule-section">
-              <p className="muted" style={{ margin: 0 }}>
-                Sélectionnez un attribut à gauche pour le détailler, ou créez-en un nouveau.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {creating && (
         <CreateModal
           dims={dims}
+          initialBase={dim}
           notifyErr={notifyErr}
           onCancel={() => setCreating(false)}
           onCreated={async (sel, msg) => {
@@ -410,17 +440,21 @@ function AttributsTab({
 
 function CreateModal({
   dims,
+  initialBase,
   notifyErr,
   onCancel,
   onCreated,
 }: {
   dims: DimInfo[];
+  initialBase: string;
   notifyErr: (err: unknown) => void;
   onCancel: () => void;
   onCreated: (sel: Selection, msg: string) => void;
 }) {
   const [kind, setKind] = useState<'char' | 'ref'>('char');
-  const [base, setBase] = useState('');
+  // La dimension de base est imposée par le contexte (dimension sélectionnée) :
+  // pré-remplie et verrouillée dans le formulaire.
+  const [base] = useState(initialBase);
   const [code, setCode] = useState('');
   const [libelle, setLibelle] = useState('');
   const [target, setTarget] = useState(''); // dimension empruntée (emprunt)
@@ -478,21 +512,14 @@ function CreateModal({
             </label>
           </div>
 
-          {/* 2. Cible */}
+          {/* 2. Définition (la dimension de base vient du contexte, verrouillée) */}
           <div className="rule-section">
-            <h3 className="rule-section__title">2. Sur quelle dimension ?</h3>
+            <h3 className="rule-section__title">2. Définition</h3>
             <div className="form-grid">
               <label className="field">
-                <span>Dimension de base •</span>
-                <select value={base} onChange={(e) => setBase(e.target.value)} required>
-                  <option value="" disabled>
-                    — choisir —
-                  </option>
-                  {dims.map((d) => (
-                    <option key={d.dim} value={d.dim}>
-                      {d.dim}
-                    </option>
-                  ))}
+                <span>Dimension de base</span>
+                <select value={base} disabled>
+                  <option value={base}>{base}</option>
                 </select>
               </label>
               <label className="field">

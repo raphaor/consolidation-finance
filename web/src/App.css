@@ -1754,6 +1754,15 @@
 
 /* ---------- Attributs de dimension (caractéristiques & emprunts) ---------- */
 
+/* Barre de choix de la dimension (la page se consulte dimension par dimension) :
+   le sélecteur puis l'action « + Nouvel attribut » alignés en bas. */
+.attr-dimbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* Liste unifiée (gauche) | détail de la sélection (droite). Repli en une
    colonne sur écran étroit, comme `rule-op-grid`. */
 .attr-layout {
