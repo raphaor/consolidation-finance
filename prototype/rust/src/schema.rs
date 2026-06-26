@@ -116,15 +116,15 @@ CREATE TABLE dim_consolidation (
     libelle                     TEXT,
     -- Clé naturelle (identité métier) :
     phase                       INTEGER,-- FK dim_scenario_category.id (clé technique B1 ; contrat code 'REEL')
-    exercice                    TEXT,   -- FK dim_period ('2024') — sélectionne la remontée
+    exercice                    INTEGER,-- FK dim_period.id (clé technique B1 ; contrat code '2024') — sélectionne la remontée
     perimeter_set               INTEGER,-- FK dim_perimeter_set.id (clé technique B1 ; contrat code)
     variant                     INTEGER,-- FK dim_variant.id (clé technique, chantier B1 ; contrat externe = code 'BASE')
-    presentation_currency       TEXT,   -- FK dim_currency ('EUR')
+    presentation_currency       INTEGER,-- FK dim_currency.id (clé technique B1 ; contrat code_iso 'EUR')
     -- Hors clé (paramètres de traitement) :
-    perimeter_period            TEXT,   -- FK dim_period (défaut = exercice)
+    perimeter_period            INTEGER,-- FK dim_period.id (clé technique B1 ; contrat code, défaut = exercice)
     rate_set                    INTEGER,-- FK dim_rate_set.id (clé technique B1 ; contrat code)
-    rate_period                 TEXT,   -- FK dim_period (défaut = exercice)
-    ruleset_code                TEXT,   -- FK dim_ruleset (NULL = pas de règles)
+    rate_period                 INTEGER,-- FK dim_period.id (clé technique B1 ; contrat code, défaut = exercice)
+    ruleset_code                INTEGER,-- FK dim_ruleset.id (clé technique B1 ; contrat code, NULL = pas de règles)
     a_nouveau_consolidation_id  INTEGER, -- FK dim_consolidation : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2
     statut                      TEXT,   -- 'brouillon' / 'ouvert' / 'verrouillé'
     UNIQUE (phase, exercice, perimeter_set, variant, presentation_currency)
@@ -135,8 +135,8 @@ pub const DDL_DIM_ENTITY: &str = "\
 CREATE TABLE dim_entity (
     code                 TEXT PRIMARY KEY,
     libelle              TEXT,
-    devise_fonctionnelle TEXT,   -- code ISO (EUR, USD, GBP…)
-    entite_parent        TEXT,   -- code entité parente (hiérarchie de groupe)
+    devise_fonctionnelle INTEGER, -- FK dim_currency.id (B1 ; contrat code_iso)
+    entite_parent        INTEGER, -- FK dim_entity.id (B1 ; contrat code, auto-ref)
     statut               TEXT
 );";
 
@@ -167,7 +167,7 @@ CREATE TABLE dim_account (
     libelle            TEXT,
     classe             TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
     sous_classe        INTEGER,        -- FK dim_sous_classe.id (clé technique B1 ; contrat code)
-    flow_scheme        TEXT            -- référence dim_flow_scheme.code ; NULL = défaut dérivé de la classe (cf. pipeline::convert / docs/QUESTIONS_OUVERTES.md Q32)
+    flow_scheme        INTEGER         -- FK dim_flow_scheme.id (clé technique B1 ; contrat code). Q45 : 100 % user-driven, plus de défaut dérivé de la classe. NULL = exclu (silencieusement) de la conversion/clôture (option b, cf. v_flow_behavior)
 );";
 
 /// 4c. dim_flow_scheme : schémas d'articulation des flux (catalogue).
@@ -195,7 +195,7 @@ CREATE TABLE dim_flow_scheme (
 /// résolution par compte se fait via la vue [`v_flow_behavior`].
 pub const DDL_SAT_FLOW_SCHEME_ITEM: &str = "\
 CREATE TABLE sat_flow_scheme_item (
-    scheme          TEXT,
+    scheme          INTEGER,        -- FK dim_flow_scheme.id (clé technique B1 ; contrat code) — partie de PK
     flow            TEXT,
     taux_conversion TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n')),
     flux_ecart      TEXT,           -- flux d'écart associé (NULL = aucun écart)
@@ -206,11 +206,14 @@ CREATE TABLE sat_flow_scheme_item (
 
 /// 8j. v_flow_behavior : **vue** résolvant le comportement d'un flux **par compte**.
 ///
-/// Joint chaque compte à son schéma de flux (`dim_account.flow_scheme`, ou à
-/// défaut dérivé de la classe : `resultat` → `RESULTAT`, sinon `BILAN`) et expose
+/// Joint chaque compte à son schéma de flux (`dim_account.flow_scheme`) et expose
 /// `(account, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau)`.
-/// Source unique consommée par `pipeline::convert`, `materialize_closures` et
-/// `pipeline::a_nouveau` (à la place de l'ex-`dim_flow.*`). Cf. Q32.
+/// **Q45 (2026-06-25)** : plus de défaut dérivé de la classe — `flow_scheme` est
+/// 100 % user-driven. `LEFT JOIN` (option b) : un compte sans schéma est **toléré
+/// mais exclu** silencieusement de la conversion et de la reconstruction de
+/// clôture (aucune ligne de comportement ne matche son flux). Source unique
+/// consommée par `pipeline::convert`, `materialize_closures` et
+/// `pipeline::a_nouveau` (à la place de l'ex-`dim_flow.*`). Cf. Q32 / Q45.
 pub const DDL_V_FLOW_BEHAVIOR: &str = "\
 CREATE VIEW v_flow_behavior AS
 SELECT
@@ -221,9 +224,8 @@ SELECT
     si.flux_de_report,
     si.flux_a_nouveau
 FROM dim_account a
-JOIN sat_flow_scheme_item si
-  ON si.scheme = COALESCE(a.flow_scheme,
-                          CASE WHEN a.classe = 'resultat' THEN 'RESULTAT' ELSE 'BILAN' END);";
+LEFT JOIN sat_flow_scheme_item si
+  ON si.scheme = a.flow_scheme;";
 
 /// 4b. dim_sous_classe : sous-classes de comptes (actif / passif / charges / produits).
 ///
@@ -301,7 +303,7 @@ CREATE TABLE sat_perimeter (
     perimeter_set   INTEGER,       -- FK dim_perimeter_set.id (clé technique B1 ; contrat code)
     entity          TEXT,
     period          TEXT,          -- correspond au Entry_period (exercice clôturé)
-    methode         TEXT,          -- FK dim_method.code (intégrité via references.rs, pas de CHECK : les méthodes sont pilotables)
+    methode         INTEGER,       -- FK dim_method.id (B1 : code mutable, id stable)
     pct_interet     DECIMAL(10,4),
     pct_integration DECIMAL(10,4), -- % de contrôle (1.0 pour la globale)
     entree          BOOLEAN DEFAULT FALSE,

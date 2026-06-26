@@ -300,9 +300,9 @@ async fn get_bilan(
             "SELECT e.account, e.flow, e.nature, COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
              FROM fact_entry e
              JOIN dim_account a ON a.code = e.account
-             LEFT JOIN dim_sous_classe sc ON sc.code = a.sous_classe
+             LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
              WHERE e.level = ? AND a.classe = 'bilan' {fsql}{of_which}
-             GROUP BY e.account, e.flow, e.nature, a.sous_classe
+             GROUP BY e.account, e.flow, e.nature, a.sous_classe, sc.sens
              ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
@@ -355,9 +355,9 @@ async fn get_compte_resultat(
              "SELECT e.account, e.flow, e.nature, COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
               FROM fact_entry e
               JOIN dim_account a ON a.code = e.account
-              LEFT JOIN dim_sous_classe sc ON sc.code = a.sous_classe
+              LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
               WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
-              GROUP BY e.account, e.flow, e.nature, a.sous_classe
+              GROUP BY e.account, e.flow, e.nature, a.sous_classe, sc.sens
               ORDER BY e.account, e.flow, e.nature"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
@@ -528,19 +528,23 @@ async fn list_consolidations(
         let con = lock_con(&state)?;
         let mut stmt = con
             .prepare(
-                // FK stockées en clé technique (id) mais exposées en **code**
-                // (contrat option A, chantier B1) : résolues par JOIN —
-                // phase, perimeter_set, rate_set, variant.
-                "SELECT c.id, c.libelle, sc.code AS phase, c.exercice,
+                // Toutes les FK de dim_consolidation sont en clé technique (id, B1) :
+                // résolues par JOIN pour exposer les codes en contrat externe.
+                "SELECT c.id, c.libelle, sc.code AS phase, p_ex.code AS exercice,
                         ps.code AS perimeter_set, v.code AS variant,
-                        c.presentation_currency, c.perimeter_period,
-                        rs.code AS rate_set, c.rate_period,
-                        c.ruleset_code, c.a_nouveau_consolidation_id, c.statut
+                        cur.code_iso AS presentation_currency, p_pp.code AS perimeter_period,
+                        rs.code AS rate_set, p_rp.code AS rate_period,
+                        rset.code AS ruleset_code, c.a_nouveau_consolidation_id, c.statut
                  FROM dim_consolidation c
                  LEFT JOIN dim_scenario_category sc ON sc.id = c.phase
+                 LEFT JOIN dim_period p_ex ON p_ex.id = c.exercice
                  LEFT JOIN dim_perimeter_set ps ON ps.id = c.perimeter_set
-                 LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
                  LEFT JOIN dim_variant v ON v.id = c.variant
+                 LEFT JOIN dim_currency cur ON cur.id = c.presentation_currency
+                 LEFT JOIN dim_period p_pp ON p_pp.id = c.perimeter_period
+                 LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
+                 LEFT JOIN dim_period p_rp ON p_rp.id = c.rate_period
+                 LEFT JOIN dim_ruleset rset ON rset.id = c.ruleset_code
                  ORDER BY c.id",
             )
             .map_err(db_err)?;
@@ -613,9 +617,12 @@ async fn run_pipeline_handler(
         let params = ConvertParams::load_params(&con, consolidation_id).map_err(db_err)?;
 
         // 3. Lecture du ruleset_code (NULL si la consolidation n'en référence pas).
+        //    B1 : stocké en id → résolu en code par LEFT JOIN.
         let ruleset_code: Option<String> = con
             .query_row(
-                "SELECT ruleset_code FROM dim_consolidation WHERE id = ?",
+                "SELECT rs.code FROM dim_consolidation c \
+                 LEFT JOIN dim_ruleset rs ON rs.id = c.ruleset_code \
+                 WHERE c.id = ?",
                 [consolidation_id],
                 |r| r.get::<_, Option<String>>(0),
             )
@@ -1399,6 +1406,15 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_consolidation_fk_to_id(&con) {
             eprintln!("   ⚠ migrate_consolidation_fk_to_id (non bloquant) : {e}");
         }
+        // 2ᵉ vague B1 : exercice / presentation_currency / perimeter_period /
+        // rate_period / ruleset_code → INTEGER. À exécuter après la 1ʳᵉ vague.
+        if let Err(e) = conso_engine::surrogate::migrate_consolidation_fk_to_id_v2(&con) {
+            eprintln!("   ⚠ migrate_consolidation_fk_to_id_v2 (non bloquant) : {e}");
+        }
+        // B1 dim_entity : devise_fonctionnelle / entite_parent → INTEGER.
+        if let Err(e) = conso_engine::surrogate::migrate_entity_fk_to_id(&con) {
+            eprintln!("   ⚠ migrate_entity_fk_to_id (non bloquant) : {e}");
+        }
         // Idem pour sat_exchange_rate.rate_set (PK → reconstruction de table).
         // Rend la dimension `rate_set` entièrement flippée (renommable).
         if let Err(e) = conso_engine::surrogate::migrate_sat_exchange_rate_fk_to_id(&con) {
@@ -1417,6 +1433,25 @@ async fn main() {
         // B1 : bascule dim_account.sous_classe du code vers l'id (FK native).
         if let Err(e) = conso_engine::surrogate::migrate_account_sous_classe_to_id(&con) {
             eprintln!("   ⚠ migrate_account_sous_classe_to_id (non bloquant) : {e}");
+        }
+        // B1 : bascule dim_account.flow_scheme du code vers l'id (FK native).
+        // Rend la dimension `flow_scheme` entièrement flippée (renommable) avec
+        // sat_flow_scheme_item.scheme ci-dessous. Q45 : flow_scheme est 100 %
+        // user-driven (plus de défaut dérivé de la classe).
+        if let Err(e) = conso_engine::surrogate::migrate_account_flow_scheme_to_id(&con) {
+            eprintln!("   ⚠ migrate_account_flow_scheme_to_id (non bloquant) : {e}");
+        }
+        // B1 : bascule sat_flow_scheme_item.scheme (PK → reconstruction) du code
+        // vers l'id. Seconde réf. vers dim_flow_scheme → dimension renommable.
+        if let Err(e) =
+            conso_engine::surrogate::migrate_sat_flow_scheme_item_scheme_to_id(&con)
+        {
+            eprintln!("   ⚠ migrate_sat_flow_scheme_item_scheme_to_id (non bloquant) : {e}");
+        }
+        // B1 : bascule sat_perimeter.methode (colonne hors PK → add+update+drop+rename)
+        // du code TEXT vers l'id INTEGER. Rend dim_method entièrement flippée (renommable).
+        if let Err(e) = conso_engine::surrogate::migrate_sat_perimeter_methode_to_id(&con) {
+            eprintln!("   ⚠ migrate_sat_perimeter_methode_to_id (non bloquant) : {e}");
         }
     } else {
         if force_reseed {

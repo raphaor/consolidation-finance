@@ -40,7 +40,8 @@ fn engine() -> Connection {
 fn cid(con: &Connection, phase: &str, exercice: &str) -> i64 {
     con.query_row(
         "SELECT id FROM dim_consolidation \
-         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) AND exercice = ?",
+         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) \
+         AND exercice = (SELECT id FROM dim_period WHERE code = ?)",
         [phase, exercice],
         |r| r.get(0),
     )
@@ -69,7 +70,7 @@ fn put(
              nature, partner, share, analysis, analysis2, level, amount) \
          SELECT (SELECT id FROM dim_consolidation \
                  WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
-                   AND exercice='2024'), \
+                   AND exercice = (SELECT id FROM dim_period WHERE code='2024')), \
                 'REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?",
         duckdb::params![entity, account, flow, nature, partner, level, amount],
     )
@@ -407,7 +408,8 @@ fn selection_in_et_is_not_null() {
 fn scope_filtre_sur_methode_entite() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL')",
+        "UPDATE sat_perimeter SET methode = (SELECT id FROM dim_method WHERE code = 'proportionnelle') \
+         WHERE entity = 'B' AND perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL')",
         [],
     )
     .expect("set methode B");
@@ -678,6 +680,30 @@ fn selection_via_sous_classe_id_aware() {
     assert_eq!(scount(&con, "nature='SCACTIF' AND account='100'"), 0, "passif exclu");
 }
 
+#[test]
+fn selection_via_flow_scheme_id_aware() {
+    let con = engine();
+
+    // Seed : les comptes bilan portent flow_scheme=BILAN, les comptes resultat
+    // flow_scheme=RESULTAT. 200 = bilan → match ; 600 = charges (resultat) → exclu.
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // bilan → match
+    put(&con, "M", "600", "F20", None, "0LIASS", 100.0, "converted"); // resultat → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","ref":"flow_scheme","op":"=","val":"BILAN"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"FSBILAN"}}}]}"#,
+    );
+
+    assert_eq!(run_one(&con, "R"), 1, "un seul compte est de flow_scheme BILAN");
+    assert_eq!(scount(&con, "nature='FSBILAN' AND account='200'"), 1);
+    assert_eq!(scount(&con, "nature='FSBILAN' AND account='600'"), 0, "resultat exclu");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Coefficients d'élimination IC corporate (N / N-1 / Var).
 //
@@ -708,14 +734,24 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
     )
     .expect("perimeter_set N-1");
     con.execute(
+        "INSERT INTO dim_period (code, libelle) VALUES ('2023', 'Exercice 2023') ON CONFLICT DO NOTHING",
+        [],
+    )
+    .expect("période 2023");
+    con.execute(
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
          VALUES (nextval('seq_consolidation'), 'Réel 2023', \
-                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2023', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'),
+                 (SELECT id FROM dim_period WHERE code = '2023'),
                  (SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), \
-                 (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
-                 '2023', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2023', NULL, NULL, 'verrouillé')",
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'),
+                 (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+                 (SELECT id FROM dim_period WHERE code = '2023'),
+                 (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
+                 (SELECT id FROM dim_period WHERE code = '2023'),
+                 NULL, NULL, 'verrouillé')",
         [],
     )
     .expect("consolidation à-nouveau");
@@ -732,7 +768,8 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
         con.execute(
             "INSERT INTO sat_perimeter \
                 (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-             VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), ?, '2023', 'globale', ?, ?, false, false)",
+             VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), ?, '2023', \
+                     (SELECT id FROM dim_method WHERE code = 'globale'), ?, ?, false, false)",
             duckdb::params![entity, pct, pct],
         )
         .expect("sat_perimeter N-1");

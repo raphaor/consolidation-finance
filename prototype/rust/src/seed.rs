@@ -807,7 +807,7 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute("INSERT INTO app_config VALUES (?, ?)", params![k, v])?;
     }
 
-    // --- Nouvelles dimensions référentielles (avant dim_scenario) ---
+    // --- Nouvelles dimensions référentielles (avant dim_consolidation) ---
     for c in SCENARIO_CATEGORIES {
         con.execute(
             "INSERT INTO dim_scenario_category (code, libelle) VALUES (?, ?)",
@@ -832,36 +832,8 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             params![ps.0, ps.1],
         )?;
     }
-
-    // --- Dimensions ---
-    for c in CONSOLIDATIONS {
-        // `id` alloué par nextval : déterministe (1 sur base fraîche) et avance
-        // la séquence (évite tout collision avec un INSERT ultérieur).
-        con.execute(
-            "INSERT INTO dim_consolidation
-                (id, libelle, phase, exercice, perimeter_set, variant,
-                 presentation_currency, perimeter_period, rate_set, rate_period,
-                 ruleset_code, a_nouveau_consolidation_id, statut)
-             VALUES (nextval('seq_consolidation'),
-                     ?,
-                     (SELECT id FROM dim_scenario_category WHERE code = ?),
-                     ?,
-                     (SELECT id FROM dim_perimeter_set WHERE code = ?),
-                     (SELECT id FROM dim_variant WHERE code = ?),
-                     ?, ?,
-                     (SELECT id FROM dim_rate_set WHERE code = ?),
-                     ?, ?, NULL, ?)",
-            params![c.0, c.1, c.2, c.3, c.4, c.5, c.6, c.7, c.8, c.9, c.10],
-        )?;
-    }
-    for e in ENTITIES {
-        con.execute(
-            "INSERT INTO dim_entity \
-             (code, libelle, devise_fonctionnelle, entite_parent, statut) \
-             VALUES (?, ?, ?, ?, ?)",
-            params![e.0, e.1, e.2, e.3, e.4],
-        )?;
-    }
+    // Périodes et devises avant dim_consolidation : exercice / presentation_currency /
+    // perimeter_period / rate_period sont désormais des FK en id (B1).
     for p in PERIODS {
         con.execute(
             "INSERT INTO dim_period \
@@ -870,20 +842,77 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             params![p.0, p.1, p.2, p.3, p.4, p.5],
         )?;
     }
+    for c in CURRENCIES {
+        con.execute(
+            "INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES (?, ?, ?)",
+            params![c.0, c.1, c.2],
+        )?;
+    }
+
+    // --- Dimensions ---
+    for c in CONSOLIDATIONS {
+        // `id` alloué par nextval : déterministe (1 sur base fraîche) et avance
+        // la séquence (évite tout collision avec un INSERT ultérieur).
+        // B1 : exercice / presentation_currency / perimeter_period / rate_period /
+        // ruleset_code sont désormais stockés en id — résolus par sous-requête.
+        con.execute(
+            "INSERT INTO dim_consolidation
+                (id, libelle, phase, exercice, perimeter_set, variant,
+                 presentation_currency, perimeter_period, rate_set, rate_period,
+                 ruleset_code, a_nouveau_consolidation_id, statut)
+             VALUES (nextval('seq_consolidation'),
+                     ?,
+                     (SELECT id FROM dim_scenario_category WHERE code = ?),
+                     (SELECT id FROM dim_period WHERE code = ?),
+                     (SELECT id FROM dim_perimeter_set WHERE code = ?),
+                     (SELECT id FROM dim_variant WHERE code = ?),
+                     (SELECT id FROM dim_currency WHERE code_iso = ?),
+                     (SELECT id FROM dim_period WHERE code = ?),
+                     (SELECT id FROM dim_rate_set WHERE code = ?),
+                     (SELECT id FROM dim_period WHERE code = ?),
+                     (SELECT id FROM dim_ruleset WHERE code = ?),
+                     NULL, ?)",
+            params![c.0, c.1, c.2, c.3, c.4, c.5, c.6, c.7, c.8, c.9, c.10],
+        )?;
+    }
+    // B1 : devise_fonctionnelle → dim_currency.id, entite_parent → dim_entity.id.
+    // Le parent (M) est inséré en premier (tableau ordonné) → la sous-requête
+    // auto-référentielle résout correctement pour les filiales.
+    for e in ENTITIES {
+        con.execute(
+            "INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut) \
+             VALUES (?, ?,
+                     (SELECT id FROM dim_currency WHERE code_iso = ?),
+                     (SELECT id FROM dim_entity WHERE code = ?),
+                     ?)",
+            params![e.0, e.1, e.2, e.3, e.4],
+        )?;
+    }
     for sc in SOUS_CLASSES {
         con.execute(
             "INSERT INTO dim_sous_classe (code, libelle, classe, sens) VALUES (?, ?, ?, ?)",
             params![sc.0, sc.1, sc.2, sc.3],
         )?;
     }
-    for a in ACCOUNTS {
-        // Liste de colonnes explicite : `flow_scheme` (ajoutée) reste NULL — le
-        // schéma par défaut est dérivé de la classe à la conversion (cf.
-        // pipeline::convert), surchargeable ensuite via le CRUD.
+    // Doit précéder ACCOUNTS : dim_account.flow_scheme (B1) résout le code du
+    // schéma vers son id par sous-requête à l'insertion.
+    for s in FLOW_SCHEMES {
         con.execute(
-            "INSERT INTO dim_account (code, libelle, classe, sous_classe) \
-             VALUES (?, ?, ?, (SELECT id FROM dim_sous_classe WHERE code = ?))",
-            params![a.0, a.1, a.2, a.3],
+            "INSERT INTO dim_flow_scheme (code, libelle) VALUES (?, ?)",
+            params![s.0, s.1],
+        )?;
+    }
+    for a in ACCOUNTS {
+        // Q45 : `flow_scheme` est désormais 100 % user-driven (plus de défaut dérivé
+        // de la classe dans la vue). On peuple donc chaque compte explicitement,
+        // à partir de sa classe, pour reproduire l'ancien comportement par défaut
+        // (bilan → BILAN, resultat → RESULTAT) → golden **stable**. B1 : résolu en id.
+        let scheme = if a.2 == "resultat" { "RESULTAT" } else { "BILAN" };
+        con.execute(
+            "INSERT INTO dim_account (code, libelle, classe, sous_classe, flow_scheme) \
+             VALUES (?, ?, ?, (SELECT id FROM dim_sous_classe WHERE code = ?), \
+                     (SELECT id FROM dim_flow_scheme WHERE code = ?))",
+            params![a.0, a.1, a.2, a.3, scheme],
         )?;
     }
     for f in FLOWS {
@@ -892,24 +921,12 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             params![f.0, f.1],
         )?;
     }
-    for s in FLOW_SCHEMES {
-        con.execute(
-            "INSERT INTO dim_flow_scheme (code, libelle) VALUES (?, ?)",
-            params![s.0, s.1],
-        )?;
-    }
     for i in FLOW_SCHEME_ITEMS {
         con.execute(
             "INSERT INTO sat_flow_scheme_item \
              (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+             VALUES ((SELECT id FROM dim_flow_scheme WHERE code = ?), ?, ?, ?, ?, ?)",
             params![i.0, i.1, i.2, i.3, i.4, i.5],
-        )?;
-    }
-    for c in CURRENCIES {
-        con.execute(
-            "INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES (?, ?, ?)",
-            params![c.0, c.1, c.2],
         )?;
     }
     for n in NATURES {
@@ -930,7 +947,11 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute(
             "INSERT INTO sat_perimeter \
              (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-             VALUES ((SELECT id FROM dim_perimeter_set WHERE code = ?), ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (\
+               (SELECT id FROM dim_perimeter_set WHERE code = ?), \
+               ?, ?, \
+               (SELECT id FROM dim_method WHERE code = ?), \
+               ?, ?, ?, ?)",
             params![k.0, k.1, k.2, k.3, Money(v.0), Money(v.1), v.2, v.3],
         )?;
     }

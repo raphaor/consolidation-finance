@@ -214,7 +214,8 @@ const TABLES: &[TableDef] = &[
         // (caractéristique) ne sont pas des colonnes en dur : ils sont gérés via
         // la page « Attributs de dimension » (characteristics / custom_references)
         // et **découverts dynamiquement** par [`resolve_table`].
-        // `flow_scheme` (nullable) sélectionne le schéma de flux du compte (Q32).
+        // `flow_scheme` (nullable, Q45 : 100 % user-driven) sélectionne le schéma
+        // de flux du compte (Q32). NULL = exclu de la conversion/clôture (option b).
         columns: &["code", "libelle", "classe", "sous_classe", "flow_scheme"],
         pk: &["code"],
         auto_pk: false,
@@ -896,6 +897,240 @@ async fn remove(
 
 // ─────────────────────────── Renommage de code (B1, étape 7) ────────────────────
 
+// ─────────── Rôle 3 — garde JSON/expressions (chantier B1) ──────────────────
+//
+// Les codes peuvent être enfouis dans des champs JSON (`dim_rule.definition`,
+// `dim_aggregate.definition`, `dim_indicator.expression`) ou dans `app_config`.
+// Ces contenus stockent encore des **codes** (pas des ids) tant que l'étape 6
+// (migration JSON → ids) n'est pas terminée. La garde ci-dessous les scanne
+// pour bloquer un renommage qui rendrait des règles/indicateurs incohérents.
+//
+// Couverture :
+//   • `app_config.pivot_currency`             (codes de `dim_currency`)
+//   • `dim_rule.definition`  scope[*].val     (codes de `dim_method` via colonne sat_perimeter `methode`)
+//   • `dim_rule.definition`  selection[*].val (codes des dims de `fact_entry`)
+//   • `dim_rule.definition`  destination[*].value (mode=override)
+//   • `dim_rule.definition`  operations[*].coefficient (codes de `dim_coefficient`)
+//   • `dim_rule.definition`  selection[*].via (codes de `dim_characteristic`)
+//   • `dim_aggregate.definition` selection[*].val et via
+//   • `dim_indicator.expression` `[code]`     (codes de `dim_aggregate`)
+//
+// Non couverts (sans risque aujourd'hui — dimensions non encore renommables) :
+//   • `ref` dans selections (codes de `dim_custom_reference`) — ref. pas encore renommable.
+//   • `dim_indicator.grain` contient des noms de colonnes, pas des codes de membres.
+
+/// Noms de colonnes `fact_entry` / `stg_entry` qui correspondent à `sql_table`.
+/// Utilisés pour repérer `selection.dim` et `destination.<key>` dans les JSON.
+fn fact_dims_for(sql_table: &str) -> &'static [&'static str] {
+    match sql_table {
+        "dim_entity" => &["entity", "partner", "share"],
+        "dim_account" => &["account"],
+        "dim_flow" => &["flow"],
+        "dim_currency" => &["currency"],
+        "dim_nature" => &["nature"],
+        "dim_period" => &["period", "entry_period"],
+        "dim_phase" => &["phase"],
+        _ => &[],
+    }
+}
+
+/// Colonne de `sat_perimeter` dont les **valeurs** proviennent de `sql_table`.
+/// `None` pour les dims qui n'ont pas d'équivalent direct dans sat_perimeter.
+fn scope_col_for(sql_table: &str) -> Option<&'static str> {
+    match sql_table {
+        "dim_method" => Some("methode"),
+        _ => None,
+    }
+}
+
+/// Requête tous les couples `(code, texte)` d'une table, pour un seul champ.
+fn fetch_str_pairs(
+    con: &duckdb::Connection,
+    sql: &str,
+) -> Result<Vec<(String, String)>, AppError> {
+    let mut stmt = con.prepare(sql).map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(db_err)?;
+    rows.map(|r| r.map_err(db_err)).collect()
+}
+
+/// `true` si `scope[*].val = old` pour les conditions où `scope[*].dim = scope_col`.
+fn scope_has_val(json: &JsonValue, scope_col: &str, old: &str) -> bool {
+    json.get("scope")
+        .and_then(|v| v.as_array())
+        .map_or(false, |arr| {
+            arr.iter().any(|c| {
+                c.get("dim").and_then(|x| x.as_str()) == Some(scope_col)
+                    && c.get("val").and_then(|x| x.as_str()) == Some(old)
+            })
+        })
+}
+
+/// `true` si l'une des conditions `selection[*]` (dans `operations[*]` ou au
+/// niveau racine pour les postes) a `dim = dim_name` et `val = old`.
+fn selection_has_val(json: &JsonValue, dim_name: &str, old: &str) -> bool {
+    let check = |sel: &JsonValue| {
+        sel.as_array().map_or(false, |conds| {
+            conds.iter().any(|c| {
+                c.get("dim").and_then(|x| x.as_str()) == Some(dim_name)
+                    && c.get("val").and_then(|x| x.as_str()) == Some(old)
+            })
+        })
+    };
+    // Postes (dim_aggregate) : selection au niveau racine.
+    if check(&json["selection"]) {
+        return true;
+    }
+    // Règles (dim_rule) : selection dans chaque opération.
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| ops.iter().any(|op| check(&op["selection"])))
+}
+
+/// `true` si l'une des destinations `mode=override` a `dim_name.value = old`.
+fn destination_has_override(json: &JsonValue, dim_name: &str, old: &str) -> bool {
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| {
+            ops.iter().any(|op| {
+                op.get("destination")
+                    .and_then(|d| d.as_object())
+                    .and_then(|d| d.get(dim_name))
+                    .map_or(false, |entry| {
+                        entry.get("mode").and_then(|x| x.as_str()) == Some("override")
+                            && entry.get("value").and_then(|x| x.as_str()) == Some(old)
+                    })
+            })
+        })
+}
+
+/// `true` si l'une des opérations a `coefficient = old` (code de dim_coefficient).
+fn operations_have_coeff(json: &JsonValue, old: &str) -> bool {
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| {
+            ops.iter().any(|op| {
+                op.get("coefficient").and_then(|x| x.as_str()) == Some(old)
+            })
+        })
+}
+
+/// `true` si l'une des conditions de selection (règle ou poste) a `via = old`
+/// (code de dim_characteristic).
+fn selection_has_via(json: &JsonValue, old: &str) -> bool {
+    let check = |sel: &JsonValue| {
+        sel.as_array().map_or(false, |conds| {
+            conds.iter().any(|c| c.get("via").and_then(|x| x.as_str()) == Some(old))
+        })
+    };
+    if check(&json["selection"]) {
+        return true;
+    }
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| ops.iter().any(|op| check(&op["selection"])))
+}
+
+/// Scan des occurrences du code `old` dans les contenus JSON/texte (rôle 3).
+///
+/// Retourne une liste de descriptions humaines (table[code].champ) des blocages.
+/// Liste vide = aucun blocage JSON détecté.
+fn scan_json_blockers(
+    con: &duckdb::Connection,
+    sql_table: &str,
+    old: &str,
+) -> Result<Vec<String>, AppError> {
+    let mut blockers = Vec::new();
+
+    // 1. app_config.pivot_currency — codes de dim_currency.
+    if sql_table == "dim_currency" {
+        let v: duckdb::Result<String> = con.query_row(
+            "SELECT value FROM app_config WHERE key = 'pivot_currency'",
+            [],
+            |r| r.get(0),
+        );
+        match v {
+            Ok(val) if val == old => blockers.push("app_config.pivot_currency".into()),
+            _ => {}
+        }
+    }
+
+    let json_dims = fact_dims_for(sql_table);
+    let scope_col = scope_col_for(sql_table);
+    let is_coeff = sql_table == "dim_coefficient";
+    let is_char = sql_table == "dim_characteristic";
+
+    // 2. dim_rule.definition
+    if !json_dims.is_empty() || scope_col.is_some() || is_coeff || is_char {
+        let rules = fetch_str_pairs(
+            con,
+            "SELECT code, definition FROM dim_rule WHERE definition IS NOT NULL",
+        )?;
+        for (rule_code, def) in &rules {
+            let Ok(json) = serde_json::from_str::<JsonValue>(def) else {
+                continue;
+            };
+            if let Some(sc) = scope_col {
+                if scope_has_val(&json, sc, old) {
+                    blockers.push(format!("dim_rule[{rule_code}].scope(dim={sc})"));
+                }
+            }
+            for &dim in json_dims {
+                if selection_has_val(&json, dim, old) {
+                    blockers.push(format!("dim_rule[{rule_code}].selection(dim={dim})"));
+                }
+                if destination_has_override(&json, dim, old) {
+                    blockers.push(format!("dim_rule[{rule_code}].destination(dim={dim})"));
+                }
+            }
+            if is_coeff && operations_have_coeff(&json, old) {
+                blockers.push(format!("dim_rule[{rule_code}].coefficient"));
+            }
+            if is_char && selection_has_via(&json, old) {
+                blockers.push(format!("dim_rule[{rule_code}].via"));
+            }
+        }
+    }
+
+    // 3. dim_aggregate.definition
+    if !json_dims.is_empty() || is_char {
+        let aggs = fetch_str_pairs(
+            con,
+            "SELECT code, definition FROM dim_aggregate WHERE definition IS NOT NULL",
+        )?;
+        for (agg_code, def) in &aggs {
+            let Ok(json) = serde_json::from_str::<JsonValue>(def) else {
+                continue;
+            };
+            for &dim in json_dims {
+                if selection_has_val(&json, dim, old) {
+                    blockers.push(format!("dim_aggregate[{agg_code}].selection(dim={dim})"));
+                }
+            }
+            if is_char && selection_has_via(&json, old) {
+                blockers.push(format!("dim_aggregate[{agg_code}].via"));
+            }
+        }
+    }
+
+    // 4. dim_indicator.expression — codes de dim_aggregate encadrés par [].
+    if sql_table == "dim_aggregate" {
+        let pattern = format!("[{old}]");
+        let inds = fetch_str_pairs(
+            con,
+            "SELECT code, expression FROM dim_indicator WHERE expression IS NOT NULL",
+        )?;
+        for (ind_code, expr) in &inds {
+            if expr.contains(&pattern) {
+                blockers.push(format!("dim_indicator[{ind_code}].expression"));
+            }
+        }
+    }
+
+    Ok(blockers)
+}
+
 /// Renomme le `code` d'un membre d'une dimension à clé technique.
 ///
 /// Cœur du chantier « codes renommables » : possible **uniquement** si plus
@@ -903,12 +1138,8 @@ async fn remove(
 /// entrantes ont été migrées en clé technique `id`). Sinon le renommage
 /// orphelinerait des données → refus avec la liste des blocages.
 ///
-/// Limite connue : la garde s'appuie sur le **graphe de références**. Elle ne
-/// couvre pas encore les codes éventuellement **enfouis dans les JSON** (règles,
-/// coefficients, indicateurs) ni `app_config` — à ajouter avant de rendre
-/// renommables les dimensions dont les valeurs apparaissent dans ces contenus
-/// (cf. `docs/PLAN_RENOMMAGE_CODES.md` rôle 3). Les dimensions aujourd'hui
-/// éligibles (ex. `variant`) n'y figurent pas.
+/// Garde renforcée (rôle 3) : scan des codes enfouis dans les JSON de règles /
+/// postes / indicateurs et dans `app_config` (cf. `scan_json_blockers`).
 pub fn rename_code(
     con: &duckdb::Connection,
     api_table: &str,
@@ -949,6 +1180,15 @@ pub fn rename_code(
     }
     if references::value_exists(con, sql_table, code_col, new).map_err(db_err)? {
         return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+
+    // Garde rôle 3 : codes enfouis dans les JSON/expressions.
+    let json_blockers = scan_json_blockers(con, sql_table, old)?;
+    if !json_blockers.is_empty() {
+        return Err(AppError::conflict(format!(
+            "code non renommable : encore présent dans {}",
+            json_blockers.join(", ")
+        )));
     }
 
     con.execute(
@@ -1797,5 +2037,113 @@ mod tests {
         bad.insert("code".into(), JsonValue::String("700".into()));
         bad.insert("comportement".into(), JsonValue::String("NOPE".into()));
         assert!(validate_references(&def, &bad, &con).is_err());
+    }
+
+    // ── Rôle 3 : garde JSON/expressions ─────────────────────────────────────
+
+    fn seed_rule(con: &Connection, code: &str, definition: &str) {
+        con.execute(
+            "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
+            [code, code, definition],
+        )
+        .unwrap();
+    }
+
+    /// `scan_json_blockers` détecte un code de méthode dans le scope d'une règle.
+    /// Note : `rename_code` pour `dim_method` est encore bloqué par la garde graphe
+    /// (`sat_perimeter.methode` non encore flippée) ; ce test vérifie le scan JSON
+    /// directement — il deviendra le chemin réel une fois `sat_perimeter.methode`
+    /// migré en clé technique (flip prévu à l'étape suivante du chantier B1).
+    #[test]
+    fn role3_method_bloque_si_dans_scope_rule() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // seed_all ne peuple pas dim_rule (c'est seed_demo_rules) — on l'insère ici.
+        seed_rule(
+            &con,
+            "ELIM_IC",
+            r#"{"scope":[{"target":"entity","dim":"methode","op":"=","val":"globale"},{"target":"partner","dim":"methode","op":"=","val":"globale"}],"operations":[]}"#,
+        );
+        let blockers = scan_json_blockers(&con, "dim_method", "globale").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("dim_rule") && b.contains("scope")),
+            "doit détecter 'globale' dans le scope d'une règle : {blockers:?}"
+        );
+    }
+
+    /// Aucun bloquer JSON pour un code de méthode absent des règles.
+    #[test]
+    fn role3_method_ok_si_absent_des_regles() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // Insérer une méthode qui n'apparaît dans aucune règle.
+        con.execute(
+            "INSERT INTO dim_method (code, libelle) VALUES ('PROP_TEST', 'Test')",
+            [],
+        )
+        .unwrap();
+        let blockers = scan_json_blockers(&con, "dim_method", "PROP_TEST").unwrap();
+        assert!(
+            blockers.is_empty(),
+            "aucun bloquer JSON pour une méthode non référencée : {blockers:?}"
+        );
+    }
+
+    /// Un code de compte présent dans la selection d'une règle bloque le renommage.
+    #[test]
+    fn role3_account_bloque_si_dans_selection_rule() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        seed_rule(
+            &con,
+            "TEST_ACCOUNT",
+            r#"{"scope":[],"operations":[{"selection":[{"dim":"account","op":"=","val":"700"}],"destination":{}}]}"#,
+        );
+        // dim_account n'est pas encore flipable par graphe (stg_entry/fact_entry en codes),
+        // donc la garde graphe prend le dessus — le test valide juste que scan_json_blockers
+        // détecte bien le blocage JSON indépendamment.
+        let blockers = scan_json_blockers(&con, "dim_account", "700").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("TEST_ACCOUNT") && b.contains("selection")),
+            "doit détecter 700 dans selection de TEST_ACCOUNT : {blockers:?}"
+        );
+    }
+
+    /// Un code de poste dans l'expression d'un indicateur bloque le renommage.
+    #[test]
+    fn role3_aggregate_bloque_si_dans_expression_indicator() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // Insérer un poste et un indicateur qui le référence.
+        con.execute(
+            "INSERT INTO dim_aggregate (code, libelle, level, definition) VALUES ('CA','CA','corporate','{\"level\":\"corporate\",\"selection\":[]}')",
+            [],
+        )
+        .unwrap();
+        con.execute(
+            "INSERT INTO dim_indicator (code, libelle, expression, grain, format) VALUES ('KPI_CA','KPI CA','[CA]','[]','number')",
+            [],
+        )
+        .unwrap();
+        let blockers = scan_json_blockers(&con, "dim_aggregate", "CA").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("KPI_CA")),
+            "doit détecter [CA] dans l'expression de KPI_CA : {blockers:?}"
+        );
+    }
+
+    /// La devise pivot dans app_config bloque le renommage de la devise.
+    #[test]
+    fn role3_currency_bloque_si_pivot() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // Le seed peuple app_config.pivot_currency = 'EUR'.
+        // dim_currency a encore des FK code-based → garde graphe d'abord,
+        // mais scan_json_blockers doit détecter le blocage app_config.
+        let blockers = scan_json_blockers(&con, "dim_currency", "EUR").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("app_config.pivot_currency")),
+            "doit détecter EUR dans app_config.pivot_currency : {blockers:?}"
+        );
     }
 }

@@ -95,7 +95,7 @@ const fn ri(
 /// Le graphe complet des références du modèle.
 ///
 /// Les auto-références statiques (`dim_flow.flux_de_report → dim_flow.code`,
-/// `dim_entity.entite_parent → dim_entity.code`) sont incluses : la validation à
+/// `dim_entity.entite_parent → dim_entity.id` [contrat code]) sont incluses : la validation à
 /// l'écriture tolère la valeur égale à la PK de la ligne elle-même (cf.
 /// `masterdata::validate_references`). L'ancienne `dim_account.compte_parent` est
 /// désormais une **référence directe** dynamique (cf. [`dynamic_references`] et
@@ -103,19 +103,14 @@ const fn ri(
 pub const REFERENCES: &[Reference] = &[
     // dim_consolidation (ex dim_scenario) — objet composite (PK technique `id`).
     ri("dim_consolidation", "phase", "dim_scenario_category", "code", false),
-    r("dim_consolidation", "exercice", "dim_period", "code"),
-    r("dim_consolidation", "perimeter_period", "dim_period", "code"),
-    r("dim_consolidation", "rate_period", "dim_period", "code"),
-    r(
-        "dim_consolidation",
-        "presentation_currency",
-        "dim_currency",
-        "code_iso",
-    ),
-    // FK migrée en clé technique (chantier B1, étape 3) : stockée en id, contrat
+    ri("dim_consolidation", "exercice", "dim_period", "code", false),
+    ri("dim_consolidation", "perimeter_period", "dim_period", "code", false),
+    ri("dim_consolidation", "rate_period", "dim_period", "code", false),
+    ri("dim_consolidation", "presentation_currency", "dim_currency", "code_iso", false),
+    // FK migrées en clé technique (chantier B1, étape 3) : stockées en id, contrat
     // externe = code. Première FK dim→dim flippée (pilote du mécanisme générique).
     ri("dim_consolidation", "variant", "dim_variant", "code", false),
-    r("dim_consolidation", "ruleset_code", "dim_ruleset", "code"),
+    ri("dim_consolidation", "ruleset_code", "dim_ruleset", "code", false),
     ri("dim_consolidation", "rate_set", "dim_rate_set", "code", false),
     ri("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code", false),
     // Conso d'à-nouveau : auto-référence vers une autre consolidation (N-1 figé).
@@ -125,18 +120,16 @@ pub const REFERENCES: &[Reference] = &[
         "dim_consolidation",
         "id",
     ),
-    // dim_entity
-    rq(
-        "dim_entity",
-        "devise_fonctionnelle",
-        "dim_currency",
-        "code_iso",
-    ),
-    r("dim_entity", "entite_parent", "dim_entity", "code"),
+    // dim_entity — B1 : devise_fonctionnelle et entite_parent stockés en id.
+    ri("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso", false),
+    ri("dim_entity", "entite_parent", "dim_entity", "code", false),
     // dim_account (compte_parent est désormais une référence directe dynamique)
     ri("dim_account", "sous_classe", "dim_sous_classe", "code", false),
-    // Schéma de flux du compte (nullable : NULL = défaut dérivé de la classe).
-    r("dim_account", "flow_scheme", "dim_flow_scheme", "code"),
+    // Schéma de flux du compte — migré en clé technique (chantier B1) : stocké en
+    // id, contrat code. Q45 : 100 % user-driven (plus de défaut dérivé de la
+    // classe) ; NULL = toléré mais exclu (option b). Rend `flow_scheme`
+    // entièrement flippée (renommable), avec ses deux références (cf. sat ci-dessous).
+    ri("dim_account", "flow_scheme", "dim_flow_scheme", "code", false),
     // dim_flow est désormais une dimension nue (code, libelle) : tout le
     // comportement (taux, écart, report, à-nouveau) vit dans sat_flow_scheme_item.
     // sat_perimeter (perimeter_set/entity/period = PK ; methode obligatoire)
@@ -146,7 +139,9 @@ pub const REFERENCES: &[Reference] = &[
     ri("sat_perimeter", "perimeter_set", "dim_perimeter_set", "code", true),
     rq("sat_perimeter", "entity", "dim_entity", "code"),
     rq("sat_perimeter", "period", "dim_period", "code"),
-    rq("sat_perimeter", "methode", "dim_method", "code"),
+    // `methode` migrée en clé technique (B1) : stockée en id, contrat externe = code.
+    // Rend la dimension `dim_method` entièrement flippée (renommable).
+    ri("sat_perimeter", "methode", "dim_method", "code", true),
     // sat_exchange_rate (rate_set/currency_source/period = PK)
     // `rate_set` migrée en clé technique (chantier B1) : stockée en id, contrat
     // externe = code. Rend la dimension `rate_set` entièrement flippée (plus
@@ -160,7 +155,10 @@ pub const REFERENCES: &[Reference] = &[
     ),
     rq("sat_exchange_rate", "period", "dim_period", "code"),
     // sat_flow_scheme_item (scheme/flow = PK ; flux_* nullables vers dim_flow)
-    rq("sat_flow_scheme_item", "scheme", "dim_flow_scheme", "code"),
+    // `scheme` migrée en clé technique (chantier B1) : stockée en id, contrat
+    // code. Seconde réf. vers dim_flow_scheme → la dimension est entièrement
+    // flippée (plus aucune référence code-based → renommable).
+    ri("sat_flow_scheme_item", "scheme", "dim_flow_scheme", "code", true),
     rq("sat_flow_scheme_item", "flow", "dim_flow", "code"),
     r("sat_flow_scheme_item", "flux_ecart", "dim_flow", "code"),
     r("sat_flow_scheme_item", "flux_de_report", "dim_flow", "code"),

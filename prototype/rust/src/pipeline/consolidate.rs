@@ -68,7 +68,7 @@ JOIN sat_perimeter per\n\
  AND per.entity = f.entity\n\
  AND per.period = ?\n\
 JOIN dim_method m\n\
-  ON m.code = per.methode\n\
+  ON m.id = per.methode\n\
 WHERE m.consolidated = true;  -- équivalence et méthodes futures exclues par flag"
     );
     con.execute(

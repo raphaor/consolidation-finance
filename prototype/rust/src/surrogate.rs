@@ -147,7 +147,8 @@ pub fn migrate_consolidation_fk_to_id(con: &Connection) -> duckdb::Result<()> {
         return Ok(()); // déjà migrée
     }
     // Table neuve au schéma cible (FK en INTEGER), réinjection avec résolution
-    // code→id des 4 FK flippées ; les autres colonnes sont reprises telles quelles.
+    // code→id des 9 FK. Résout toutes les FK en une passe pour être compatible
+    // avec le DDL courant, quelle que soit la vague d'origine.
     let create_mig = crate::schema::DDL_DIM_CONSOLIDATION
         .replace("dim_consolidation (", "dim_consolidation__mig (");
     con.execute_batch(&format!(
@@ -157,16 +158,99 @@ pub fn migrate_consolidation_fk_to_id(con: &Connection) -> duckdb::Result<()> {
              perimeter_period, rate_set, rate_period, ruleset_code,
              a_nouveau_consolidation_id, statut)
          SELECT c.id, c.libelle,
-                (SELECT s.id FROM dim_scenario_category s WHERE s.code = c.phase),
-                c.exercice,
-                (SELECT p.id FROM dim_perimeter_set p WHERE p.code = c.perimeter_set),
-                (SELECT v.id FROM dim_variant v WHERE v.code = c.variant),
-                c.presentation_currency, c.perimeter_period,
-                (SELECT r.id FROM dim_rate_set r WHERE r.code = c.rate_set),
-                c.rate_period, c.ruleset_code, c.a_nouveau_consolidation_id, c.statut
+                (SELECT s.id  FROM dim_scenario_category s WHERE s.code     = c.phase),
+                (SELECT pe.id FROM dim_period pe             WHERE pe.code   = c.exercice),
+                (SELECT ps.id FROM dim_perimeter_set ps      WHERE ps.code   = c.perimeter_set),
+                (SELECT v.id  FROM dim_variant v             WHERE v.code    = c.variant),
+                (SELECT cu.id FROM dim_currency cu           WHERE cu.code_iso = c.presentation_currency),
+                (SELECT pp.id FROM dim_period pp             WHERE pp.code   = c.perimeter_period),
+                (SELECT r.id  FROM dim_rate_set r            WHERE r.code    = c.rate_set),
+                (SELECT rp.id FROM dim_period rp             WHERE rp.code   = c.rate_period),
+                (SELECT rs.id FROM dim_ruleset rs            WHERE rs.code   = c.ruleset_code),
+                c.a_nouveau_consolidation_id, c.statut
          FROM dim_consolidation c;
          DROP TABLE dim_consolidation;
          ALTER TABLE dim_consolidation__mig RENAME TO dim_consolidation;",
+    ))?;
+    Ok(())
+}
+
+/// Migration in-place des **FK restantes** de `dim_consolidation` (chantier B1,
+/// étape 3 — 2ᵉ vague) sur une base existante : convertit `exercice`,
+/// `presentation_currency`, `perimeter_period`, `rate_period`, `ruleset_code`
+/// du stockage **code (TEXT)** vers la **clé technique (id, INTEGER)**.
+/// Idempotent (no-op si `exercice` est déjà entier).
+///
+/// À appeler **après** [`migrate_consolidation_fk_to_id`] (qui a déjà flippé
+/// phase/perimeter_set/variant/rate_set) et après [`ensure_ids`].
+/// Requiert `dim_period`, `dim_currency` et `dim_ruleset` avec leurs `id`.
+pub fn migrate_consolidation_fk_to_id_v2(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_consolidation")? {
+        return Ok(());
+    }
+    if column_is_int(con, "dim_consolidation", "exercice")? {
+        return Ok(()); // déjà migrée
+    }
+    let create_mig = crate::schema::DDL_DIM_CONSOLIDATION
+        .replace("dim_consolidation (", "dim_consolidation__mig2 (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         INSERT INTO dim_consolidation__mig2
+            (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
+             perimeter_period, rate_set, rate_period, ruleset_code,
+             a_nouveau_consolidation_id, statut)
+         SELECT c.id, c.libelle,
+                c.phase,
+                (SELECT p.id FROM dim_period p WHERE p.code = c.exercice),
+                c.perimeter_set,
+                c.variant,
+                (SELECT cu.id FROM dim_currency cu WHERE cu.code_iso = c.presentation_currency),
+                (SELECT pp.id FROM dim_period pp WHERE pp.code = c.perimeter_period),
+                c.rate_set,
+                (SELECT rp.id FROM dim_period rp WHERE rp.code = c.rate_period),
+                (SELECT rs.id FROM dim_ruleset rs WHERE rs.code = c.ruleset_code),
+                c.a_nouveau_consolidation_id, c.statut
+         FROM dim_consolidation c;
+         DROP TABLE dim_consolidation;
+         ALTER TABLE dim_consolidation__mig2 RENAME TO dim_consolidation;",
+    ))?;
+    Ok(())
+}
+
+/// Migration in-place de `dim_entity` (chantier B1) : convertit
+/// `devise_fonctionnelle` (TEXT code_iso → INTEGER dim_currency.id) et
+/// `entite_parent` (TEXT code → INTEGER dim_entity.id auto-référence).
+/// Idempotent (no-op si `devise_fonctionnelle` est déjà entier).
+///
+/// Requiert `dim_currency` avec ses `id` et `ensure_ids` sur `dim_entity`.
+/// Le parent (M) doit avoir été résolu avant les filiales — garanti car on
+/// lit la table d'origine entière (`dim_entity e`) et on résout avec
+/// `WHERE code = e.entite_parent` (sous-requête sur la table originale).
+pub fn migrate_entity_fk_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_entity")? {
+        return Ok(());
+    }
+    if column_is_int(con, "dim_entity", "devise_fonctionnelle")? {
+        return Ok(());
+    }
+    // `dim_entity__mig` est créée sans colonne `id` (DDL_DIM_ENTITY n'en a pas —
+    // c'est `ensure_ids` qui la gère). On la recrée manuellement AVANT l'INSERT
+    // pour conserver les ids existants : le self-join `entite_parent → ep.id`
+    // lit la table **originale** dont les ids sont encore cohérents.
+    let create_mig = crate::schema::DDL_DIM_ENTITY
+        .replace("dim_entity (", "dim_entity__mig (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         ALTER TABLE dim_entity__mig ADD COLUMN id INTEGER;
+         INSERT INTO dim_entity__mig (code, libelle, devise_fonctionnelle, entite_parent, statut, id)
+         SELECT e.code, e.libelle,
+                (SELECT cu.id FROM dim_currency cu WHERE cu.code_iso = e.devise_fonctionnelle),
+                (SELECT ep.id FROM dim_entity  ep WHERE ep.code      = e.entite_parent),
+                e.statut,
+                e.id
+         FROM dim_entity e;
+         DROP TABLE dim_entity;
+         ALTER TABLE dim_entity__mig RENAME TO dim_entity;",
     ))?;
     Ok(())
 }
@@ -220,17 +304,55 @@ pub fn migrate_sat_perimeter_fk_to_id(con: &Connection) -> duckdb::Result<()> {
     }
     let create_mig = crate::schema::DDL_SAT_PERIMETER
         .replace("sat_perimeter (", "sat_perimeter__mig (");
+    // Détecte si methode est déjà entier (migration methode jouée avant) ou encore code.
+    let methode_is_int = column_is_int(con, "sat_perimeter", "methode").unwrap_or(false);
+    let methode_expr = if methode_is_int {
+        "s.methode".to_string()
+    } else {
+        "(SELECT m.id FROM dim_method m WHERE m.code = s.methode)".to_string()
+    };
     con.execute_batch(&format!(
         "{create_mig}
          INSERT INTO sat_perimeter__mig
             (perimeter_set, entity, period, methode,
              pct_interet, pct_integration, entree, sortie)
          SELECT (SELECT p.id FROM dim_perimeter_set p WHERE p.code = s.perimeter_set),
-                s.entity, s.period, s.methode,
+                s.entity, s.period, {methode_expr},
                 s.pct_interet, s.pct_integration, s.entree, s.sortie
          FROM sat_perimeter s;
          DROP TABLE sat_perimeter;
          ALTER TABLE sat_perimeter__mig RENAME TO sat_perimeter;",
+    ))?;
+    Ok(())
+}
+
+/// Migration in-place de `sat_flow_scheme_item.scheme` (option A, chantier B1)
+/// sur une base **existante** : convertit la colonne du stockage **code (TEXT)**
+/// vers la **clé technique (id, INTEGER)**. Idempotent (no-op si déjà entier).
+///
+/// `scheme` est dans la PK `(scheme, flow)` → **reconstruction de table** (cf.
+/// [`migrate_sat_exchange_rate_fk_to_id`]). À appeler au démarrage serveur
+/// **après** [`ensure_ids`] (`dim_flow_scheme` doit avoir son `id`). Seconde réf.
+/// vers `dim_flow_scheme` (avec `dim_account.flow_scheme`) → rend la dimension
+/// entièrement flippée (renommable).
+pub fn migrate_sat_flow_scheme_item_scheme_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "sat_flow_scheme_item")? {
+        return Ok(());
+    }
+    if column_is_int(con, "sat_flow_scheme_item", "scheme")? {
+        return Ok(()); // déjà migrée
+    }
+    let create_mig = crate::schema::DDL_SAT_FLOW_SCHEME_ITEM
+        .replace("sat_flow_scheme_item (", "sat_flow_scheme_item__mig (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         INSERT INTO sat_flow_scheme_item__mig
+            (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau)
+         SELECT (SELECT fs.id FROM dim_flow_scheme fs WHERE fs.code = s.scheme),
+                s.flow, s.taux_conversion, s.flux_ecart, s.flux_de_report, s.flux_a_nouveau
+         FROM sat_flow_scheme_item s;
+         DROP TABLE sat_flow_scheme_item;
+         ALTER TABLE sat_flow_scheme_item__mig RENAME TO sat_flow_scheme_item;",
     ))?;
     Ok(())
 }
@@ -278,6 +400,54 @@ pub fn migrate_account_sous_classe_to_id(con: &Connection) -> duckdb::Result<()>
          ) WHERE dim_account.sous_classe IS NOT NULL;
          ALTER TABLE dim_account DROP COLUMN sous_classe;
          ALTER TABLE dim_account RENAME COLUMN sous_classe__b1 TO sous_classe;",
+    )?;
+    Ok(())
+}
+
+/// Migration B1 : bascule `dim_account.flow_scheme` du code (TEXT) vers la clé
+/// technique (id, INTEGER) sur une base existante. Idempotent.
+///
+/// Comme `sous_classe`, c'est une colonne simple hors PK/UNIQUE : **add temp +
+/// update + drop + rename**, qui préserve les colonnes custom runtime. La table
+/// cible `dim_flow_scheme` doit déjà avoir son `id` (cf. [`ensure_ids`]).
+pub fn migrate_account_flow_scheme_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_account")? {
+        return Ok(());
+    }
+    if column_is_int(con, "dim_account", "flow_scheme")? {
+        return Ok(()); // déjà migrée
+    }
+    con.execute_batch(
+        "ALTER TABLE dim_account ADD COLUMN flow_scheme__b1 INTEGER;
+         UPDATE dim_account SET flow_scheme__b1 = (
+             SELECT fs.id FROM dim_flow_scheme fs WHERE fs.code = dim_account.flow_scheme
+         ) WHERE dim_account.flow_scheme IS NOT NULL;
+         ALTER TABLE dim_account DROP COLUMN flow_scheme;
+         ALTER TABLE dim_account RENAME COLUMN flow_scheme__b1 TO flow_scheme;",
+    )?;
+    Ok(())
+}
+
+/// Migration B1 : bascule `sat_perimeter.methode` du code (TEXT) vers la clé
+/// technique (id, INTEGER) sur une base existante. Idempotent.
+///
+/// `methode` est une colonne simple hors PK → **add temp + update + drop + rename**.
+/// La table cible `dim_method` doit déjà avoir son `id` (cf. [`ensure_ids`]).
+/// Rend la dimension `dim_method` entièrement flippée (renommable).
+pub fn migrate_sat_perimeter_methode_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "sat_perimeter")? {
+        return Ok(());
+    }
+    if column_is_int(con, "sat_perimeter", "methode")? {
+        return Ok(()); // déjà migrée
+    }
+    con.execute_batch(
+        "ALTER TABLE sat_perimeter ADD COLUMN methode__b1 INTEGER;
+         UPDATE sat_perimeter SET methode__b1 = (
+             SELECT m.id FROM dim_method m WHERE m.code = sat_perimeter.methode
+         ) WHERE sat_perimeter.methode IS NOT NULL;
+         ALTER TABLE sat_perimeter DROP COLUMN methode;
+         ALTER TABLE sat_perimeter RENAME COLUMN methode__b1 TO methode;",
     )?;
     Ok(())
 }
@@ -372,7 +542,9 @@ mod tests {
             "INSERT INTO dim_scenario_category (code, libelle) VALUES ('REEL','Réel');
              INSERT INTO dim_variant (code, libelle) VALUES ('BASE','Base');
              INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL','Périmètre');
-             INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES','Taux réels');",
+             INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES','Taux réels');
+             INSERT INTO dim_period (code, libelle) VALUES ('2024','Exercice 2024');
+             INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES ('EUR','Euro',2);",
         )
         .unwrap();
 
@@ -394,39 +566,127 @@ mod tests {
 
         migrate_consolidation_fk_to_id(&con).expect("migration");
 
-        // Les 4 FK sont désormais des entiers = id de leur cible ; id préservé.
-        let (phase, perim, variant, rate, id): (i64, i64, i64, i64, i64) = con
+        // Les 9 FK sont désormais des entiers = id de leur cible ; id préservé.
+        let (phase, perim, variant, rate, exercice, pres, id): (i64, i64, i64, i64, i64, i64, i64) = con
             .query_row(
-                "SELECT phase, perimeter_set, variant, rate_set, id FROM dim_consolidation",
+                "SELECT phase, perimeter_set, variant, rate_set, exercice, \
+                        presentation_currency, id FROM dim_consolidation",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
             )
             .expect("FK migrées en entiers");
         assert_eq!(id, 1, "id préservé");
-        assert_eq!(
-            phase,
-            crate::resolve::resolve_id(&con, "dim_scenario_category", "REEL").unwrap().unwrap()
-        );
-        assert_eq!(
-            perim,
-            crate::resolve::resolve_id(&con, "dim_perimeter_set", "PERIM_REEL").unwrap().unwrap()
-        );
-        assert_eq!(
-            variant,
-            crate::resolve::resolve_id(&con, "dim_variant", "BASE").unwrap().unwrap()
-        );
-        assert_eq!(
-            rate,
-            crate::resolve::resolve_id(&con, "dim_rate_set", "RATES").unwrap().unwrap()
-        );
-        // exercice (non flippé) reste un code.
-        let exercice: String = con
-            .query_row("SELECT exercice FROM dim_consolidation", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(exercice, "2024");
+        assert_eq!(phase,    crate::resolve::resolve_id(&con, "dim_scenario_category", "REEL").unwrap().unwrap());
+        assert_eq!(perim,    crate::resolve::resolve_id(&con, "dim_perimeter_set", "PERIM_REEL").unwrap().unwrap());
+        assert_eq!(variant,  crate::resolve::resolve_id(&con, "dim_variant", "BASE").unwrap().unwrap());
+        assert_eq!(rate,     crate::resolve::resolve_id(&con, "dim_rate_set", "RATES").unwrap().unwrap());
+        assert_eq!(exercice, crate::resolve::resolve_id(&con, "dim_period", "2024").unwrap().unwrap());
+        assert_eq!(pres,     crate::resolve::resolve_id(&con, "dim_currency", "EUR").unwrap().unwrap());
 
         // Idempotent : second passage no-op (variant déjà entier).
         migrate_consolidation_fk_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn migrate_consolidation_fk_to_id_v2_convertit_les_codes_restants() {
+        // Simule une base en état intermédiaire : après v1 (phase/variant/perimeter_set/
+        // rate_set en INTEGER) mais avant v2 (exercice/presentation_currency/etc. encore TEXT).
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_scenario_category (code, libelle) VALUES ('REEL','Réel');
+             INSERT INTO dim_variant (code, libelle) VALUES ('BASE','Base');
+             INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL','Périmètre');
+             INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES','Taux réels');
+             INSERT INTO dim_period (code, libelle) VALUES ('2024','Exercice 2024');
+             INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES ('EUR','Euro',2);",
+        )
+        .unwrap();
+
+        // État intermédiaire : phase/variant/perimeter_set/rate_set en id (v1 faite),
+        // exercice/presentation_currency/perimeter_period/rate_period en TEXT (v2 à faire).
+        con.execute_batch(
+            "DROP TABLE dim_consolidation;
+             CREATE TABLE dim_consolidation (
+                id INTEGER PRIMARY KEY, libelle TEXT,
+                phase INTEGER, exercice TEXT,
+                perimeter_set INTEGER, variant INTEGER,
+                presentation_currency TEXT, perimeter_period TEXT,
+                rate_set INTEGER, rate_period TEXT, ruleset_code TEXT,
+                a_nouveau_consolidation_id INTEGER, statut TEXT,
+                UNIQUE (phase, exercice, perimeter_set, variant, presentation_currency));
+             INSERT INTO dim_consolidation VALUES
+                (1,'Réel',
+                 (SELECT id FROM dim_scenario_category WHERE code='REEL'), '2024',
+                 (SELECT id FROM dim_perimeter_set WHERE code='PERIM_REEL'),
+                 (SELECT id FROM dim_variant WHERE code='BASE'),
+                 'EUR','2024',
+                 (SELECT id FROM dim_rate_set WHERE code='RATES'),
+                 '2024', NULL, NULL, 'ouvert');",
+        )
+        .unwrap();
+
+        migrate_consolidation_fk_to_id_v2(&con).expect("migration v2");
+
+        let (ex, pres, pp, rp, ruleset, id): (i64, i64, i64, i64, Option<i64>, i64) = con
+            .query_row(
+                "SELECT exercice, presentation_currency, perimeter_period, \
+                        rate_period, ruleset_code, id FROM dim_consolidation",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .expect("FK migrées en entiers");
+        assert_eq!(id, 1, "id préservé");
+        assert_eq!(ex, crate::resolve::resolve_id(&con, "dim_period", "2024").unwrap().unwrap());
+        assert_eq!(pres, crate::resolve::resolve_id(&con, "dim_currency", "EUR").unwrap().unwrap());
+        assert_eq!(pp, crate::resolve::resolve_id(&con, "dim_period", "2024").unwrap().unwrap());
+        assert_eq!(rp, crate::resolve::resolve_id(&con, "dim_period", "2024").unwrap().unwrap());
+        assert!(ruleset.is_none(), "ruleset_code NULL préservé");
+
+        // Idempotent.
+        migrate_consolidation_fk_to_id_v2(&con).expect("migration v2 #2");
+    }
+
+    #[test]
+    fn migrate_entity_fk_to_id_convertit_les_codes_en_id() {
+        // Simule une base existante : dim_entity avec devise_fonctionnelle et
+        // entite_parent en TEXT. Vérifie que la migration convertit les deux en id.
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES ('EUR','Euro',2);
+             INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES ('USD','Dollar',2);",
+        )
+        .unwrap();
+
+        // Rétrograde dim_entity à l'ancien schéma (TEXT) + id (ensure_ids l'avait ajouté).
+        con.execute_batch(
+            "DROP TABLE dim_entity;
+             CREATE TABLE dim_entity (
+                code TEXT PRIMARY KEY, libelle TEXT,
+                devise_fonctionnelle TEXT, entite_parent TEXT, statut TEXT);
+             ALTER TABLE dim_entity ADD COLUMN id INTEGER DEFAULT nextval('seq_dim_entity');
+             INSERT INTO dim_entity (code,libelle,devise_fonctionnelle,entite_parent,statut)
+                VALUES ('M','Mère','EUR',NULL,'actif');
+             INSERT INTO dim_entity (code,libelle,devise_fonctionnelle,entite_parent,statut)
+                VALUES ('A','Filiale A','USD','M','actif');",
+        )
+        .unwrap();
+
+        migrate_entity_fk_to_id(&con).expect("migration entity");
+
+        let (df_m, ep_m, df_a, ep_a): (i64, Option<i64>, i64, Option<i64>) = {
+            let m_id: i64 = con.query_row("SELECT id FROM dim_entity WHERE code='M'", [], |r| r.get(0)).unwrap();
+            let (df_m, ep_m) = con.query_row("SELECT devise_fonctionnelle, entite_parent FROM dim_entity WHERE code='M'", [], |r| Ok((r.get::<_,i64>(0)?, r.get::<_,Option<i64>>(1)?))).unwrap();
+            let (df_a, ep_a) = con.query_row("SELECT devise_fonctionnelle, entite_parent FROM dim_entity WHERE code='A'", [], |r| Ok((r.get::<_,i64>(0)?, r.get::<_,Option<i64>>(1)?))).unwrap();
+            let _ = m_id;
+            (df_m, ep_m, df_a, ep_a)
+        };
+        assert_eq!(df_m, crate::resolve::resolve_id(&con, "dim_currency", "EUR").unwrap().unwrap());
+        assert!(ep_m.is_none(), "parent de M est NULL");
+        assert_eq!(df_a, crate::resolve::resolve_id(&con, "dim_currency", "USD").unwrap().unwrap());
+        assert_eq!(ep_a, Some(crate::resolve::resolve_id(&con, "dim_entity", "M").unwrap().unwrap()));
+
+        // Idempotent.
+        migrate_entity_fk_to_id(&con).expect("migration entity #2");
     }
 
     #[test]
@@ -479,7 +739,8 @@ mod tests {
         // Simule une base existante : sat_perimeter avec perimeter_set en TEXT.
         let con = setup();
         con.execute_batch(
-            "INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL','Périmètre');",
+            "INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL','Périmètre');
+             INSERT INTO dim_method (code, libelle) VALUES ('globale','Intégration globale');",
         )
         .unwrap();
 
@@ -515,6 +776,55 @@ mod tests {
 
         // Idempotent.
         migrate_sat_perimeter_fk_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn migrate_sat_perimeter_methode_to_id_convertit_les_codes() {
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_method (code, libelle) VALUES ('globale','Globale'),('prop','Prop');",
+        )
+        .unwrap();
+        // Simule une base existante avec methode en TEXT.
+        con.execute_batch(
+            "DROP TABLE sat_perimeter;
+             CREATE TABLE sat_perimeter (
+                perimeter_set INTEGER, entity TEXT, period TEXT, methode TEXT,
+                pct_interet DECIMAL(10,4), pct_integration DECIMAL(10,4),
+                entree BOOLEAN DEFAULT FALSE, sortie BOOLEAN DEFAULT FALSE,
+                PRIMARY KEY (perimeter_set, entity, period)
+             );
+             INSERT INTO sat_perimeter VALUES (1,'E1','2024','globale',1.0,1.0,FALSE,FALSE);
+             INSERT INTO sat_perimeter VALUES (1,'E2','2024','prop',0.5,0.5,FALSE,FALSE);",
+        )
+        .unwrap();
+
+        migrate_sat_perimeter_methode_to_id(&con).expect("migration");
+
+        let methode_e1: i64 = con
+            .query_row(
+                "SELECT methode FROM sat_perimeter WHERE entity = 'E1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let globale_id = crate::resolve::resolve_id(&con, "dim_method", "globale")
+            .unwrap()
+            .unwrap();
+        assert_eq!(methode_e1, globale_id, "methode E1 migrée en id");
+
+        let methode_e2: i64 = con
+            .query_row(
+                "SELECT methode FROM sat_perimeter WHERE entity = 'E2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let prop_id = crate::resolve::resolve_id(&con, "dim_method", "prop").unwrap().unwrap();
+        assert_eq!(methode_e2, prop_id, "methode E2 migrée en id");
+
+        // Idempotent.
+        migrate_sat_perimeter_methode_to_id(&con).expect("migration #2");
     }
 
     #[test]
@@ -619,6 +929,102 @@ mod tests {
         );
         // Idempotent.
         migrate_account_sous_classe_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn migrate_account_flow_scheme_to_id_convertit_les_codes() {
+        // Base existante : dim_account avec flow_scheme TEXT (codes), + une colonne
+        // custom runtime (patron B) qui doit survivre à la migration.
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_flow_scheme (code, libelle) VALUES
+                ('BILAN','Schéma bilan'),('RESULTAT','Schéma résultat');
+             ALTER TABLE dim_account ADD COLUMN compte_parent TEXT;
+             DROP TABLE dim_account;
+             CREATE TABLE dim_account (
+                code TEXT PRIMARY KEY, libelle TEXT, classe TEXT,
+                sous_classe TEXT, flow_scheme TEXT, compte_parent TEXT
+             );
+             INSERT INTO dim_account VALUES
+                ('10','Cap','bilan',NULL,'BILAN','ROOT'),
+                ('101','Capital','bilan',NULL,NULL,'10');",
+        )
+        .unwrap();
+
+        migrate_account_flow_scheme_to_id(&con).expect("migration");
+
+        let (fs, parent): (Option<i64>, String) = con
+            .query_row(
+                "SELECT flow_scheme, compte_parent FROM dim_account WHERE code='10'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(parent, "ROOT", "colonne custom préservée");
+        assert_eq!(
+            fs,
+            Some(
+                crate::resolve::resolve_id(&con, "dim_flow_scheme", "BILAN")
+                    .unwrap()
+                    .unwrap()
+            ),
+            "flow_scheme résolu en id"
+        );
+        // La ligne à flow_scheme NULL reste NULL (option b : pas d'id inventé).
+        let fs_null: Option<i64> = con
+            .query_row(
+                "SELECT flow_scheme FROM dim_account WHERE code='101'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(fs_null.is_none(), "flow_scheme NULL préservé");
+        // Idempotent.
+        migrate_account_flow_scheme_to_id(&con).expect("migration #2");
+    }
+
+    #[test]
+    fn migrate_sat_flow_scheme_item_scheme_to_id_convertit_les_codes_en_id() {
+        // Simule une base existante : sat_flow_scheme_item avec scheme en TEXT
+        // (codes). On vérifie que la migration la reconstruit avec scheme en id.
+        let con = setup();
+        con.execute_batch(
+            "INSERT INTO dim_flow_scheme (code, libelle) VALUES ('BILAN','Schéma bilan');",
+        )
+        .unwrap();
+
+        // Rétrograde sat_flow_scheme_item à l'ancien schéma (scheme TEXT, code).
+        con.execute_batch(
+            "DROP TABLE sat_flow_scheme_item;
+             CREATE TABLE sat_flow_scheme_item (
+                scheme TEXT, flow TEXT, taux_conversion TEXT,
+                flux_ecart TEXT, flux_de_report TEXT, flux_a_nouveau TEXT,
+                PRIMARY KEY (scheme, flow)
+             );
+             INSERT INTO sat_flow_scheme_item VALUES
+                ('BILAN','F99','close_n',NULL,'F99',NULL);",
+        )
+        .unwrap();
+
+        migrate_sat_flow_scheme_item_scheme_to_id(&con).expect("migration");
+
+        let (scheme_id, flow): (i64, String) = con
+            .query_row(
+                "SELECT scheme, flow FROM sat_flow_scheme_item",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("ligne présente après migration");
+        assert_eq!(flow, "F99", "autres colonnes préservées");
+        assert_eq!(
+            scheme_id,
+            crate::resolve::resolve_id(&con, "dim_flow_scheme", "BILAN")
+                .unwrap()
+                .unwrap(),
+            "scheme résolu en id"
+        );
+        // Idempotent.
+        migrate_sat_flow_scheme_item_scheme_to_id(&con).expect("migration #2");
     }
 
     #[test]

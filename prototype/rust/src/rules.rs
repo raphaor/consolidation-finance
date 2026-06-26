@@ -824,6 +824,67 @@ fn push_condition(
     }
 }
 
+/// Pour une colonne de `sat_perimeter` migrée en clé technique (ri() dans le
+/// graphe de références), résout un code JSON → id avant binding.
+///
+/// Retourne `None` si la colonne n'est pas ri() (pas de résolution à faire) ou
+/// si la valeur n'est pas une chaîne (IS NULL / IS NOT NULL / numérique : on
+/// laisse `push_condition` gérer). En cas d'IN avec liste de codes, résout
+/// chaque code individuellement.
+fn resolve_sat_perimeter_val_to_id(
+    con: &Connection,
+    sat_col: &str,
+    val: &Option<JsonValue>,
+) -> Result<Option<JsonValue>, duckdb::Error> {
+    // Chercher dans le graphe une ri() sur (sat_perimeter, sat_col).
+    let target_table = references::all_references(con)
+        .into_iter()
+        .find(|r| {
+            r.table == "sat_perimeter"
+                && r.column == sat_col
+                && r.target_display_column.is_some()
+        })
+        .map(|r| r.target_table);
+    let Some(target) = target_table else {
+        return Ok(None); // colonne non flippée, pas de résolution
+    };
+    match val {
+        Some(JsonValue::String(code)) => {
+            let id = crate::resolve::resolve_id(con, &target, code)?;
+            let resolved = id
+                .map(|i| JsonValue::Number(serde_json::Number::from(i)))
+                .unwrap_or(JsonValue::Null);
+            Ok(Some(resolved))
+        }
+        Some(JsonValue::Array(arr)) => {
+            let mut ids = Vec::with_capacity(arr.len());
+            for v in arr {
+                if let JsonValue::String(code) = v {
+                    if let Some(id) = crate::resolve::resolve_id(con, &target, code)? {
+                        ids.push(JsonValue::Number(serde_json::Number::from(id)));
+                    }
+                }
+            }
+            Ok(Some(JsonValue::Array(ids)))
+        }
+        _ => Ok(None), // NULL, bool, number : pas de résolution
+    }
+}
+
+/// Retourne la valeur effective à passer à [`push_condition`] pour une condition
+/// de scope sur `sat_perimeter` : si la colonne est ri() (id stocké), résout les
+/// codes en ids ; sinon renvoie `c.val` inchangé.
+fn scope_effective_val(
+    con: &Connection,
+    sat_col: &str,
+    val: &Option<JsonValue>,
+) -> Result<Option<JsonValue>, duckdb::Error> {
+    match resolve_sat_perimeter_val_to_id(con, sat_col, val)? {
+        Some(resolved) => Ok(Some(resolved)),
+        None => Ok(val.clone()),
+    }
+}
+
 /// Conversion d'une valeur JSON générique vers `DbValue` pour binding.
 ///
 /// Les booléens sont acceptés (utiles pour `entree`/`sortie`), les chaînes
@@ -1069,7 +1130,8 @@ fn exec_operation(
         );
         for c in scope.iter().filter(|c| c.target == "entity") {
             let operand = format!("p_ent.{}", c.dim);
-            let cond = push_condition(&operand, &c.op, &c.val, &mut params)
+            let eff_val = scope_effective_val(con, &c.dim, &c.val)?;
+            let cond = push_condition(&operand, &c.op, &eff_val, &mut params)
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
         }
@@ -1083,7 +1145,8 @@ fn exec_operation(
         );
         for c in scope.iter().filter(|c| c.target == "partner") {
             let operand = format!("p_part.{}", c.dim);
-            let cond = push_condition(&operand, &c.op, &c.val, &mut params)
+            let eff_val = scope_effective_val(con, &c.dim, &c.val)?;
+            let cond = push_condition(&operand, &c.op, &eff_val, &mut params)
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
         }
@@ -1097,7 +1160,8 @@ fn exec_operation(
         );
         for c in scope.iter().filter(|c| c.target == "share") {
             let operand = format!("p_share.{}", c.dim);
-            let cond = push_condition(&operand, &c.op, &c.val, &mut params)
+            let eff_val = scope_effective_val(con, &c.dim, &c.val)?;
+            let cond = push_condition(&operand, &c.op, &eff_val, &mut params)
                 .map_err(duckdb_synthesis_error)?;
             joins.push_str(&format!("\n AND {cond}"));
         }
@@ -1132,8 +1196,9 @@ fn exec_operation(
                         JOIN dim_consolidation s_an ON s_an.id = s_cur.a_nouveau_consolidation_id \
                         WHERE s_cur.id = e.consolidation_id)\n \
                     AND {alias}.period = (\
-                        SELECT s_an.exercice FROM dim_consolidation s_cur \
+                        SELECT p.code FROM dim_consolidation s_cur \
                         JOIN dim_consolidation s_an ON s_an.id = s_cur.a_nouveau_consolidation_id \
+                        JOIN dim_period p ON p.id = s_an.exercice \
                         WHERE s_cur.id = e.consolidation_id)"
             ));
         }

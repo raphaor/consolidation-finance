@@ -328,13 +328,15 @@ async fn import_perimeter(
     std::fs::write(&tmp, &bytes)
         .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
-    // `perimeter_set` est stocké en id (B1) : le CSV porte des codes, résolus par
-    // sous-requête corrélée. Le reader est aliasé `src` (cf. loader::build_insert_sql).
+    // `perimeter_set` et `methode` sont stockés en id (B1) : le CSV porte des codes,
+    // résolus par sous-requête corrélée.
     let sql = format!(
         "INSERT INTO sat_perimeter \
          (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
          SELECT (SELECT id FROM dim_perimeter_set WHERE code = src.perimeter_set), \
-                src.entity, src.period, src.methode, src.pct_interet, src.pct_integration, \
+                src.entity, src.period, \
+                (SELECT id FROM dim_method WHERE code = src.methode), \
+                src.pct_interet, src.pct_integration, \
                 CAST(src.entree AS BOOLEAN), CAST(src.sortie AS BOOLEAN) \
          FROM read_csv_auto('{path}', header=true) AS src \
          ON CONFLICT(perimeter_set, entity, period) DO UPDATE SET \

@@ -20,7 +20,8 @@ const TOL: f64 = 0.01;
 fn cid(con: &Connection, phase: &str, exercice: &str) -> i64 {
     con.query_row(
         "SELECT id FROM dim_consolidation \
-         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) AND exercice = ?",
+         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) \
+         AND exercice = (SELECT id FROM dim_period WHERE code = ?)",
         [phase, exercice],
         |r| r.get(0),
     )
@@ -55,7 +56,7 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
 
     // Active l'à-nouveau (F99 → F00) — le seed laisse le champ NULL.
     con.execute(
-        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme='BILAN' AND flow='F99'",
+        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme=(SELECT id FROM dim_flow_scheme WHERE code='BILAN') AND flow='F99'",
         [],
     )
     .expect("activer flux_a_nouveau");
@@ -81,7 +82,8 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
 
          INSERT INTO sat_perimeter
             (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
-         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025','globale',1.0,1.0,FALSE,FALSE);",
+         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025',
+                 (SELECT id FROM dim_method WHERE code = 'globale'),1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed période + périmètre CUR");
     // dim_consolidation CUR : a_nouveau_consolidation_id pointe vers REEL.
@@ -90,10 +92,15 @@ fn a_nouveau_reporte_la_cloture_sur_l_ouverture() {
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
          VALUES (nextval('seq_consolidation'), 'Réel 2025', \
-                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2025', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'),
+                 (SELECT id FROM dim_period WHERE code = '2025'),
                  (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'), \
-                 (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
-                 '2025', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2025', NULL, ?, 'ouvert')",
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'),
+                 (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+                 (SELECT id FROM dim_period WHERE code = '2025'),
+                 (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
+                 (SELECT id FROM dim_period WHERE code = '2025'),
+                 NULL, ?, 'ouvert')",
         [reel_id],
     )
     .expect("seed consolidation CUR");
@@ -151,7 +158,7 @@ fn sans_a_nouveau_le_f00_de_liasse_est_conserve() {
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
     con.execute(
-        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme='BILAN' AND flow='F99'",
+        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme=(SELECT id FROM dim_flow_scheme WHERE code='BILAN') AND flow='F99'",
         [],
     )
     .expect("activer flux_a_nouveau");
@@ -179,7 +186,7 @@ fn snapshot_reel_et_cur() -> Connection {
     create_schema(&con).expect("create_schema");
     seed_all(&con).expect("seed_all");
     con.execute(
-        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme='BILAN' AND flow='F99'",
+        "UPDATE sat_flow_scheme_item SET flux_a_nouveau='F00' WHERE scheme=(SELECT id FROM dim_flow_scheme WHERE code='BILAN') AND flow='F99'",
         [],
     )
     .expect("activer flux_a_nouveau");
@@ -197,10 +204,15 @@ fn snapshot_reel_et_cur() -> Connection {
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
          VALUES (nextval('seq_consolidation'), 'Réel 2025', \
-                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2025', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'),
+                 (SELECT id FROM dim_period WHERE code = '2025'),
                  (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'), \
-                 (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR', \
-                 '2025', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2025', NULL, ?, 'ouvert')",
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'),
+                 (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+                 (SELECT id FROM dim_period WHERE code = '2025'),
+                 (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
+                 (SELECT id FROM dim_period WHERE code = '2025'),
+                 NULL, ?, 'ouvert')",
         [reel_id],
     )
     .expect("seed consolidation CUR");
@@ -218,8 +230,10 @@ fn coherence_signale_divergences_et_orphelins() {
     con.execute_batch(
         "INSERT INTO sat_perimeter
             (perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie)
-         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025','globale',1.0,1.0,FALSE,FALSE),
-                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'NEW','2025','globale',1.0,1.0,FALSE,FALSE);",
+         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025',
+                 (SELECT id FROM dim_method WHERE code = 'globale'),1.0,1.0,FALSE,FALSE),
+                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'NEW','2025',
+                 (SELECT id FROM dim_method WHERE code = 'globale'),1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed périmètre CUR");
 
@@ -259,9 +273,12 @@ fn coherence_ok_quand_perimetre_aligne() {
     con.execute_batch(
         "INSERT INTO sat_perimeter
             (perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie)
-         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025','globale',1.0,1.0,FALSE,FALSE),
-                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'A','2025','globale',1.0,1.0,FALSE,FALSE),
-                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'B','2025','globale',1.0,1.0,FALSE,FALSE);",
+         VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'M','2025',
+                 (SELECT id FROM dim_method WHERE code = 'globale'),1.0,1.0,FALSE,FALSE),
+                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'A','2025',
+                 (SELECT id FROM dim_method WHERE code = 'globale'),1.0,1.0,FALSE,FALSE),
+                ((SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_CUR'),'B','2025',
+                 (SELECT id FROM dim_method WHERE code = 'globale'),1.0,1.0,FALSE,FALSE);",
     )
     .expect("seed périmètre CUR");
 

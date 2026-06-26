@@ -170,53 +170,90 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
 
         INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL', 'Périmètre réel 2024');
 
+        -- dim_period et dim_currency avant dim_consolidation (B1 : exercice /
+        -- presentation_currency / perimeter_period / rate_period sont des FK id).
+        INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut) VALUES
+            ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
+            ('2024','Exercice 2024','exercice','2024-01-01','2024-12-31','ouvert');
+
+        INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES
+            ('EUR','Euro',2),
+            ('USD','Dollar US',2),
+            ('GBP','Livre sterling',2),
+            ('CHF','Franc suisse',2),
+            ('JPY','Yen',0);
+
         -- dim_consolidation : objet composite (PK technique auto `id`). L'id est
         -- alloué par nextval (déterministe 1 sur base fraîche) — `load_params(&con, 1)`
-        -- pointe donc sur cette consolidation. Les colonnes `perimeter_period` et
-        -- `rate_period` valent l'exercice ('2024').
+        -- pointe donc sur cette consolidation. B1 : toutes les FK sont en id.
         INSERT INTO dim_consolidation
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut)
         VALUES
             (nextval('seq_consolidation'), 'Réel',
-             (SELECT id FROM dim_scenario_category WHERE code = 'REEL'), '2024',
+             (SELECT id FROM dim_scenario_category WHERE code = 'REEL'),
+             (SELECT id FROM dim_period WHERE code = '2024'),
              (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL'),
-             (SELECT id FROM dim_variant WHERE code = 'BASE'), 'EUR',
-             '2024', (SELECT id FROM dim_rate_set WHERE code = 'RATES'), '2024', NULL, NULL, 'ouvert');
+             (SELECT id FROM dim_variant WHERE code = 'BASE'),
+             (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+             (SELECT id FROM dim_period WHERE code = '2024'),
+             (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
+             (SELECT id FROM dim_period WHERE code = '2024'),
+             NULL, NULL, 'ouvert');
 
-        INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut) VALUES
-            ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
-            ('2024','Exercice 2024','exercice','2024-01-01','2024-12-31','ouvert');
-
-        -- Entités : M (mère, EUR) + filiales réparties sur 5 devises.
+        -- Entités : M (mère) insérée en premier, puis les filiales.
+        -- B1 : devise_fonctionnelle → dim_currency.id, entite_parent → dim_entity.id.
+        -- Deux passes : la 1ʳᵉ insère M (entite_parent NULL) ; la 2ᵉ insère les
+        -- filiales et peut résoudre l'id de M par sous-requête.
+        INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut)
+        VALUES ('M', 'Entite 0',
+                (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+                NULL, 'actif');
         INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut)
         SELECT
-            CASE WHEN i = 0 THEN 'M' ELSE 'E' || LPAD(CAST(i AS VARCHAR), 02, '0') END,
+            'E' || LPAD(CAST(i AS VARCHAR), 02, '0'),
             'Entite ' || CAST(i AS VARCHAR),
-            CASE (i % 5)
-                WHEN 0 THEN 'EUR'
-                WHEN 1 THEN 'USD'
-                WHEN 2 THEN 'GBP'
-                WHEN 3 THEN 'CHF'
-                ELSE        'JPY'
-            END,
-            CASE WHEN i = 0 THEN NULL ELSE 'M' END,
+            (SELECT id FROM dim_currency WHERE code_iso =
+                CASE (i % 5)
+                    WHEN 0 THEN 'EUR'
+                    WHEN 1 THEN 'USD'
+                    WHEN 2 THEN 'GBP'
+                    WHEN 3 THEN 'CHF'
+                    ELSE        'JPY'
+                END),
+            (SELECT id FROM dim_entity WHERE code = 'M'),
             'actif'
-        FROM range(0, {N_ENTITIES}) t(i);
+        FROM range(1, {N_ENTITIES}) t(i);
+
+        -- Schémas de flux (doit précéder dim_account : flow_scheme B1 résout le
+        -- code du schéma vers son id par sous-requête à l'insertion).
+        INSERT INTO dim_flow_scheme (code, libelle) VALUES
+            ('BILAN','Schéma bilan'),
+            ('RESULTAT','Schéma résultat');
 
         -- Plan de compte : mix bilan / resultat / flux (sous_classe NULLABLE,
-        -- laissée à NULL pour les comptes synthétiques).
-        INSERT INTO dim_account (code, libelle, classe, sous_classe)
+        -- laissée à NULL pour les comptes synthétiques). Q45 : `flow_scheme` est
+        -- peuplé explicitement (bilan/flux → BILAN, resultat → RESULTAT), plus de
+        -- défaut dérivé de la classe dans la vue. B1 : résolu en id.
+        INSERT INTO dim_account (code, libelle, classe, sous_classe, flow_scheme)
         SELECT
-            'ACC_' || LPAD(CAST(i AS VARCHAR), 04, '0'),
-            'Compte ' || CAST(i AS VARCHAR),
-            CASE
-                WHEN i % 5 IN (0,1) THEN 'bilan'
-                WHEN i % 5 IN (2,3) THEN 'resultat'
-                ELSE                     'flux'
-            END,
-            NULL
-        FROM range(0, {N_ACCOUNTS}) t(i);
+            code,
+            libelle,
+            classe,
+            NULL,
+            (SELECT fs.id FROM dim_flow_scheme fs
+             WHERE fs.code = (CASE classe WHEN 'resultat' THEN 'RESULTAT' ELSE 'BILAN' END))
+        FROM (
+            SELECT
+                'ACC_' || LPAD(CAST(i AS VARCHAR), 04, '0') AS code,
+                'Compte ' || CAST(i AS VARCHAR)             AS libelle,
+                CASE
+                    WHEN i % 5 IN (0,1) THEN 'bilan'
+                    WHEN i % 5 IN (2,3) THEN 'resultat'
+                    ELSE                     'flux'
+                END AS classe
+            FROM range(0, {N_ACCOUNTS}) t(i)
+        );
 
         INSERT INTO dim_flow (code, libelle) VALUES
             ('F00','Ouverture'),
@@ -227,34 +264,24 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             ('F98','Sortie périmètre'),
             ('F99','Clôture');
 
-        INSERT INTO dim_flow_scheme (code, libelle) VALUES
-            ('BILAN','Schéma bilan'),
-            ('RESULTAT','Schéma résultat');
-
-        -- Articulation complète par schéma (cf. Q32 / v_flow_behavior).
+        -- Articulation complète par schéma (cf. Q32 / v_flow_behavior). B1 :
+        -- `scheme` résolu en id (PK composite reconstruite).
         INSERT INTO sat_flow_scheme_item
             (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) VALUES
-            ('BILAN','F00','close_n1','F80','F99',NULL),
-            ('BILAN','F01','close_n1','F80','F99',NULL),
-            ('BILAN','F20','avg','F81','F99',NULL),
-            ('BILAN','F80','close_n',NULL,'F99',NULL),
-            ('BILAN','F81','close_n',NULL,'F99',NULL),
-            ('BILAN','F98','close_n',NULL,'F99',NULL),
-            ('BILAN','F99','close_n',NULL,'F99',NULL),
-            ('RESULTAT','F00','avg',NULL,'F99',NULL),
-            ('RESULTAT','F01','avg',NULL,'F99',NULL),
-            ('RESULTAT','F20','avg',NULL,'F99',NULL),
-            ('RESULTAT','F80','close_n',NULL,'F99',NULL),
-            ('RESULTAT','F81','close_n',NULL,'F99',NULL),
-            ('RESULTAT','F98','avg',NULL,'F99',NULL),
-            ('RESULTAT','F99','avg',NULL,'F99',NULL);
-
-        INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES
-            ('EUR','Euro',2),
-            ('USD','Dollar US',2),
-            ('GBP','Livre sterling',2),
-            ('CHF','Franc suisse',2),
-            ('JPY','Yen',0);
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F00','close_n1','F80','F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F01','close_n1','F80','F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F20','avg','F81','F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F80','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F81','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F98','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F99','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F00','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F01','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F20','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F80','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F81','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F98','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F99','avg',NULL,'F99',NULL);
 
         INSERT INTO dim_nature (code, libelle, rules) VALUES
             ('0LIASS','Liasse',NULL),
@@ -274,7 +301,10 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
             (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
         SELECT
             (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL'), e.code, '2024',
-            CASE WHEN e.rn % 7 = 0 THEN 'proportionnelle' ELSE 'globale' END,
+            CASE WHEN e.rn % 7 = 0
+                THEN (SELECT id FROM dim_method WHERE code = 'proportionnelle')
+                ELSE (SELECT id FROM dim_method WHERE code = 'globale')
+            END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,
             CASE WHEN e.rn % 10 = 1 THEN TRUE ELSE FALSE END,
@@ -315,8 +345,11 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
     // Index des entités/comptes pour le JOIN.
     con.execute_batch(
         "CREATE TEMP TABLE ent_idx AS
-            SELECT ROW_NUMBER() OVER () - 1 AS rn, code, devise_fonctionnelle
-            FROM dim_entity ORDER BY code;
+            SELECT ROW_NUMBER() OVER () - 1 AS rn, e.code,
+                   cu.code_iso AS devise_fonctionnelle
+            FROM dim_entity e
+            JOIN dim_currency cu ON cu.id = e.devise_fonctionnelle
+            ORDER BY e.code;
          CREATE TEMP TABLE acc_idx AS
             SELECT ROW_NUMBER() OVER () - 1 AS rn, code
             FROM dim_account ORDER BY code;",
