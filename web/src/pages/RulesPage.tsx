@@ -21,7 +21,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
-import { sortForDisplay } from '../utils/format';
+import { compareText, sortForDisplay } from '../utils/format';
 import {
   DIM_TO_TABLE_FALLBACK,
   DimRefContext,
@@ -777,109 +777,109 @@ function RuleFormModal({
                 {/* Sélection */}
                 <div className="rule-section" style={{ marginTop: 0 }}>
                   <h4 className="rule-section__title">Sélection</h4>
-                  {op.selection.map((s, sIdx) => {
-                    // Options de traversée pour `s.dim` :
-                    // - caractéristiques N1 dont la dimension de base est `s.dim`
-                    //   (filtre sur la valeur N1 du membre, ex : `comportement = VENTES_IC`).
-                    // - références directes (patron B) portées par `s.dim`
-                    //   (filtre sur la colonne de référence, ex : `compte_parent = 60`).
-                    // - enums natifs `attr` (CHECK du DDL, ex : `account.classe`).
-                    const viaOptions = sortForDisplay(
-                      characteristics.filter((c) => c.base_dimension === s.dim),
-                      (c) => c.code,
-                    );
-                    const refOptions = sortForDisplay(
-                      customReferences.filter((r) => r.host_dimension === s.dim),
-                      (r) => r.column,
-                    );
-                    const attrOptions = sortForDisplay(
-                      nativeEnums.filter((e) => e.host_dimension === s.dim),
-                      (e) => e.column,
-                    );
-                    // Valeur courante du dropdown « Traverser » :
-                    // - '' → direct (pas de traversée)
-                    // - `via:<code>` → caractéristique N1
-                    // - `ref:<column>` → référence directe (custom ou native)
-                    // - `attr:<column>` → enum natif (CHECK du DDL)
-                    const traverseVal = s.via
-                      ? `via:${s.via}`
-                      : s.ref
-                        ? `ref:${s.ref}`
-                        : s.attr
-                          ? `attr:${s.attr}`
-                          : '';
-                    return (
-                      <div key={sIdx} className="rule-condition rule-condition--compact">
-                        <span className="rule-sel-dim">{s.dim}</span>
-                        <TraverseField
-                          value={traverseVal}
-                          disabled={s.dim === 'level'}
-                          viaOptions={viaOptions}
-                          refOptions={refOptions}
-                          attrOptions={attrOptions}
-                          onSelect={(v) => {
-                            if (v === '') {
-                              updateSelection(opIdx, sIdx, {
-                                via: undefined,
-                                ref: undefined,
-                                attr: undefined,
-                                val: '',
-                              });
-                            } else if (v.startsWith('via:')) {
-                              updateSelection(opIdx, sIdx, {
-                                via: v.slice(4),
-                                ref: undefined,
-                                attr: undefined,
-                                val: '',
-                              });
-                            } else if (v.startsWith('ref:')) {
-                              updateSelection(opIdx, sIdx, {
-                                via: undefined,
-                                ref: v.slice(4),
-                                attr: undefined,
-                                val: '',
-                              });
-                            } else if (v.startsWith('attr:')) {
-                              updateSelection(opIdx, sIdx, {
-                                via: undefined,
-                                ref: undefined,
-                                attr: v.slice(5),
-                                val: '',
-                              });
-                            }
-                          }}
-                        />
-                        <OpSelect
-                          value={s.op}
-                          onChange={(op) => updateSelection(opIdx, sIdx, { op })}
-                        />
-                        {!NULL_OPS.has(s.op) && (
-                          <label className="field field--grow">
-                            <span>Valeur</span>
-                            <SelectionValueField
-                              sel={s}
-                              customReferences={customReferences}
-                              nativeEnums={nativeEnums}
-                              op={s.op}
-                              value={s.val}
-                              onRawChange={(raw) =>
+                  {(() => {
+                    const sortedSelection = [...op.selection].sort((a, b) => {
+                      const aIdx = DEFAULT_SEL_DIMS.indexOf(a.dim);
+                      const bIdx = DEFAULT_SEL_DIMS.indexOf(b.dim);
+                      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                      if (aIdx !== -1) return -1;
+                      if (bIdx !== -1) return 1;
+                      return compareText(a.dim, b.dim);
+                    });
+                    return sortedSelection.map((s) => {
+                      const sIdx = op.selection.indexOf(s);
+                      const viaOptions = sortForDisplay(
+                        characteristics.filter((c) => c.base_dimension === s.dim),
+                        (c) => c.code,
+                      );
+                      const refOptions = sortForDisplay(
+                        customReferences.filter((r) => r.host_dimension === s.dim),
+                        (r) => r.column,
+                      );
+                      const attrOptions = sortForDisplay(
+                        nativeEnums.filter((e) => e.host_dimension === s.dim),
+                        (e) => e.column,
+                      );
+                      const traverseVal = s.via
+                        ? `via:${s.via}`
+                        : s.ref
+                          ? `ref:${s.ref}`
+                          : s.attr
+                            ? `attr:${s.attr}`
+                            : '';
+                      return (
+                        <div key={sIdx} className="rule-condition rule-condition--compact">
+                          <span className="rule-sel-dim">{s.dim}</span>
+                          <TraverseField
+                            value={traverseVal}
+                            disabled={s.dim === 'level'}
+                            viaOptions={viaOptions}
+                            refOptions={refOptions}
+                            attrOptions={attrOptions}
+                            onSelect={(v) => {
+                              if (v === '') {
                                 updateSelection(opIdx, sIdx, {
-                                  val: parseCondVal(s.op, raw),
-                                })
+                                  via: undefined,
+                                  ref: undefined,
+                                  attr: undefined,
+                                  val: '',
+                                });
+                              } else if (v.startsWith('via:')) {
+                                updateSelection(opIdx, sIdx, {
+                                  via: v.slice(4),
+                                  ref: undefined,
+                                  attr: undefined,
+                                  val: '',
+                                });
+                              } else if (v.startsWith('ref:')) {
+                                updateSelection(opIdx, sIdx, {
+                                  via: undefined,
+                                  ref: v.slice(4),
+                                  attr: undefined,
+                                  val: '',
+                                });
+                              } else if (v.startsWith('attr:')) {
+                                updateSelection(opIdx, sIdx, {
+                                  via: undefined,
+                                  ref: undefined,
+                                  attr: v.slice(5),
+                                  val: '',
+                                });
                               }
-                            />
-                          </label>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--danger"
-                          onClick={() => removeSelection(opIdx, sIdx)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    );
-                  })}
+                            }}
+                          />
+                          <OpSelect
+                            value={s.op}
+                            onChange={(op) => updateSelection(opIdx, sIdx, { op })}
+                          />
+                          {!NULL_OPS.has(s.op) && (
+                            <label className="field field--grow">
+                              <span>Valeur</span>
+                              <SelectionValueField
+                                sel={s}
+                                customReferences={customReferences}
+                                nativeEnums={nativeEnums}
+                                op={s.op}
+                                value={s.val}
+                                onRawChange={(raw) =>
+                                  updateSelection(opIdx, sIdx, {
+                                    val: parseCondVal(s.op, raw),
+                                  })
+                                }
+                              />
+                            </label>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--danger"
+                            onClick={() => removeSelection(opIdx, sIdx)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    });
+                  })()}
                   {(() => {
                     const presentSel = new Set(op.selection.map((s) => s.dim));
                     const baseSel = DEFAULT_SEL_DIMS.filter((d) =>
@@ -1965,6 +1965,19 @@ export function RulesPage() {
       {subtab === 'biblio' && <BibliothequeTab dims={dims} />}
       {subtab === 'jeux' && <JeuxTab />}
     </section>
+    </DimRefContext.Provider>
+  );
+}
+
+export function JeuxReglesPage() {
+  return (
+    <DimRefContext.Provider value={DIM_TO_TABLE_FALLBACK}>
+      <section className="page">
+        <div className="page__header">
+          <h1 className="page__title">Jeux de règles</h1>
+        </div>
+        <JeuxTab />
+      </section>
     </DimRefContext.Provider>
   );
 }
