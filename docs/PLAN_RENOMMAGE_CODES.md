@@ -30,7 +30,8 @@ codes-renommables, branche `feat/renommage-codes`, voir
   et `validate.rs`/`rules.rs` se **simplifient** (un JOIN `dim_perimeter_set` en
   moins, comparaison id=id directe).
   **`sous_classe` également** (4ᵉ) : `dim_account.sous_classe` en `id`. 1ʳᵉ **FK
-  native traversable** flippée → mécanisme **id-aware** dans `rules.rs` (cf. §3).
+  native traversable** flippée → mécanisme **id-aware** dans `rules.rs`
+  (`ref_code_contract`, cf. §8 étape 3 / commit `f846d0b`).
   Préalable Q44 livré : `SENS_CASE` retiré du code, `sens` user-driven sur
   `dim_sous_classe` (plus de valeur native structurante à préserver).
 - Robustesse : migration in-place par **reconstruction de table** (satellites PK),
@@ -42,11 +43,14 @@ codes-renommables, branche `feat/renommage-codes`, voir
 ### Modules clés (où regarder)
 - `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) +
   `migrate_consolidation_fk_to_id` + `migrate_sat_exchange_rate_fk_to_id` +
-  `migrate_sat_perimeter_fk_to_id` (reconstructions in-place). Le **registre
-  `SURROGATE_DIMS`**.
+  `migrate_sat_perimeter_fk_to_id` (reconstructions in-place) +
+  `migrate_account_sous_classe_to_id` (add+update+drop+rename, hors PK). Le
+  **registre `SURROGATE_DIMS`**.
 - `src/resolve.rs` — résolution code↔id (unitaire + cartes batch).
 - `src/references.rs` — `Reference.target_display_column` + constructeur `ri()`
-  (FK « id en stockage, code en contrat »). Patron de tout flip.
+  (FK « id en stockage, code en contrat »). Patron de tout flip. +
+  **`ref_code_contract(host_dim, col)`** : détecte les FK natives `ri()` pour la
+  traversée id-aware du moteur de règles (cf. §8 étape 3).
 - `src/masterdata.rs` — traduction code↔id aux frontières (`write_db_value`,
   `translate_rows_out`, `validate_references`, `get_references`, `table_schema`)
   + **`rename_code`** (+ route `/rename`).
@@ -59,6 +63,10 @@ codes-renommables, branche `feat/renommage-codes`, voir
 4. Loader : automatique (build_insert_sql lit `ri()`).
 5. **Lecteurs internes** : résoudre id→code (ou joindre sur id) — pipeline,
    reports, `validate.rs`, `rules.rs`, et **`server.rs`** (⚠ voir gotchas).
+   - **Cas particulier — FK native traversable** (`sous_classe`, `flow_scheme`…) :
+     la traversée de règles (`ref` / `map_ref`) lit la colonne hôte. Si elle est
+     `ri()` (id), utiliser `ref_code_contract` + le mécanisme id-aware de `rules.rs`
+     (JOIN cible sur id, lecture du code). Cf. §8 étape 3 + commit `f846d0b`.
 6. **Migration in-place** : reconstruction si la colonne est dans une PK/UNIQUE
    (cf. `migrate_consolidation_fk_to_id`), sinon add temp + update + drop + rename.
 7. `cargo test` (golden = filet) **+ smoke-test serveur par l'utilisateur**.
@@ -96,8 +104,9 @@ codes-renommables, branche `feat/renommage-codes`, voir
 Carte de coût des **dimensions de config** (cf. §8.3) — `rate_set`,
 `perimeter_set` et `sous_classe` sont **faites** :
 - **`flow_scheme`** : vue `v_flow_behavior` + défauts en dur `RESULTAT`/`BILAN`
-  (→ retirer, Q45) + `sat_flow_scheme_item.scheme` (PK composite). Mécanisme
-  id-aware règles **réutilisable** depuis `sous_classe` (cf. §3).
+  (→ retirer, Q45, mini-spec `FLOW_SCHEME_EXPLICITE.md`) + `sat_flow_scheme_item.scheme`
+  (PK composite). Mécanisme id-aware règles **réutilisable** depuis `sous_classe`
+  (`ref_code_contract`, cf. §8 étape 3).
 - **`ruleset`** : 5 handlers custom (`server.rs`) + `dim_ruleset_item` (PK) —
   volumineux mais mécanique. **À faire en dernier** (avec une modif métier
   supplémentaire, décision utilisateur).
@@ -109,8 +118,9 @@ Recommandation : `flow_scheme` (le mécanisme id-aware est en place depuis
 l'**étape 4 (fact_entry)** — le jalon majeur (rend entités/comptes renommables).
 
 ### Hors chantier (ne pas committer)
-Travail parallèle non-committé sur l'ergonomie des règles : `web/src/App.css`,
-`web/src/pages/RulesPage.tsx`. **Laisser tel quel.**
+Travail parallèle sur le frontend (`web/`) — ergonomie des règles, formules,
+indicateurs. Évolue en continu côté utilisateur. **Le staging du chantier exclut
+toujours `web/`** (on ne committe que `docs/` + `prototype/rust/`).
 
 ## 1. Le problème
 
@@ -373,3 +383,46 @@ mais le renommage reste lourd et fragile, et ne prépare pas la scalabilité vis
 - **`analysis`/`analysis2`** : dims libres → restent en texte (renommage sans
   objet) ; à adosser un jour à des listes de valeurs si besoin.
 - **Tests golden** dès l'étape 0 comme filet sur toute la migration.
+
+## 11. Chantier adjacent GELÉ — création de dimensions (ne pas démarrer avant B1)
+
+> Note ajoutée le 2026-06-25 par le chantier UI (refonte Référentiel). **À lire
+> avant de reprendre B1.**
+
+**Demande utilisateur** : étendre la page « Dimensions » pour créer une dimension
+custom qui, au choix —
+- (a) **emprunte** les valeurs d'une autre dimension (comme `partner`/`share` →
+  `entity`, ou un futur `devise_transaction` → `currency`) ;
+- (b) a sa **propre table de valeurs**, administrée dans Master data ;
+- (c) porte ses propres **attributs** (caractéristiques / emprunts), selon les
+  principes de l'interface actuelle.
+
+Aujourd'hui `dimensions::create_custom` ne crée qu'une dimension **libre**
+(colonne `TEXT`, catégorie Analytical, **sans référence**).
+
+**Décision : gelé tant que B1 est en déploiement.** Le risque d'interférence est
+élevé — la feature touche précisément les modules que B1 fait basculer code→id :
+
+| Brique de la feature | Module B1 percuté | Étape B1 |
+|---|---|---|
+| Dimension empruntée = nouvelle **référence** dans le graphe | `references.rs` (`ri()`, contrat code/stockage id) | étape 3 (en cours) |
+| Traductions à l'écriture/lecture/validation/dropdowns | `masterdata.rs` (`write_db_value`, `translate_rows_out`…) | étape 3 |
+| **Table propre** / **attributs** = objets dynamiques (`car_<code>`, `lst_<code>`, colonne `<name>`) | nommage par id (`car_<id>`, `x<id>`/`c<id>`/`r<id>`) | **étape 5** |
+| Dimension empruntée = **axe de faits** référençant une autre dim (comme `partner`) | FK `fact_entry` code→id | **étape 4 (la grosse)** |
+| Extension de `create_custom` / `delete_custom` | `dimensions.rs` | transverse |
+
+Construire maintenant en **code-based** obligerait à tout refaire en **id-based**
+ensuite, avec des conflits de fusion sur `references.rs` / `masterdata.rs` /
+`dimensions.rs` — les fichiers les plus chauds de B1.
+
+**Condition de déblocage** : reprendre cette feature **après** que B1 ait livré au
+moins **étape 4 (fact_entry en ids)** et **étape 5 (objets dynamiques nommés par
+id)**. La création s'appuiera alors directement sur les conventions id-based
+(références via `ri()`, objets `*_<id>`), sans double travail.
+
+**Déjà livré côté UI (sans risque B1, déjà committé sur cette branche)** : page
+« Dimensions » (groupe Référentiel) listant les axes + colonne « Valeurs depuis »
+(révèle l'emprunt `partner`/`share` → `entities`) ; création de dimensions
+**libres uniquement** ; vues lecture seule `partner`/`share` dans Master data.
+Commits `feat(web)` récents. C'est l'**étape UI** ; l'**étape moteur** (a/b/c
+ci-dessus) est ce qui est gelé.
