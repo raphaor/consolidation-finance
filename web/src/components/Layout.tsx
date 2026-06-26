@@ -22,6 +22,7 @@ export type PageId =
   // Calculs
   | 'schemas'
   | 'regles'
+  | 'jeux-regles'
   | 'coefficients'
   | 'postes'
   | 'indicateurs'
@@ -29,7 +30,9 @@ export type PageId =
   | 'dimensions'
   | 'masterdata'
   | 'caracteristiques'
-  | 'maintenance';
+  | 'maintenance'
+  // Aide
+  | 'help';
 
 interface Group {
   id: string;
@@ -72,6 +75,7 @@ const GROUPS: Group[] = [
     pages: [
       { id: 'schemas', label: 'Schémas de flux' },
       { id: 'regles', label: 'Règles' },
+      { id: 'jeux-regles', label: 'Jeux de règles' },
       { id: 'coefficients', label: 'Coefficients' },
       { id: 'postes', label: 'Postes' },
       { id: 'indicateurs', label: 'Indicateurs' },
@@ -85,6 +89,13 @@ const GROUPS: Group[] = [
       { id: 'masterdata', label: 'Master data' },
       { id: 'caracteristiques', label: 'Attributs de dimension' },
       { id: 'maintenance', label: 'Maintenance' },
+    ],
+  },
+  {
+    id: 'aide',
+    label: 'Aide',
+    pages: [
+      { id: 'help', label: 'Documentation' },
     ],
   },
 ];

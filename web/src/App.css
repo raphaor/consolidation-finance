@@ -1913,3 +1913,176 @@
   height: 16px;
   cursor: pointer;
 }
+
+/* ---------- Page d'aide ---------- */
+
+.help-layout {
+  display: flex;
+  gap: 24px;
+  min-height: 600px;
+}
+
+.help-sidebar {
+  flex: 0 0 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.help-sidebar h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-nav {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-nav li {
+  margin-bottom: 4px;
+}
+
+.help-nav-link {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.help-nav-link:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+
+.help-nav-link--active {
+  background: var(--select-bg);
+  color: var(--select-text);
+  font-weight: 500;
+}
+
+.help-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-page {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px 32px;
+}
+
+.help-content h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.help-content h3 {
+  margin-top: 24px;
+  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-content p {
+  margin: 8px 0 16px 0;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-content ul,
+.help-content ol {
+  margin: 8px 0 16px 0;
+  padding-left: 24px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-content li {
+  margin-bottom: 4px;
+}
+
+.help-content pre {
+  margin: 12px 0 16px 0;
+  padding: 12px 16px;
+  background: var(--header-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.help-content code {
+  background: var(--header-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--select-text);
+}
+
+.help-content strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-nav-link-inline {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--select-bg);
+  color: var(--select-text);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.help-nav-link-inline:hover {
+  border-bottom-color: var(--select-text);
+  color: var(--select-text);
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px 0;
+  font-size: 13px;
+}
+
+.help-table th,
+.help-table td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.help-table th {
+  background: var(--header-bg);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-table tr:nth-child(even) {
+  background: var(--row-hover);
+}

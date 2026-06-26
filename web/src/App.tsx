@@ -14,13 +14,14 @@ import { CoefficientsPage } from './pages/CoefficientsPage';
 import { DimensionsPage } from './pages/DimensionsPage';
 import { EcrituresPage } from './pages/EcrituresPage';
 import { ExecutionPage } from './pages/ExecutionPage';
+import { HelpPage } from './pages/HelpPage';
 import { IndicateursPage, PostesPage } from './pages/IndicatorsPage';
 import { ImportPage } from './pages/ImportPage';
 import { MaintenancePage } from './pages/MaintenancePage';
 import { MasterDataPage } from './pages/MasterDataPage';
 import { MasterDetailPage } from './pages/MasterDetailPage';
 import { RapportsPage } from './pages/RapportsPage';
-import { RulesPage } from './pages/RulesPage';
+import { JeuxReglesPage, RulesPage } from './pages/RulesPage';
 import { SaisiePage } from './pages/SaisiePage';
 import './App.css';
 
@@ -50,6 +51,7 @@ export default function App() {
         <MasterDetailPage title="Schémas de flux" config={SCHEMES_CONFIG} />
       )}
       {page === 'regles' && <RulesPage />}
+      {page === 'jeux-regles' && <JeuxReglesPage />}
       {page === 'coefficients' && <CoefficientsPage />}
       {page === 'postes' && <PostesPage />}
       {page === 'indicateurs' && <IndicateursPage />}
@@ -72,6 +74,8 @@ export default function App() {
       )}
       {page === 'caracteristiques' && <CaracteristiquesPage />}
       {page === 'maintenance' && <MaintenancePage />}
+      {/* Aide */}
+      {page === 'help' && <HelpPage />}
     </Layout>
   );
 }
