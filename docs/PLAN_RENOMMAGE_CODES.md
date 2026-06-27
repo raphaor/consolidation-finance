@@ -47,10 +47,10 @@ codes-renommables, branche `feat/renommage-codes`, voir
 - ⏳ Renommer un code de dimension → pas testé post-étape 5.
 - ⏳ `POST /api/reset` → `car_1`/`lst_1` survivent, colonnes de rattachement réappliquées.
 
-**Différé (scope réduit étape 5) :**
-- Colonnes attributs N2 : `<attr_code>` sur `car_<id>` → `c<attr_id>` (non fait)
-- Colonnes custom : `<name>` sur `fact_entry`/`stg_entry` → `x<id>` (non fait)
-- Colonnes références directes : `<col>` sur `dim_<host>` → `r<id>` (non fait)
+**Prochaines étapes planifiées (§8 feuille de route) :**
+- **Étape 9** : colonnes attributs N2 `<attr_code>` → `c<attr_id>` sur `car_<id>`
+- **Étape 10** : colonnes custom `<name>` → `x<id>` sur `fact_entry`/`stg_entry`
+- **Étape 11** : colonnes références directes `<col>` → `r<id>` sur `dim_<host>`
 
 ### Nouveaux sujets intégrés au plan (2026-06-27)
 
@@ -588,6 +588,32 @@ depuis les données existantes (jamais de reseed).
    - 147 tests, 0 échec.
    **`dim_currency` est la 7ᵉ dimension renommable.** Chantier B1 terminé sur les
    dimensions statiques. Reste : smoke-test serveur par l'utilisateur.
+9. **Colonnes attributs N2 : `<attr_code>` → `c<attr_id>`** (rôle 2, suite)
+   Aujourd'hui `car_<id>` porte ses colonnes N2 sous le nom `<attr_code>` (le code
+   de l'attribut). Si l'utilisateur renomme un attribut, le nom de la colonne reste
+   l'ancien code. Pour achever le rôle 2 sur les objets dynamiques :
+   - Ajouter un `id` dans `dim_characteristic_attribute` (déjà fait : `ensure_characteristic_attribute_ids`).
+   - Renommer la colonne `<attr_code>` → `c<attr_id>` sur chaque `car_<id>`.
+   - Migrer in-place les bases existantes (idempotent, comme étape 5).
+   - Mettre à jour tous les sites qui construisent le nom de colonne (règles, indicateurs, `dynamic_references`).
+   - Exposer un endpoint de renommage d'attribut N2.
+10. **Colonnes custom : `<name>` → `x<id>`** (rôle 2, suite)
+    Les dimensions custom ajoutent une colonne `<name>` sur `fact_entry`/`stg_entry`.
+    Si l'utilisateur renomme la dimension, la colonne garde l'ancien nom.
+    - Ajouter un `id` dans `dim_custom_dimension`.
+    - Renommer la colonne `<name>` → `x<id>` sur `fact_entry`/`stg_entry`.
+    - Migrer in-place les bases existantes.
+    - Mettre à jour tous les sites qui utilisent le nom de colonne.
+    - Exposer un endpoint de renommage de dimension custom.
+11. **Colonnes références directes : `<col>` → `r<id>`** (rôle 2, suite)
+    Les références directes (patron B) ajoutent une colonne `<col>` sur la master data
+    hôte (`dim_<host>`). Si l'utilisateur renomme la référence, la colonne reste l'ancien
+    nom.
+    - Ajouter un `id` dans `dim_custom_reference`.
+    - Renommer la colonne `<col>` → `r<id>` sur `dim_<host>`.
+    - Migrer in-place les bases existantes.
+    - Mettre à jour tous les sites qui utilisent le nom de colonne (règles, `dynamic_references`, `reapply`).
+    - Exposer un endpoint de renommage de référence directe.
 
 ## 9. Annexe — option A (rejetée, pour mémoire)
 Garder le `code` en PK + opération « renommer en cascade » : `UPDATE` de toutes
