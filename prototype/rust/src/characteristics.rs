@@ -72,9 +72,32 @@ fn vtable_for(con: &duckdb::Connection, char_code: &str) -> duckdb::Result<Strin
 /// Un attribut N2 (colonne typée sur la table de valeurs d'une N1).
 #[derive(Serialize)]
 pub struct AttributeDef {
-    pub name: String,
+    pub id: i64,      // clé technique B1 ; nom physique = c{id} sur car_<char_id>
+    pub name: String, // code mutable (contrat API/JSON)
     pub libelle: String,
     pub target_dimension: String,
+}
+
+/// Nom physique d'une colonne N2 sur `car_<char_id>`.
+pub fn attr_col(attr_id: i64) -> String {
+    format!("c{attr_id}")
+}
+
+/// Résout `(char_code, attr_name)` → nom de colonne physique (`c<attr_id>`).
+/// Retourne `None` si l'attribut n'existe pas.
+pub fn attr_col_for(
+    con: &duckdb::Connection,
+    char_code: &str,
+    attr_name: &str,
+) -> Option<String> {
+    con.query_row(
+        "SELECT id FROM dim_characteristic_attribute \
+         WHERE characteristic_code = ? AND name = ?",
+        [char_code, attr_name],
+        |r| r.get::<_, i64>(0),
+    )
+    .ok()
+    .map(attr_col)
 }
 
 /// Une caractéristique N1 avec ses attributs N2.
@@ -170,14 +193,15 @@ pub fn attribute_target(
 
 fn load_attributes(con: &duckdb::Connection, char_code: &str) -> duckdb::Result<Vec<AttributeDef>> {
     let mut stmt = con.prepare(
-        "SELECT name, libelle, target_dimension FROM dim_characteristic_attribute \
+        "SELECT id, name, libelle, target_dimension FROM dim_characteristic_attribute \
          WHERE characteristic_code = ? ORDER BY name",
     )?;
     let rows = stmt.query_map([char_code], |row| {
         Ok(AttributeDef {
-            name: row.get::<_, String>(0)?,
-            libelle: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            target_dimension: row.get::<_, String>(2)?,
+            id: row.get::<_, i64>(0)?,
+            name: row.get::<_, String>(1)?,
+            libelle: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            target_dimension: row.get::<_, String>(3)?,
         })
     })?;
     rows.collect()
@@ -339,14 +363,24 @@ pub fn add_attribute(
         )));
     }
     let vtable = vtable_for(con, char_code).map_err(db_err)?;
-    con.execute(&format!("ALTER TABLE {vtable} ADD COLUMN {name} TEXT"), [])
-        .map_err(db_err)?;
+    // INSERT d'abord pour obtenir l'id technique → le nom physique sera c{id}.
     con.execute(
         "INSERT INTO dim_characteristic_attribute \
          (characteristic_code, name, libelle, target_dimension) VALUES (?, ?, ?, ?)",
         &[&char_code, &name, &libelle, &target_dimension],
     )
     .map_err(db_err)?;
+    let attr_id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_characteristic_attribute \
+             WHERE characteristic_code = ? AND name = ?",
+            [char_code, name],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    let col = attr_col(attr_id);
+    con.execute(&format!("ALTER TABLE {vtable} ADD COLUMN \"{col}\" TEXT"), [])
+        .map_err(db_err)?;
     Ok(())
 }
 
@@ -370,8 +404,17 @@ pub fn delete_attribute(
             "attribut inexistant : {char_code}.{name}"
         )));
     }
+    let attr_id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_characteristic_attribute \
+             WHERE characteristic_code = ? AND name = ?",
+            [char_code, name],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    let col = attr_col(attr_id);
     let vtable = vtable_for(con, char_code).map_err(db_err)?;
-    con.execute(&format!("ALTER TABLE {vtable} DROP COLUMN {name}"), [])
+    con.execute(&format!("ALTER TABLE {vtable} DROP COLUMN \"{col}\""), [])
         .map_err(db_err)?;
     con.execute(
         "DELETE FROM dim_characteristic_attribute WHERE characteristic_code = ? AND name = ?",
@@ -383,11 +426,37 @@ pub fn delete_attribute(
 
 // ─────────────────────── Valeurs N1 (lignes de car_<code>) ──────────────────────
 
-/// Colonnes d'une valeur N1 : `code`, `libelle` + les attributs N2.
-fn value_columns(attrs: &[AttributeDef]) -> Vec<String> {
+/// Clés API/JSON d'une valeur N1 : `code`, `libelle` + les noms d'attributs.
+/// Utilisé pour valider et lire les corps de requête.
+fn value_api_keys(attrs: &[AttributeDef]) -> Vec<String> {
     let mut cols = vec!["code".to_string(), "libelle".to_string()];
     cols.extend(attrs.iter().map(|a| a.name.clone()));
     cols
+}
+
+/// Expression SELECT pour une valeur N1 : alias physique → clé API.
+/// `"c{id}" AS "{name}"` pour les attributs N2, colonnes nues pour code/libelle.
+fn select_clause(attrs: &[AttributeDef]) -> String {
+    let mut parts = vec!["\"code\"".to_string(), "\"libelle\"".to_string()];
+    parts.extend(
+        attrs
+            .iter()
+            .map(|a| format!("\"{}\" AS \"{}\"", attr_col(a.id), a.name)),
+    );
+    parts.join(", ")
+}
+
+/// Traduit une clé JSON d'attribut (nom) en nom de colonne physique (`c{id}`).
+/// Retourne le nom physique si trouvé, sinon le nom tel quel (fallback base fraîche).
+fn physical_col(attrs: &[AttributeDef], api_key: &str) -> String {
+    if api_key == "code" || api_key == "libelle" {
+        return api_key.to_string();
+    }
+    attrs
+        .iter()
+        .find(|a| a.name == api_key)
+        .map(|a| attr_col(a.id))
+        .unwrap_or_else(|| api_key.to_string())
 }
 
 /// Confirme l'existence de la caractéristique et renvoie ses attributs N2.
@@ -415,7 +484,7 @@ fn reject_unknown_value_fields(
     attrs: &[AttributeDef],
     obj: &Map<String, JsonValue>,
 ) -> Result<(), AppError> {
-    let allowed: HashSet<String> = value_columns(attrs).into_iter().collect();
+    let allowed: HashSet<String> = value_api_keys(attrs).into_iter().collect();
     if let Some(k) = obj.keys().find(|k| !allowed.contains(k.as_str())) {
         return Err(AppError::bad_request(format!(
             "champ inconnu pour une valeur de caractéristique : {k}"
@@ -452,11 +521,7 @@ fn validate_attribute_values(
 /// Liste les valeurs (lignes) d'une caractéristique N1.
 pub fn list_values(con: &duckdb::Connection, char_code: &str) -> Result<Vec<JsonValue>, AppError> {
     let attrs = require_characteristic(con, char_code)?;
-    let cols = value_columns(&attrs)
-        .iter()
-        .map(|c| format!("\"{c}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let cols = select_clause(&attrs);
     let vtable = vtable_for(con, char_code).map_err(db_err)?;
     masterdata::run_query(
         con,
@@ -496,7 +561,8 @@ pub fn create_value(
     let mut cols = Vec::new();
     let mut vals: Vec<DbValue> = Vec::new();
     for (k, v) in obj {
-        cols.push(format!("\"{k}\""));
+        // Traduire la clé API (nom) en nom de colonne physique (c{id} pour les N2).
+        cols.push(format!("\"{}\"", physical_col(&attrs, k)));
         vals.push(masterdata::json_to_db_value(v));
     }
     let placeholders = vals.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
@@ -538,7 +604,7 @@ pub fn update_value(
         if k == "code" {
             continue; // PK immuable
         }
-        sets.push(format!("\"{k}\" = ?"));
+        sets.push(format!("\"{}\" = ?", physical_col(&attrs, k)));
         vals.push(masterdata::json_to_db_value(v));
     }
     if sets.is_empty() {
@@ -969,8 +1035,11 @@ mod tests {
             "account",
         )
         .unwrap();
+        // Après étape 9 B1, la colonne physique est c{attr_id}, pas le nom de l'attribut.
+        let phys_col = attr_col_for(&con, "comportement", "compte_destination")
+            .expect("attr_col_for doit trouver la colonne");
         assert!(
-            col_exists(&con, &vtable, "compte_destination"),
+            col_exists(&con, &vtable, &phys_col),
             "colonne d'attribut N2 sur car_<id>"
         );
 
@@ -997,16 +1066,23 @@ mod tests {
             && r.column == "comportement"
             && r.target_table == vtable
             && r.target_column == "code"));
-        // N2 : car_<id>.compte_destination → dim_account.code
-        assert!(refs.iter().any(|r| r.table == vtable
-            && r.column == "compte_destination"
-            && r.target_table == "dim_account"
-            && r.target_column == "code"));
-        // N2 typée vers une autre dimension : nat → dim_nature.code
-        assert!(refs.iter().any(|r| r.table == vtable
-            && r.column == "nat"
-            && r.target_table == "dim_nature"
-            && r.target_column == "code"));
+        // N2 : car_<id>.c{attr_id} → dim_account.code (colonne physique B1 étape 9)
+        let col_cd = attr_col_for(&con, "comportement", "compte_destination").unwrap();
+        assert!(
+            refs.iter().any(|r| r.table == vtable
+                && r.column == col_cd
+                && r.target_table == "dim_account"
+                && r.target_column == "code"),
+            "N2 compte_destination ({col_cd}) dans le graphe"
+        );
+        let col_nat = attr_col_for(&con, "comportement", "nat").unwrap();
+        assert!(
+            refs.iter().any(|r| r.table == vtable
+                && r.column == col_nat
+                && r.target_table == "dim_nature"
+                && r.target_column == "code"),
+            "N2 nat ({col_nat}) dans le graphe"
+        );
     }
 
     #[test]
@@ -1046,8 +1122,9 @@ mod tests {
             table_exists(&con, &vtable),
             "table de valeurs survit au reset"
         );
+        let phys_col = attr_col_for(&con, "comportement", "compte_destination").unwrap();
         assert!(
-            col_exists(&con, &vtable, "compte_destination"),
+            col_exists(&con, &vtable, &phys_col),
             "colonne d'attribut survit au reset"
         );
     }

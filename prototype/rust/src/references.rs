@@ -365,22 +365,23 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
         }
     }
 
-    // N2 : chaque attribut car_<char_id>.<name> → master data de la dimension cible
+    // N2 : chaque attribut car_<char_id>."c<attr_id>" → master data de la dimension cible.
+    // Colonne physique = c{attr_id} (B1 étape 9 ; avant migration = nom de l'attribut).
     if let Ok(mut stmt) = con.prepare(
-        "SELECT dc.id, dca.name, dca.target_dimension \
+        "SELECT dc.id, dca.id, dca.target_dimension \
          FROM dim_characteristic_attribute dca \
          JOIN dim_characteristic dc ON dc.code = dca.characteristic_code \
-         ORDER BY dc.id, dca.name",
+         ORDER BY dc.id, dca.id",
     ) {
         if let Ok(rows) = stmt.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
         }) {
-            for (char_id, name, target) in rows.flatten() {
+            for (char_id, attr_id, target) in rows.flatten() {
                 // La cible d'un N2 peut être une dimension ou une liste de valeurs.
                 if let Some((tt, tc)) = target_master(con, &target) {
                     out.push(OwnedReference {
                         table: crate::characteristics::value_table(char_id),
-                        column: name,
+                        column: crate::characteristics::attr_col(attr_id),
                         target_table: tt,
                         target_column: tc,
                         target_display_column: None,

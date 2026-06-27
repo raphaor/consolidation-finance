@@ -13,7 +13,7 @@ codes-renommables, branche `feat/renommage-codes`, voir
 
 ### Où on en est (2026-06-29 — état final)
 
-**Étapes 0–8 terminées. Smoke-tests runtime étape 5 partiellement validés.**
+**Étapes 0–9 terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
 - **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
   `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
@@ -38,6 +38,17 @@ codes-renommables, branche `feat/renommage-codes`, voir
   garde JSON retirée ; `dim_currency` entièrement renommable (7ᵉ dim).
   Correction bug `dynamic_references` (doublon patron B / ri() → cascade sur INTEGER).
   147 tests, 0 échec.
+- **Étape 9** (2026-06-29) : colonnes N2 `<attr_name>` → `c<attr_id>` sur `car_<id>`.
+  - `surrogate.rs` : `migrate_attribute_columns_to_id` (idempotent, `RENAME COLUMN`).
+  - `characteristics.rs` : `AttributeDef.id`, `attr_col`/`attr_col_for`, `select_clause`,
+    `physical_col` ; `add_attribute` INSERT avant ALTER ; `delete_attribute` résout `c<id>` ;
+    `list_values`/`create_value`/`update_value` séparent noms API et noms physiques.
+  - `rules.rs` : `dest_expr` reçoit `Option<&Connection>` pour résoudre `c<attr_id>` en mode `map`.
+  - `references.rs` : `dynamic_references` N2 utilise `c<attr_id>` comme colonne physique.
+  - `masterdata.rs` : `OwnedTableDef` gagne `sql_columns` (physique) séparé de `columns` (API) ;
+    helpers `sql_col`/`api_col` ; `select_all`/`fetch_one`/CREATE/UPDATE/DELETE mis à jour.
+  - `server.rs` : appel migration au démarrage, `schema_version` → `'9'`.
+  - 147 lib tests + 19 intégration = 166 tests, 0 échec.
 
 ### Smoke-tests runtime étape 5 — partiellement validés
 
@@ -48,7 +59,6 @@ codes-renommables, branche `feat/renommage-codes`, voir
 - ⏳ `POST /api/reset` → `car_1`/`lst_1` survivent, colonnes de rattachement réappliquées.
 
 **Prochaines étapes planifiées (§8 feuille de route) :**
-- **Étape 9** : colonnes attributs N2 `<attr_code>` → `c<attr_id>` sur `car_<id>`
 - **Étape 10** : colonnes custom `<name>` → `x<id>` sur `fact_entry`/`stg_entry`
 - **Étape 11** : colonnes références directes `<col>` → `r<id>` sur `dim_<host>`
 
@@ -588,15 +598,17 @@ depuis les données existantes (jamais de reseed).
    - 147 tests, 0 échec.
    **`dim_currency` est la 7ᵉ dimension renommable.** Chantier B1 terminé sur les
    dimensions statiques. Reste : smoke-test serveur par l'utilisateur.
-9. **Colonnes attributs N2 : `<attr_code>` → `c<attr_id>`** (rôle 2, suite)
-   Aujourd'hui `car_<id>` porte ses colonnes N2 sous le nom `<attr_code>` (le code
-   de l'attribut). Si l'utilisateur renomme un attribut, le nom de la colonne reste
-   l'ancien code. Pour achever le rôle 2 sur les objets dynamiques :
-   - Ajouter un `id` dans `dim_characteristic_attribute` (déjà fait : `ensure_characteristic_attribute_ids`).
-   - Renommer la colonne `<attr_code>` → `c<attr_id>` sur chaque `car_<id>`.
-   - Migrer in-place les bases existantes (idempotent, comme étape 5).
-   - Mettre à jour tous les sites qui construisent le nom de colonne (règles, indicateurs, `dynamic_references`).
-   - Exposer un endpoint de renommage d'attribut N2.
+9. ✅ **Colonnes attributs N2 : `<attr_code>` → `c<attr_id>`** (2026-06-29)
+   - `migrate_attribute_columns_to_id` : `RENAME COLUMN <name> TO c<id>` (idempotent).
+   - `AttributeDef.id` + `attr_col`/`attr_col_for`/`select_clause`/`physical_col`.
+   - `add_attribute` : INSERT d'abord → id → `ALTER TABLE ADD COLUMN c<id>`.
+   - `delete_attribute` : résout `c<id>` avant `DROP COLUMN`.
+   - `list_values`/`create_value`/`update_value` : séparent noms API et noms physiques.
+   - `dest_expr` (`rules.rs`) : `Option<&Connection>` → résout `c<attr_id>` en mode `map`.
+   - `dynamic_references` N2 : colonne physique `c<attr_id>`.
+   - `OwnedTableDef` (`masterdata.rs`) : `sql_columns` + helpers `sql_col`/`api_col` ;
+     `select_all`/`fetch_one`/CREATE/UPDATE/DELETE mis à jour.
+   - 166 tests (147 lib + 19 intégration), 0 échec.
 10. **Colonnes custom : `<name>` → `x<id>`** (rôle 2, suite)
     Les dimensions custom ajoutent une colonne `<name>` sur `fact_entry`/`stg_entry`.
     Si l'utilisateur renomme la dimension, la colonne garde l'ancien nom.

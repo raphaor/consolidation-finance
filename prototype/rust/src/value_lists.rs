@@ -666,10 +666,13 @@ mod tests {
 
         let char_id = crate::characteristics::id_of(&con, "comportement").unwrap();
         let list_id = id_of(&con, "incoterm").unwrap();
+        // Après B1 étape 9, la colonne physique est c{attr_id}, pas le nom d'attribut.
+        let inco_col = crate::characteristics::attr_col_for(&con, "comportement", "inco")
+            .expect("attr_col_for 'inco' doit trouver la colonne");
         let refs = crate::references::dynamic_references(&con);
         assert!(
             refs.iter().any(|r| r.table == format!("car_{char_id}")
-                && r.column == "inco"
+                && r.column == inco_col
                 && r.target_table == format!("lst_{list_id}")
                 && r.target_column == "code"),
             "l'attribut N2 → liste apparaît dans le graphe de références"

@@ -520,11 +520,14 @@ fn destination_map_traverse_caracteristique() {
     .unwrap();
 
     // Valeur + affectation en SQL direct (le CRUD est testé côté `characteristics`).
+    // Après B1 étape 9, les colonnes physiques sont c{attr_id}, pas les noms d'attributs.
     let char_id = conso_engine::characteristics::id_of(&con, "comportement").unwrap();
     let car_table = conso_engine::characteristics::value_table(char_id);
+    let col_cd = conso_engine::characteristics::attr_col_for(&con, "comportement", "compte_destination").unwrap();
+    let col_nat = conso_engine::characteristics::attr_col_for(&con, "comportement", "nat").unwrap();
     con.execute(
         &format!(
-            "INSERT INTO {car_table} (code, libelle, compte_destination, nat) \
+            "INSERT INTO {car_table} (code, libelle, \"{col_cd}\", \"{col_nat}\") \
              VALUES ('VENTES_IC', 'Ventes interco', '471L', '1AJUST')"
         ),
         [],
@@ -990,9 +993,11 @@ fn via_id_destination_map_fonctionne_apres_normalisation() {
     add_attribute(&con, "comportement", "nat", "Nature", "nature").unwrap();
     let char_id = conso_engine::characteristics::id_of(&con, "comportement").unwrap();
     let car_table = conso_engine::characteristics::value_table(char_id);
+    let col_cd = conso_engine::characteristics::attr_col_for(&con, "comportement", "compte_destination").unwrap();
+    let col_nat = conso_engine::characteristics::attr_col_for(&con, "comportement", "nat").unwrap();
     con.execute(
         &format!(
-            "INSERT INTO {car_table} (code, libelle, compte_destination, nat) \
+            "INSERT INTO {car_table} (code, libelle, \"{col_cd}\", \"{col_nat}\") \
              VALUES ('VENTES_IC', 'V', '471L', '1AJUST')"
         ),
         [],

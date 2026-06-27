@@ -496,11 +496,52 @@ struct OwnedTableDef {
     api_name: String,
     label: String,
     sql_name: String,
+    /// Noms de colonnes dans le contrat API (utilisés pour la validation et les
+    /// clés JSON retournées). Toujours identiques à `sql_columns` sauf pour les
+    /// tables de valeurs N1 (`car_<id>`) après B1 étape 9, où le nom physique
+    /// est `c<attr_id>` mais le nom API est le code de l'attribut.
     columns: Vec<String>,
+    /// Noms physiques dans la DB (utilisés pour construire les expressions SQL).
+    /// `sql_columns[i]` correspond à `columns[i]`.
+    sql_columns: Vec<String>,
     pk: Vec<String>,
     /// `true` si la PK est auto-générée (colonne omise de l'INSERT, id récupéré
     /// via `RETURNING`). Porté depuis la [`TableDef`] native.
     auto_pk: bool,
+}
+
+impl OwnedTableDef {
+    /// Expression SELECT pour la colonne `i` : `"c1" AS "api_name"` si physique ≠ API,
+    /// sinon `"api_name"` (pas d'alias superflu).
+    fn select_expr(&self, i: usize) -> String {
+        let api = &self.columns[i];
+        let sql = &self.sql_columns[i];
+        if sql != api {
+            format!("{} AS {}", quote_ident(sql), quote_ident(api))
+        } else {
+            quote_ident(api)
+        }
+    }
+
+    /// Nom physique correspondant à un nom de colonne API. Retourne `api_col` si non trouvé.
+    fn sql_col<'a>(&'a self, api_col: &'a str) -> &'a str {
+        self.columns
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.as_str() == api_col)
+            .map(|(i, _)| self.sql_columns[i].as_str())
+            .unwrap_or(api_col)
+    }
+
+    /// Nom API correspondant à un nom de colonne physique. Retourne `sql_col` si non trouvé.
+    fn api_col<'a>(&'a self, sql_col: &'a str) -> &'a str {
+        self.sql_columns
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.as_str() == sql_col)
+            .map(|(i, _)| self.columns[i].as_str())
+            .unwrap_or(sql_col)
+    }
 }
 
 /// Résout une table demandée par son nom d'API (`/api/md/{table}`) en une
@@ -532,6 +573,7 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
             api_name: def.api_name.to_string(),
             label: def.label.to_string(),
             sql_name: def.sql_name.to_string(),
+            sql_columns: cols.clone(),
             columns: cols,
             pk: def.pk.iter().map(|s| s.to_string()).collect(),
             auto_pk: def.auto_pk,
@@ -545,13 +587,22 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
         // démarrage). On recherche la caractéristique demandée.
         let chars = crate::characteristics::load_all(con).map_err(db_err)?;
         if let Some(c) = chars.into_iter().find(|c| c.code == code) {
-            let mut cols = vec!["code".to_string(), "libelle".to_string()];
-            cols.extend(c.attributes.iter().map(|a| a.name.clone()));
+            // Contrat API : noms d'attributs (muables, servent à la validation).
+            let mut api_cols = vec!["code".to_string(), "libelle".to_string()];
+            api_cols.extend(c.attributes.iter().map(|a| a.name.clone()));
+            // Noms physiques : c{attr_id} pour les attributs N2 (B1 étape 9).
+            let mut sql_cols = vec!["code".to_string(), "libelle".to_string()];
+            sql_cols.extend(
+                c.attributes
+                    .iter()
+                    .map(|a| crate::characteristics::attr_col(a.id)),
+            );
             return Ok(Some(OwnedTableDef {
                 api_name: format!("car_{code}"),
                 label: c.libelle,
                 sql_name: c.value_table, // car_<id>
-                columns: cols,
+                columns: api_cols,
+                sql_columns: sql_cols,
                 pk: vec!["code".to_string()],
                 auto_pk: false,
             }));
@@ -563,11 +614,13 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
     if let Some(code) = api.strip_prefix("lst_") {
         let lists = crate::value_lists::load_all(con).map_err(db_err)?;
         if let Some(l) = lists.into_iter().find(|l| l.code == code) {
+            let cols = vec!["code".to_string(), "libelle".to_string()];
             return Ok(Some(OwnedTableDef {
                 api_name: format!("lst_{code}"),
                 label: l.libelle,
                 sql_name: l.value_table, // lst_<id>
-                columns: vec!["code".to_string(), "libelle".to_string()],
+                sql_columns: cols.clone(),
+                columns: cols,
                 pk: vec!["code".to_string()],
                 auto_pk: false,
             }));
@@ -579,10 +632,8 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
 }
 
 fn select_all(def: &OwnedTableDef, con: &duckdb::Connection) -> Result<Vec<JsonValue>, AppError> {
-    let cols = def
-        .columns
-        .iter()
-        .map(|c| quote_ident(c))
+    let cols = (0..def.columns.len())
+        .map(|i| def.select_expr(i))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!("SELECT {cols} FROM {}", def.sql_name);
@@ -595,16 +646,14 @@ fn fetch_one(
     pk_vals: &[(String, JsonValue)],
     con: &duckdb::Connection,
 ) -> Result<Option<JsonValue>, AppError> {
-    let cols = def
-        .columns
-        .iter()
-        .map(|c| quote_ident(c))
+    let cols = (0..def.columns.len())
+        .map(|i| def.select_expr(i))
         .collect::<Vec<_>>()
         .join(", ");
     let where_clause = def
         .pk
         .iter()
-        .map(|c| format!("{} = ?", quote_ident(c)))
+        .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
         .collect::<Vec<_>>()
         .join(" AND ");
     let sql = format!("SELECT {cols} FROM {} WHERE {where_clause}", def.sql_name);
@@ -654,7 +703,10 @@ fn validate_references(
         // Une valeur est « vide » si la colonne est absente, JSON null, ou chaîne
         // vide. Sur une référence obligatoire (non-nullable), c'est rejeté ;
         // sinon (nullable) c'est toléré (= NULL).
-        let s = match obj.get(r.column.as_str()) {
+        // Cherche la valeur dans obj via le nom API (peut différer du nom physique
+        // pour les attributs N2 de caractéristiques, après B1 étape 9).
+        let api_key = def.api_col(r.column.as_str());
+        let s = match obj.get(api_key) {
             Some(JsonValue::String(s)) if !s.is_empty() => s.as_str(),
             None | Some(JsonValue::Null) | Some(JsonValue::String(_)) => {
                 if r.required {
@@ -767,8 +819,9 @@ async fn create(
                     continue; // PK auto : générée par la base, omise de l'INSERT.
                 }
                 if let Some(v) = obj.get(col.as_str()) {
-                    cols.push(quote_ident(col));
-                    vals.push(write_db_value(&con, &def.sql_name, col, v)?);
+                    let phys = def.sql_col(col);
+                    cols.push(quote_ident(phys));
+                    vals.push(write_db_value(&con, &def.sql_name, phys, v)?);
                 }
             }
             if cols.is_empty() {
@@ -796,8 +849,9 @@ async fn create(
             let mut vals: Vec<DbValue> = Vec::new();
             for col in &def.columns {
                 if let Some(v) = obj.get(col.as_str()) {
-                    cols.push(quote_ident(col));
-                    vals.push(write_db_value(&con, &def.sql_name, col, v)?);
+                    let phys = def.sql_col(col);
+                    cols.push(quote_ident(phys));
+                    vals.push(write_db_value(&con, &def.sql_name, phys, v)?);
                 }
             }
             if cols.is_empty() {
@@ -850,15 +904,16 @@ async fn update(
                 continue;
             }
             if let Some(v) = obj.get(col.as_str()) {
-                sets.push(format!("{} = ?", quote_ident(col)));
-                vals.push(write_db_value(&con, &def.sql_name, col, v)?);
+                let phys = def.sql_col(col);
+                sets.push(format!("{} = ?", quote_ident(phys)));
+                vals.push(write_db_value(&con, &def.sql_name, phys, v)?);
             }
         }
         if !sets.is_empty() {
             let where_clause = def
                 .pk
                 .iter()
-                .map(|c| format!("{} = ?", quote_ident(c)))
+                .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
                 .collect::<Vec<_>>()
                 .join(" AND ");
             let sql = format!(
@@ -927,7 +982,7 @@ async fn remove(
         let where_clause = def
             .pk
             .iter()
-            .map(|c| format!("{} = ?", quote_ident(c)))
+            .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
             .collect::<Vec<_>>()
             .join(" AND ");
         let sql = format!("DELETE FROM {} WHERE {}", def.sql_name, where_clause);
@@ -2019,11 +2074,13 @@ mod tests {
         reject_unknown_fields(&def, &obj).unwrap();
         validate_references(&def, &obj, &con).unwrap();
 
+        // INSERT avec les noms physiques (sql_columns), valeurs via les clés API.
         let mut cols = Vec::new();
         let mut vals: Vec<DbValue> = Vec::new();
-        for col in &def.columns {
-            if let Some(v) = obj.get(col.as_str()) {
-                cols.push(quote_ident(col));
+        for api_col in &def.columns {
+            if let Some(v) = obj.get(api_col.as_str()) {
+                let phys = def.sql_col(api_col);
+                cols.push(quote_ident(phys));
                 vals.push(json_to_db_value(v));
             }
         }

@@ -648,6 +648,46 @@ pub fn migrate_pivot_currency_to_id(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Migration B1 étape 9 : renomme les colonnes N2 des tables de valeurs de
+/// `<attr_name>` → `c<attr_id>`. Idempotent.
+///
+/// Après cette migration, les colonnes physiques sur `car_<char_id>` ne dépendent
+/// plus du code (nom mutable) de l'attribut : un renommage de code attribut ne
+/// nécessite plus d'`ALTER TABLE RENAME COLUMN`.
+pub fn migrate_attribute_columns_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_characteristic_attribute")? {
+        return Ok(());
+    }
+    let mut stmt = con.prepare(
+        "SELECT dc.id, dca.id, dca.name \
+         FROM dim_characteristic_attribute dca \
+         JOIN dim_characteristic dc ON dc.code = dca.characteristic_code \
+         ORDER BY dc.id, dca.name",
+    )?;
+    let rows: Vec<(i64, i64, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .flatten()
+        .collect();
+    for (char_id, attr_id, attr_name) in rows {
+        let car_table = crate::characteristics::value_table(char_id);
+        if !table_exists(con, &car_table)? {
+            continue; // table absente (état partiel)
+        }
+        let new_col = format!("c{attr_id}");
+        if column_exists(con, &car_table, &new_col)? {
+            continue; // déjà migré
+        }
+        if !column_exists(con, &car_table, &attr_name)? {
+            continue; // colonne source absente (état incohérent, on ignore)
+        }
+        con.execute(
+            &format!("ALTER TABLE {car_table} RENAME COLUMN \"{attr_name}\" TO \"{new_col}\""),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

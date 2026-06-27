@@ -935,6 +935,7 @@ fn json_to_dbvalue(v: &JsonValue) -> DbValue {
 /// - `"override", value` → pousse `value` dans `params`, renvoie `?`
 /// - `"null"` → `NULL`
 fn dest_expr(
+    con: Option<&Connection>,
     dim: &str,
     destinations: &[(String, Destination)],
     params: &mut Vec<DbValue>,
@@ -968,10 +969,15 @@ fn dest_expr(
             "map" => {
                 let via = d.via.clone().unwrap_or_default();
                 let attr = d.attr.clone().unwrap_or_default();
+                // Résoudre le nom de colonne physique c{attr_id} si possible ;
+                // fallback sur le nom attr (legacy ou DB fraîche sans migration).
+                let col = con
+                    .and_then(|c| characteristics::attr_col_for(c, &via, &attr))
+                    .unwrap_or_else(|| attr.clone());
                 if let Some((table, code_col)) = id_typed {
-                    format!("(SELECT id FROM {table} WHERE {code_col} = cg_{via}.\"{attr}\")")
+                    format!("(SELECT id FROM {table} WHERE {code_col} = cg_{via}.\"{col}\")")
                 } else {
-                    format!("cg_{via}.\"{attr}\"")
+                    format!("cg_{via}.\"{col}\"")
                 }
             }
             "map_ref" => {
@@ -1136,7 +1142,7 @@ fn exec_operation(
 
     for dim in &propagated {
         insert_parts.push(dim);
-        let expr = dest_expr(dim, &op.destination, &mut params);
+        let expr = dest_expr(Some(con), dim, &op.destination, &mut params);
         select_parts.push(format!("{expr} AS {dim}"));
     }
     // `consolidation_id` : colonne technique (hors dimensions propagées) recopiée
@@ -2352,7 +2358,7 @@ mod tests {
     fn dest_expr_héritage_par_défaut_quand_dim_absente() {
         // Une dimension absente de la liste des destinations est héritée.
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr("account", &[], &mut params);
+        let expr = dest_expr(None, "account", &[], &mut params);
         assert_eq!(expr, "e.account", "héritage par défaut");
         assert!(params.is_empty());
     }
@@ -2370,7 +2376,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr("partner", &dests, &mut params);
+        let expr = dest_expr(None, "partner", &dests, &mut params);
         assert_eq!(expr, "NULL", "mode null → NULL littéral");
         assert!(params.is_empty(), "mode null ne bind rien");
     }
@@ -2388,7 +2394,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr("nature", &dests, &mut params);
+        let expr = dest_expr(None, "nature", &dests, &mut params);
         // B1 étape 4 : nature est id-typée → override code génère une sous-requête code→id.
         assert_eq!(
             expr,
@@ -2416,7 +2422,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr("nature", &dests, &mut params);
+        let expr = dest_expr(None, "nature", &dests, &mut params);
         assert_eq!(expr, "?", "mode override id → liaison directe");
         assert_eq!(params.len(), 1);
         match &params[0] {
@@ -2440,7 +2446,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr("account", &dests, &mut params);
+        let expr = dest_expr(None, "account", &dests, &mut params);
         assert_eq!(
             expr,
             "(SELECT id FROM dim_account WHERE code = mdr_compte_parent.\"compte_parent\")",
