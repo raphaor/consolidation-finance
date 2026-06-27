@@ -256,12 +256,15 @@ fn build_aggregate_sql(
             }
             let (bt, _) = references::dimension_master_id_join(&base)
                 .ok_or_else(|| format!("dimension sans master data : {base}"))?;
+            let char_id = characteristics::id_of(con, via)
+                .ok_or_else(|| format!("caractéristique '{via}' sans id technique"))?;
+            let car_table = characteristics::value_table(char_id);
             add_join(
                 b,
                 &format!("via_{via}"),
                 format!(
                     "\nLEFT JOIN {bt} imd_{via} ON imd_{via}.id = e.{base}\
-                     \nLEFT JOIN car_{via} icg_{via} ON icg_{via}.code = imd_{via}.\"{via}\""
+                     \nLEFT JOIN {car_table} icg_{via} ON icg_{via}.code = imd_{via}.\"{via}\""
                 ),
             );
             format!("icg_{via}.code")

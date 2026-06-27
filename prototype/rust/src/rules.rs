@@ -189,7 +189,10 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
                 // La caractéristique doit exister avec base_dimension = dim.
                 match characteristics::base_dimension_of(con, via).map_err(|e| e.to_string())? {
                     Some(base) if base == s.dim => {
-                        Some((format!("car_{via}"), "code".to_string()))
+                        let char_id = characteristics::id_of(con, via).ok_or_else(|| {
+                            format!("caractéristique '{via}' sans id technique")
+                        })?;
+                        Some((characteristics::value_table(char_id), "code".to_string()))
                     }
                     Some(other) => {
                         return Err(format!(
@@ -1276,7 +1279,12 @@ fn exec_operation(
                 "destination map : dimension de base sans master data : {base_dim}"
             ))
         })?;
-        let value_table = format!("car_{via}");
+        let char_id = characteristics::id_of(con, via).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "destination map : caractéristique '{via}' sans id technique"
+            ))
+        })?;
+        let value_table = characteristics::value_table(char_id);
         joins.push_str(&format!(
             "\nJOIN {base_table} md_{via}\n  ON md_{via}.id = e.{base_dim}\
              \nJOIN {value_table} cg_{via}\n  ON cg_{via}.code = md_{via}.\"{via}\""
@@ -1423,7 +1431,12 @@ fn exec_operation(
                 "selection via : dimension de base sans master data : {base_dim}"
             ))
         })?;
-        let value_table = format!("car_{via}");
+        let char_id = characteristics::id_of(con, via).ok_or_else(|| {
+            duckdb_synthesis_error(format!(
+                "selection via : caractéristique '{via}' sans id technique"
+            ))
+        })?;
+        let value_table = characteristics::value_table(char_id);
         joins.push_str(&format!(
             "\nJOIN {base_table} smd_{via}\n  ON smd_{via}.id = e.{base_dim}\
              \nJOIN {value_table} scg_{via}\n  ON scg_{via}.code = smd_{via}.\"{via}\""

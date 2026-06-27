@@ -479,6 +479,91 @@ pub fn migrate_ruleset_item_fk_to_id(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Dote `dim_characteristic_attribute` d'un `id` technique (séquence dédiée).
+/// Idempotent. À appeler après [`ensure_ids`] (qui ne couvre pas ce registre car
+/// il n'a pas de colonne `code` unique — sa clé est composite).
+pub fn ensure_characteristic_attribute_ids(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_characteristic_attribute")? {
+        return Ok(());
+    }
+    if column_exists(con, "dim_characteristic_attribute", "id")? {
+        return Ok(()); // déjà migrée
+    }
+    let seq = "seq_dim_characteristic_attribute";
+    con.execute(&format!("CREATE SEQUENCE IF NOT EXISTS {seq} START 1"), [])?;
+    con.execute(
+        "ALTER TABLE dim_characteristic_attribute ADD COLUMN id INTEGER",
+        [],
+    )?;
+    con.execute(
+        &format!("UPDATE dim_characteristic_attribute SET id = nextval('{seq}')"),
+        [],
+    )?;
+    con.execute(
+        &format!(
+            "ALTER TABLE dim_characteristic_attribute ALTER COLUMN id \
+             SET DEFAULT nextval('{seq}')"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
+/// Migration B1 étape 5 : renomme les tables de valeurs N1 de `car_<code>` →
+/// `car_<id>` pour chaque caractéristique. Idempotent : skip si `car_<id>` existe
+/// déjà ou si `car_<code>` n'existe pas. À appeler après [`ensure_ids`].
+pub fn migrate_characteristic_tables_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_characteristic")? {
+        return Ok(());
+    }
+    let chars: Vec<(String, i64)> = {
+        let mut stmt = con.prepare("SELECT code, id FROM dim_characteristic")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<duckdb::Result<_>>()?
+    };
+    for (code, id) in chars {
+        let old_name = format!("car_{code}");
+        let new_name = format!("car_{id}");
+        if table_exists(con, &new_name)? {
+            continue; // déjà renommée
+        }
+        if !table_exists(con, &old_name)? {
+            continue; // jamais créée ou déjà renommée
+        }
+        con.execute(&format!("ALTER TABLE {old_name} RENAME TO {new_name}"), [])?;
+    }
+    Ok(())
+}
+
+/// Migration B1 étape 5 : renomme les tables de listes de valeurs de
+/// `lst_<code>` → `lst_<id>`. Idempotent. À appeler après [`ensure_ids`].
+pub fn migrate_value_list_tables_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_value_list")? {
+        return Ok(());
+    }
+    let lists: Vec<(String, i64)> = {
+        let mut stmt = con.prepare("SELECT code, id FROM dim_value_list")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<duckdb::Result<_>>()?
+    };
+    for (code, id) in lists {
+        let old_name = format!("lst_{code}");
+        let new_name = format!("lst_{id}");
+        if table_exists(con, &new_name)? {
+            continue; // déjà renommée
+        }
+        if !table_exists(con, &old_name)? {
+            continue;
+        }
+        con.execute(&format!("ALTER TABLE {old_name} RENAME TO {new_name}"), [])?;
+    }
+    Ok(())
+}
+
 /// Migration B1 étape 4 : bascule les 10 colonnes dimensionnelles de `fact_entry`
 /// du stockage **code (TEXT)** vers la **clé technique (id, INTEGER)**. Idempotent.
 ///

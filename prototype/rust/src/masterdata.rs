@@ -512,7 +512,8 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
         }));
     }
 
-    // 2. Table de valeurs d'une caractéristique : car_<code>.
+    // 2. Table de valeurs d'une caractéristique : api = car_<code>,
+    //    sql_name = car_<id> (B1 étape 5).
     if let Some(code) = api.strip_prefix("car_") {
         // `load_all` filtre déjà l'absence éventuelle des registres (premier
         // démarrage). On recherche la caractéristique demandée.
@@ -523,7 +524,7 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
             return Ok(Some(OwnedTableDef {
                 api_name: format!("car_{code}"),
                 label: c.libelle,
-                sql_name: format!("car_{code}"),
+                sql_name: c.value_table, // car_<id>
                 columns: cols,
                 pk: vec!["code".to_string()],
                 auto_pk: false,
@@ -532,14 +533,14 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
         return Ok(None);
     }
 
-    // 3. Table de valeurs d'une liste : lst_<code>.
+    // 3. Table de valeurs d'une liste : api = lst_<code>, sql_name = lst_<id>.
     if let Some(code) = api.strip_prefix("lst_") {
         let lists = crate::value_lists::load_all(con).map_err(db_err)?;
         if let Some(l) = lists.into_iter().find(|l| l.code == code) {
             return Ok(Some(OwnedTableDef {
                 api_name: format!("lst_{code}"),
                 label: l.libelle,
-                sql_name: format!("lst_{code}"),
+                sql_name: l.value_table, // lst_<id>
                 columns: vec!["code".to_string(), "libelle".to_string()],
                 pk: vec!["code".to_string()],
                 auto_pk: false,
@@ -1902,10 +1903,11 @@ mod tests {
         )
         .unwrap();
 
+        let char_id = crate::characteristics::id_of(&con, "comportement").unwrap();
         let def = resolve_table(&con, "car_comportement")
             .unwrap()
             .expect("car_comportement résolvable");
-        assert_eq!(def.sql_name, "car_comportement");
+        assert_eq!(def.sql_name, crate::characteristics::value_table(char_id));
         assert_eq!(def.label, "Comportement");
         assert_eq!(def.pk, vec!["code".to_string()]);
         // code, libelle + l'attribut N2.
@@ -1923,10 +1925,11 @@ mod tests {
     fn resolve_table_lst_code() {
         let con = setup();
         crate::value_lists::create_list(&con, "incoterm", "Incoterms").unwrap();
+        let list_id = crate::value_lists::id_of(&con, "incoterm").unwrap();
         let def = resolve_table(&con, "lst_incoterm")
             .unwrap()
             .expect("lst_incoterm résolvable");
-        assert_eq!(def.sql_name, "lst_incoterm");
+        assert_eq!(def.sql_name, crate::value_lists::value_table(list_id));
         assert_eq!(def.label, "Incoterms");
         assert_eq!(def.columns, vec!["code".to_string(), "libelle".to_string()]);
         assert_eq!(def.pk, vec!["code".to_string()]);

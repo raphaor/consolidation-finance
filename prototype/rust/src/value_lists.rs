@@ -41,9 +41,29 @@ use crate::dimensions::is_valid_custom_name;
 use crate::masterdata;
 use crate::state::{db_err, lock_con, AppError, AppState};
 
-/// Nom de la table de valeurs d'une liste.
-pub fn value_table(code: &str) -> String {
-    format!("lst_{code}")
+/// Nom physique de la table de valeurs d'une liste (B1 étape 5 : par `id`).
+pub fn value_table(id: i64) -> String {
+    format!("lst_{id}")
+}
+
+/// `id` technique d'une liste de valeurs, ou `None` si elle n'existe pas.
+pub fn id_of(con: &duckdb::Connection, code: &str) -> Option<i64> {
+    con.query_row(
+        "SELECT id FROM dim_value_list WHERE code = ?",
+        [code],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
+/// Nom physique de la table de valeurs pour un code de liste (lookup id).
+fn vtable_for(con: &duckdb::Connection, list_code: &str) -> duckdb::Result<String> {
+    let id: i64 = con.query_row(
+        "SELECT id FROM dim_value_list WHERE code = ?",
+        [list_code],
+        |r| r.get(0),
+    )?;
+    Ok(value_table(id))
 }
 
 // ───────────────────────────── Modèle / chargement ─────────────────────────────
@@ -51,6 +71,7 @@ pub fn value_table(code: &str) -> String {
 /// Une liste de valeurs (référentiel).
 #[derive(Serialize)]
 pub struct ValueListDef {
+    pub id: i64,
     pub code: String,
     pub libelle: String,
     pub value_table: String,
@@ -87,13 +108,16 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<ValueListDef>> {
     if !registry_exists(con) {
         return Ok(Vec::new());
     }
-    let mut stmt = con.prepare("SELECT code, libelle FROM dim_value_list ORDER BY code")?;
+    let mut stmt =
+        con.prepare("SELECT id, code, libelle FROM dim_value_list ORDER BY code")?;
     let rows = stmt.query_map([], |row| {
-        let code = row.get::<_, String>(0)?;
+        let id = row.get::<_, i64>(0)?;
+        let code = row.get::<_, String>(1)?;
         Ok(ValueListDef {
-            value_table: value_table(&code),
+            id,
+            value_table: value_table(id),
             code,
-            libelle: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            libelle: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
         })
     })?;
     rows.collect()
@@ -149,40 +173,46 @@ pub fn create_list(con: &duckdb::Connection, code: &str, libelle: &str) -> Resul
     if exists {
         return Err(AppError::conflict(format!("liste déjà existante : {code}")));
     }
-    let vtable = value_table(code);
-    con.execute(
-        &format!("CREATE TABLE {vtable} (code TEXT PRIMARY KEY, libelle TEXT)"),
-        [],
-    )
-    .map_err(db_err)?;
+    // INSERT en premier pour récupérer l'id technique (séquence auto).
     con.execute(
         "INSERT INTO dim_value_list (code, libelle) VALUES (?, ?)",
         &[&code, &libelle],
     )
     .map_err(db_err)?;
-    Ok(())
-}
-
-/// Supprime une liste de valeurs : table `lst_<code>` + registre. Refusée si un
-/// attribut N2 la cible encore.
-pub fn delete_list(con: &duckdb::Connection, code: &str) -> Result<(), AppError> {
-    ensure_valid_ident("code de liste", code)?;
-    let exists: bool = con
+    let id: i64 = con
         .query_row(
-            "SELECT COUNT(*) > 0 FROM dim_value_list WHERE code = ?",
+            "SELECT id FROM dim_value_list WHERE code = ?",
             [code],
             |r| r.get(0),
         )
         .map_err(db_err)?;
-    if !exists {
-        return Err(AppError::not_found(format!("liste inexistante : {code}")));
-    }
+    let vtable = value_table(id);
+    con.execute(
+        &format!("CREATE TABLE {vtable} (code TEXT PRIMARY KEY, libelle TEXT)"),
+        [],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Supprime une liste de valeurs : table `lst_<id>` + registre. Refusée si un
+/// attribut N2 la cible encore.
+pub fn delete_list(con: &duckdb::Connection, code: &str) -> Result<(), AppError> {
+    ensure_valid_ident("code de liste", code)?;
+    let list_id: Option<i64> = con
+        .query_row(
+            "SELECT id FROM dim_value_list WHERE code = ?",
+            [code],
+            |r| r.get(0),
+        )
+        .ok();
+    let list_id = list_id.ok_or_else(|| AppError::not_found(format!("liste inexistante : {code}")))?;
     if is_referenced(con, code) {
         return Err(AppError::conflict(format!(
             "liste utilisée par un attribut de caractéristique : {code}"
         )));
     }
-    con.execute(&format!("DROP TABLE IF EXISTS {}", value_table(code)), [])
+    con.execute(&format!("DROP TABLE IF EXISTS {}", value_table(list_id)), [])
         .map_err(db_err)?;
     con.execute("DELETE FROM dim_value_list WHERE code = ?", [code])
         .map_err(db_err)?;
@@ -215,12 +245,10 @@ fn reject_unknown_value_fields(obj: &Map<String, JsonValue>) -> Result<(), AppEr
 /// Liste les valeurs (lignes) d'une liste.
 pub fn list_values(con: &duckdb::Connection, code: &str) -> Result<Vec<JsonValue>, AppError> {
     require_list(con, code)?;
+    let vtable = vtable_for(con, code).map_err(db_err)?;
     masterdata::run_query(
         con,
-        &format!(
-            "SELECT code, libelle FROM {} ORDER BY code",
-            value_table(code)
-        ),
+        &format!("SELECT code, libelle FROM {vtable} ORDER BY code"),
         Vec::new(),
     )
 }
@@ -238,7 +266,7 @@ pub fn create_value(
         .and_then(JsonValue::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| AppError::bad_request("code de valeur requis"))?;
-    let vtable = value_table(list_code);
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
     let exists: bool = con
         .query_row(
             &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
@@ -269,7 +297,7 @@ pub fn update_value(
 ) -> Result<(), AppError> {
     require_list(con, list_code)?;
     reject_unknown_value_fields(obj)?;
-    let vtable = value_table(list_code);
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
     let exists: bool = con
         .query_row(
             &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
@@ -302,9 +330,10 @@ pub fn delete_value(
     value_code: &str,
 ) -> Result<(), AppError> {
     require_list(con, list_code)?;
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
     let n = con
         .execute(
-            &format!("DELETE FROM {} WHERE code = ?", value_table(list_code)),
+            &format!("DELETE FROM {vtable} WHERE code = ?"),
             [value_code],
         )
         .map_err(db_err)?;
@@ -438,11 +467,13 @@ mod tests {
     fn cree_liste_avec_table_de_valeurs() {
         let con = setup();
         create_list(&con, "incoterm", "Incoterms").unwrap();
-        assert!(table_exists(&con, "lst_incoterm"), "table de valeurs créée");
+        let lid = id_of(&con, "incoterm").unwrap();
+        let vtable = value_table(lid);
+        assert!(table_exists(&con, &vtable), "table de valeurs créée");
         let all = load_all(&con).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].code, "incoterm");
-        assert_eq!(all[0].value_table, "lst_incoterm");
+        assert_eq!(all[0].value_table, vtable);
     }
 
     #[test]
@@ -482,9 +513,10 @@ mod tests {
         let mut upd = Map::new();
         upd.insert("libelle".into(), json!("Franco à bord"));
         update_value(&con, "incoterm", "FOB", &upd).unwrap();
+        let lid = id_of(&con, "incoterm").unwrap();
         let lib: String = con
             .query_row(
-                "SELECT libelle FROM lst_incoterm WHERE code = 'FOB'",
+                &format!("SELECT libelle FROM lst_{lid} WHERE code = 'FOB'"),
                 [],
                 |r| r.get(0),
             )
@@ -509,11 +541,13 @@ mod tests {
         crate::characteristics::add_attribute(&con, "comportement", "inco", "Incoterm", "incoterm")
             .unwrap();
 
+        let char_id = crate::characteristics::id_of(&con, "comportement").unwrap();
+        let list_id = id_of(&con, "incoterm").unwrap();
         let refs = crate::references::dynamic_references(&con);
         assert!(
-            refs.iter().any(|r| r.table == "car_comportement"
+            refs.iter().any(|r| r.table == format!("car_{char_id}")
                 && r.column == "inco"
-                && r.target_table == "lst_incoterm"
+                && r.target_table == format!("lst_{list_id}")
                 && r.target_column == "code"),
             "l'attribut N2 → liste apparaît dans le graphe de références"
         );
@@ -560,6 +594,7 @@ mod tests {
         v.insert("code".into(), json!("FOB"));
         create_value(&con, "incoterm", &v).unwrap();
 
+        let lid = id_of(&con, "incoterm").unwrap();
         crate::schema::create_schema(&con).expect("re-create_schema");
 
         let n: i64 = con
@@ -567,7 +602,7 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1, "registre survit au reset");
         assert!(
-            table_exists(&con, "lst_incoterm"),
+            table_exists(&con, &value_table(lid)),
             "table de valeurs survit"
         );
         assert_eq!(

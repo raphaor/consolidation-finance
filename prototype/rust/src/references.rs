@@ -293,8 +293,8 @@ pub fn target_master(con: &Connection, target: &str) -> Option<(String, String)>
     if let Some((t, c)) = secondary_master_data(target) {
         return Some((t.to_string(), c.to_string()));
     }
-    if crate::value_lists::list_exists(con, target) {
-        return Some((crate::value_lists::value_table(target), "code".to_string()));
+    if let Some(list_id) = crate::value_lists::id_of(con, target) {
+        return Some((crate::value_lists::value_table(list_id), "code".to_string()));
     }
     None
 }
@@ -343,19 +343,19 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
     }
     let mut out = Vec::new();
 
-    // N1 : colonne de rattachement sur la dimension de base → car_<code>.code
-    if let Ok(mut stmt) =
-        con.prepare("SELECT code, base_dimension FROM dim_characteristic ORDER BY code")
-    {
-        if let Ok(rows) =
-            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        {
-            for (code, base) in rows.flatten() {
+    // N1 : colonne de rattachement sur la dimension de base → car_<id>.code
+    if let Ok(mut stmt) = con.prepare(
+        "SELECT id, code, base_dimension FROM dim_characteristic ORDER BY code",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        }) {
+            for (id, code, base) in rows.flatten() {
                 if let Some((base_table, _)) = dimension_master(&base) {
                     out.push(OwnedReference {
                         table: base_table.to_string(),
                         column: code.clone(),
-                        target_table: format!("car_{code}"),
+                        target_table: crate::characteristics::value_table(id),
                         target_column: "code".to_string(),
                         target_display_column: None,
                         required: false,
@@ -365,23 +365,21 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
         }
     }
 
-    // N2 : chaque attribut car_<char>.<name> → master data de la dimension cible
+    // N2 : chaque attribut car_<char_id>.<name> → master data de la dimension cible
     if let Ok(mut stmt) = con.prepare(
-        "SELECT characteristic_code, name, target_dimension \
-         FROM dim_characteristic_attribute ORDER BY characteristic_code, name",
+        "SELECT dc.id, dca.name, dca.target_dimension \
+         FROM dim_characteristic_attribute dca \
+         JOIN dim_characteristic dc ON dc.code = dca.characteristic_code \
+         ORDER BY dc.id, dca.name",
     ) {
         if let Ok(rows) = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
         }) {
-            for (char_code, name, target) in rows.flatten() {
+            for (char_id, name, target) in rows.flatten() {
                 // La cible d'un N2 peut être une dimension ou une liste de valeurs.
                 if let Some((tt, tc)) = target_master(con, &target) {
                     out.push(OwnedReference {
-                        table: format!("car_{char_code}"),
+                        table: crate::characteristics::value_table(char_id),
                         column: name,
                         target_table: tt,
                         target_column: tc,

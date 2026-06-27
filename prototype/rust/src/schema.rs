@@ -671,31 +671,39 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
         con.execute(stmt, [])?;
     }
 
-    // 4. Ré-appliquer les colonnes custom survivantes.
+    // 4. Doter chaque dimension d'un `id` technique (chantier B1, étape 1).
+    //    Doit précéder reapply() qui lit dim_characteristic.id.
+    crate::surrogate::ensure_ids(con)?;
+
+    // 4b. Doter dim_characteristic_attribute d'un `id` (clé composite → séquence).
+    crate::surrogate::ensure_characteristic_attribute_ids(con)?;
+
+    // 4c. Renommer les tables de valeurs car_<code> → car_<id> et lst_<code> →
+    //     lst_<id> sur les bases existantes (no-op sur base fraîche).
+    crate::surrogate::migrate_characteristic_tables_to_id(con)?;
+    crate::surrogate::migrate_value_list_tables_to_id(con)?;
+
+    // 5. Ré-appliquer les colonnes custom survivantes.
     crate::dimensions::apply_custom_columns(con, &saved_customs)?;
 
-    // 5. Ré-appliquer les colonnes de rattachement des caractéristiques N1
+    // 6. Ré-appliquer les colonnes de rattachement des caractéristiques N1
     //    (perdues au DROP des tables de dimension de base ; les tables de
-    //    valeurs `car_<code>` survivent au reset, donc ne sont pas recréées).
+    //    valeurs `car_<id>` survivent au reset, donc ne sont pas recréées).
     crate::characteristics::reapply(con)?;
 
-    // 6. Ré-appliquer les colonnes des références directes (patron B), perdues
+    // 7. Ré-appliquer les colonnes des références directes (patron B), perdues
     //    elles aussi au DROP des dimensions hôtes (le registre survit au reset).
     crate::custom_references::reapply(con)?;
 
-    // 7. Peupler les FK natives du DDL statique dans `dim_custom_reference`
+    // 8. Peupler les FK natives du DDL statique dans `dim_custom_reference`
     //    (account.sous_classe, entity.entite_parent, scenario.category, …).
     //    Marquées `native=TRUE` et verrouillées contre édition via l'API.
     //    Idempotent : INSERT OR IGNORE préserve les customs utilisateur.
     crate::custom_references::seed_native(con)?;
 
-    // 8. (Re)seeder les coefficients natifs (moteur de formules, volet 1).
+    // 9. (Re)seeder les coefficients natifs (moteur de formules, volet 1).
     //    Idempotent (INSERT OR IGNORE) ; les coefficients utilisateur survivent.
     crate::coefficients::seed_builtins(con)?;
-
-    // 9. Doter chaque dimension d'un `id` technique (chantier B1, étape 1).
-    //    Idempotent ; non-breaking (les `id` ne sont pas encore consommés).
-    crate::surrogate::ensure_ids(con)?;
 
     // 10. Créer la vue v_flow_behavior APRÈS ensure_ids car elle référence les
     //     colonnes `id` ajoutées par cette étape (dim_account.id, dim_flow.id).

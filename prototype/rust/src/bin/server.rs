@@ -1547,6 +1547,17 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_fact_entry_to_ids(&con) {
             eprintln!("   ⚠ migrate_fact_entry_to_ids (non bloquant) : {e}");
         }
+        // B1 étape 5 : renomme les tables de valeurs car_<code>→car_<id>
+        // et lst_<code>→lst_<id>. Idempotent ; nécessite ensure_ids (déjà appelé).
+        if let Err(e) = conso_engine::surrogate::ensure_characteristic_attribute_ids(&con) {
+            eprintln!("   ⚠ ensure_characteristic_attribute_ids (non bloquant) : {e}");
+        }
+        if let Err(e) = conso_engine::surrogate::migrate_characteristic_tables_to_id(&con) {
+            eprintln!("   ⚠ migrate_characteristic_tables_to_id (non bloquant) : {e}");
+        }
+        if let Err(e) = conso_engine::surrogate::migrate_value_list_tables_to_id(&con) {
+            eprintln!("   ⚠ migrate_value_list_tables_to_id (non bloquant) : {e}");
+        }
         // B1 étape 6 : bascule les valeurs JSON (règles / postes / indicateurs)
         // de codes strings vers ids entiers. Idempotent.
         if let Err(e) = conso_engine::json_migration::migrate_json_to_ids(&con) {

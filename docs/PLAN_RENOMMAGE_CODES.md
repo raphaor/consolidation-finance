@@ -13,53 +13,45 @@ codes-renommables, branche `feat/renommage-codes`, voir
 
 ### Où on en est (2026-06-27 — état final)
 
-**Étapes 0–4, 6, 7 entièrement terminées + smoke-tests validés.**
+**Étapes 0–7 entièrement terminées en code. Smoke-tests runtime à valider.**
 
+- **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
+  `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
+  (colonnes attributs N2 `c<id>` + colonnes custom `x<id>` différés).
+  143 tests, 0 échec.
+  - `surrogate.rs` : 3 nouvelles migrations idempotentes
+    (`ensure_characteristic_attribute_ids`, `migrate_characteristic_tables_to_id`,
+    `migrate_value_list_tables_to_id`).
+  - `schema.rs` : `ensure_ids` déplacé avant `reapply` (chicken-and-egg corrigé).
+  - `characteristics.rs`, `value_lists.rs` : `value_table(id)` + helpers `id_of`,
+    `vtable_for`. Tous les sites d'appel mis à jour.
+  - `references.rs` : `dynamic_references` + `target_master` id-aware.
+  - `rules.rs`, `indicators.rs` : JOINs `car_{via}` → `car_{id}`.
+  - `masterdata.rs` : `sql_name = car_{id}` / `lst_{id}`, `api_name` = code inchangé.
+  - `server.rs` : 3 appels de migration au startup.
 - **Smoke-tests OK (2026-06-27)** : CRUD rulesets, renommage jeu de règles,
   pipeline, perimeter/method, consolidations — aucun bug runtime détecté.
-- **Dénormalisation ids→codes (2026-06-27)** : `GET /api/rules/{code}` et
-  `GET /api/aggregates` dénormalisent les ids stockés en codes avant renvoi
-  (`json_migration::denormalize_rule_definition` / `denormalize_aggregate_definition`).
-  L'éditeur de règles affiche à nouveau les codes lisibles.
-- **RenameModal harmonisée (2026-06-27)** : `MasterDataPage` utilisait
-  `window.prompt()` (hors-thème). Remplacé par la modale standard (backdrop,
-  input autofocus, erreur inline). Composant partagé extrait dans
-  `web/src/components/RenameModal.tsx`.
-- Fait : **étapes 0, 1, 2, 3, 4, 6, 7** entièrement. **Étape 3 — COMPLÈTE** :
-  toutes FK dim→dim flippées dont `ruleset` (session 2026-06-27bis).
-- **Corrections smoke-test (session 2026-06-27)** : 4 faux blocages au renommage
-  d'un compte corrigés — `fact_entry.*` refs passées en `ri()` (invisibles à la
-  garde code-keyed) ; `stg_entry`/`car_*`/patron B en cascade plutôt qu'en blocage.
-  Suite tests verte à **183 tests, 0 échec** après ces corrections.
+- Fait : **étapes 0, 1, 2, 3, 4, 5, 6, 7** entièrement.
 
-### Prochaine étape : **étape 5** — objets dynamiques nommés par id
+### Prochaine étape : **smoke-test étape 5** + optionnel : `via` dans JSON
 
-**Objectif** : les noms physiques `car_<code>`, `lst_<code>`, colonnes custom
-(`<name>`, attributs N2) ne dépendent plus du code mutable.
+**À valider par l'utilisateur (serveur runtime) :**
+- Créer une caractéristique, vérifier `car_1` créé.
+- Créer une liste de valeurs, vérifier `lst_1` créé.
+- Renommer un code de dimension → pas de blocage sur `car_*`/`lst_*`.
+- POST /api/reset → `car_1`/`lst_1` survivent, reapply OK.
 
-**4 registres à basculer :**
+**Différé (scope réduit étape 5) :**
 
-| Objet | Avant | Après | Migration DuckDB |
-|---|---|---|---|
-| Tables caractéristiques | `car_<code>` | `car_<id>` | `ALTER TABLE … RENAME TO` |
-| Attributs N2 (colonnes) | `<attr_code>` sur `car_*` | `c<id>` | `ALTER TABLE … RENAME COLUMN` |
-| Tables listes de valeurs | `lst_<code>` | `lst_<id>` | `ALTER TABLE … RENAME TO` |
-| Colonnes dims custom | `<name>` sur `fact_entry`/`stg_entry` | `x<id>` | `ALTER TABLE … RENAME COLUMN` |
-
-> Référence directe (`r<id>`) : à traiter en même temps ou juste après.
-> DuckDB supporte RENAME TABLE et RENAME COLUMN directement (pas de reconstruction).
-
-**Fichiers principaux touchés :**
-- `characteristics.rs` — `format!("car_{code}")` → lookup id ; idem attributs N2
-- `value_lists.rs` — `format!("lst_{code}")` → lookup id
-- `dimensions.rs` + `custom_references.rs` — nommage colonnes custom
-- `surrogate.rs` — 4 nouvelles fonctions de migration idempotentes
-- `references.rs` — `all_references` construit noms depuis ids
-- `json_migration.rs` — migration `via`/`ref` dans JSON (déblocage post-étape 5)
-- Tests : `car_comportement`, `lst_incoterm`, tests `via`/`ref` dans `rules.rs`
+**✅ TERMINÉ (2026-06-27bis)** — scope réduit (tables seulement) :
+- `car_<code>` → `car_<id>` ✅
+- `lst_<code>` → `lst_<id>` ✅
+- Attributs N2 `c<id>` : **différé**
+- Colonnes custom `x<id>` : **différé**
+- Référence directe `r<id>` : **différé**
 
 **Ce que ça débloque :**
-- `via` et `ref` dans les JSON de règles/postes entièrement migrables (étape 6 résiduelle)
+- `via` dans les JSON de règles/postes migrables vers ids (étape 6 résiduelle)
 - Création de dimensions custom (chantier gelé §11)
 
 ### Détail étape 6 (JSON → ids)

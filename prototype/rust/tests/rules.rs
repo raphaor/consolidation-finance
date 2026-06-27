@@ -520,9 +520,13 @@ fn destination_map_traverse_caracteristique() {
     .unwrap();
 
     // Valeur + affectation en SQL direct (le CRUD est testé côté `characteristics`).
+    let char_id = conso_engine::characteristics::id_of(&con, "comportement").unwrap();
+    let car_table = conso_engine::characteristics::value_table(char_id);
     con.execute(
-        "INSERT INTO car_comportement (code, libelle, compte_destination, nat) \
-         VALUES ('VENTES_IC', 'Ventes interco', '471L', '1AJUST')",
+        &format!(
+            "INSERT INTO {car_table} (code, libelle, compte_destination, nat) \
+             VALUES ('VENTES_IC', 'Ventes interco', '471L', '1AJUST')"
+        ),
         [],
     )
     .unwrap();
@@ -621,9 +625,13 @@ fn selection_via_n1_filtre_par_valeur_de_caracteristique() {
 
     // N1 « regroupement » sur les comptes. Valeurs : PROD (ventes), CHGES (achats).
     create_characteristic(&con, "regroupement", "Regroupement", "account").unwrap();
+    let reg_id = conso_engine::characteristics::id_of(&con, "regroupement").unwrap();
+    let reg_table = conso_engine::characteristics::value_table(reg_id);
     con.execute(
-        "INSERT INTO car_regroupement (code, libelle) VALUES \
-         ('PROD', 'Produits'), ('CHGES', 'Charges')",
+        &format!(
+            "INSERT INTO {reg_table} (code, libelle) VALUES \
+             ('PROD', 'Produits'), ('CHGES', 'Charges')"
+        ),
         [],
     )
     .unwrap();
