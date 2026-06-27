@@ -1,8 +1,10 @@
 # Mini-spec — `flow_scheme` explicite (sans défaut)
 
-> Statut : **décision prise** (Q45, 2026-06-25) — `flow_scheme` devient 100 %
-> user-driven. Cette spec cadre le **sous-choix restant** (comportement d'un
-> compte sans schéma) et l'impact sur le golden, avant implémentation.
+> Statut : **implémenté** (Q45, 2026-06-26) — `flow_scheme` est 100 % user-driven.
+> Sous-choix **(b)** tranché : un compte sans schéma est **toléré mais exclu**
+> silencieusement (vue `LEFT JOIN`). Le seed peuple `flow_scheme` sur tous les
+> comptes → golden **stable**. Flip B1 livré (`flow_scheme` = 5ᵉ dimension
+> renommable). Ce document garde la trace de la décision pour mémoire.
 > Motivation : retirer le dur `COALESCE(…, CASE classe → RESULTAT/BILAN)` de la
 > vue `v_flow_behavior` (`schema.rs:225`) — prérequis au flip B1 de `flow_scheme`.
 
@@ -24,6 +26,13 @@ Conséquence : `RESULTAT` / `BILAN` ne sont plus des codes « magiques » réfé
 par le moteur — ils redeviennent de simples schémas utilisateur (renommables).
 
 ## 2. Sous-choix ouvert : compte sans `flow_scheme`
+
+> **Décision (2026-06-26) : option (b)** — toléré mais exclu. La recommandation
+> initiale était (a), mais le choix utilisateur s'est porté sur (b) : pas de
+> validation bloquante (`flow_scheme` nullable), vue en `LEFT JOIN`. Le seed reste
+> peuplé sur tous les comptes (comportement identique au défaut d'origine), donc
+> le golden n'a **pas bougé**. La différence avec (a) : un compte utilisateur sans
+> schéma disparaît silencieusement des sorties (piège assumé).
 
 La levée du défaut fait surgir une question : que faire d'un compte dont
 `flow_scheme IS NULL` ?

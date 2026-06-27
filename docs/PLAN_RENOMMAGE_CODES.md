@@ -12,33 +12,137 @@ codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
 ### Où on en est
-- **Le renommage fonctionne de bout en bout** (validé en UI : `variant` renommé
-  en `V1`). C'est la preuve de l'approche : `POST /api/md/{table}/rename`, gardé
-  par une vérification de sûreté, + bouton « Renommer » dans Master Data.
-- Fait : **étapes 0, 1, 2** (golden / `id` partout / résolution code↔id),
-  **étape 3 partielle** (FK dim→dim toutes flippées sauf `method` et `ruleset`),
-  **étape 7** (renommage, livré en avance).
-  **`rate_set`** (2ᵉ renommable) : `sat_exchange_rate.rate_set` en `id`, `convert.rs`
-  résout dans la CTE `params`.
-  **`perimeter_set`** (3ᵉ) : `sat_perimeter.perimeter_set` en `id`, `ConvertParams.
-  perimeter_set` passé en `i64`.
-  **`sous_classe`** (4ᵉ) : `dim_account.sous_classe` en `id`. 1ʳᵉ FK native traversable
-  → mécanisme **id-aware** dans `rules.rs` (`ref_code_contract`).
-  **`flow_scheme`** (5ᵉ) : Q45 + deux FK flippées (`dim_account.flow_scheme`,
-  `sat_flow_scheme_item.scheme`). Traversée id-aware réutilisée.
-  **FK lot consolidation (2ᵉ vague)** : `exercice`, `presentation_currency`,
-  `perimeter_period`, `rate_period`, `ruleset_code` flippées en `id`.
-  `dim_period` et `dim_currency` réordonnées avant `dim_consolidation` dans seed +
-  loader. Migrations in-place : `migrate_consolidation_fk_to_id` étendu à 9 FK ;
-  `migrate_consolidation_fk_to_id_v2` pour bases intermédiaires.
-  **`dim_entity`** : `devise_fonctionnelle` → `dim_currency.id` et `entite_parent` →
-  `dim_entity.id` (auto-référence). Migration `migrate_entity_fk_to_id` préserve
-  les ids existants (self-join cohérent). `bench.rs` : deux passes INSERT (M en 1ʳᵉ,
-  filiales après) + JOIN `dim_currency` dans `ent_idx`.
-- Robustesse : migration in-place par **reconstruction de table** (satellites PK),
-  **add+update+drop+rename** (hors PK), **import B1-aware**, **`CHECKPOINT`**
-  anti-corruption WAL. Couverture **loader** ajoutée (`tests/loader.rs`).
-- État : **136 tests unit + 40 intégration verts, golden inchangé**.
+- **Le renommage fonctionne de bout en bout** pour toutes les dimensions flippées,
+  **y compris les règles et jeux de règles** (bouton « Renommer » dans RulesPage).
+- Fait : **étapes 0, 1, 2, 3, 4, 6, 7** entièrement. **Étape 3 — COMPLÈTE** :
+  toutes FK dim→dim flippées dont `ruleset` (session 2026-06-27bis).
+- **FK `ruleset` (session 2026-06-27bis)** : `dim_ruleset_item.ruleset_code`
+  TEXT → INTEGER via `migrate_ruleset_item_fk_to_id` (reconstruction PK composite).
+  `references.rs` : `rq()` → `ri()`. Moteur `rules.rs` et handlers `server.rs`
+  utilisent sous-requête `(SELECT id FROM dim_ruleset WHERE code = ?)`. Export/import
+  B1-aware automatique via `import_db_value`. Suite verte : **183 tests, 0 échec**.
+  ⚠️ **Smoke-test serveur en attente** : CRUD `/api/rulesets`, créer/modifier/
+  supprimer un ruleset, renommer un jeu de règles, lancer le pipeline.
+- **ÉTAPE 6 — TERMINÉE (session 2026-06-27)** : les JSON de règles/postes/indicateurs
+  stockent désormais des **ids entiers** au lieu de codes strings. Moteur dual-mode
+  (lit indifféremment ids ou codes legacy). Migration idempotente au démarrage.
+  Voir détail ci-dessous.
+- **Renommage règles/rulesets** (session 2026-06-27) : `dim_rule` + `dim_ruleset`
+  ajoutées dans `TABLES` → `POST /api/md/rules/rename` et `.../rulesets/rename`
+  opérationnels. Bouton « Renommer » ajouté dans `RulesPage.tsx` (onglets
+  Bibliothèque et Jeux de règles).
+- **Corrections smoke-test (session 2026-06-27)** : 4 faux blocages au renommage
+  d'un compte corrigés — `fact_entry.*` refs passées en `ri()` (invisibles à la
+  garde code-keyed) ; `stg_entry`/`car_*`/patron B en cascade plutôt qu'en blocage.
+  Suite tests verte à **183 tests, 0 échec** après ces corrections.
+
+### Détail étape 6 (JSON → ids)
+
+**`src/json_migration.rs`** (nouveau module) :
+- `normalize_rule_definition(con, json)` — scope.val + selection[*].val (hors
+  via/ref/attr) + destination.override.value → ids entiers.
+- `normalize_aggregate_definition(con, json)` — selection[*].val → ids.
+- `normalize_indicator_expression(con, expr)` — `[code]` → `[id]` via
+  `formula::operands`. Cherche agrégat puis indicateur.
+- `migrate_json_to_ids(con)` — migration idempotente au démarrage (après
+  `migrate_fact_entry_to_ids`). Parcourt dim_rule, dim_aggregate, dim_indicator.
+
+**`src/rules.rs`** — moteur dual-mode :
+- `Destination.value` : `Option<String>` → `Option<JsonValue>`.
+- `parse_destination` "override" : accepte String (code legacy) ou Number (id).
+- `dest_expr` override : `Number` → liaison directe `BigInt` sans sous-requête ;
+  `String` → sous-requête `code→id` (chemin legacy inchangé).
+- `exec_operation` sélection : val entier → `e.<dim>` direct (INTEGER=INTEGER) ;
+  val string → `(SELECT code FROM table WHERE id = e.<dim>)` (chemin legacy).
+- `validate_definition` override : skip la vérif d'existence pour les `Number`.
+- 2 tests mis à jour / ajoutés.
+
+**`src/indicators.rs`** — résolution par id :
+- `IndicatorResolver.resolve` : si nom parseable en `i64` → lookup par id dans
+  `dim_aggregate` puis `dim_indicator`. Fonctions `load_aggregate_def_by_id` et
+  `load_indicator_expr_by_id` ajoutées.
+- `create_aggregate`, `update_aggregate` : appellent `normalize_aggregate_definition`.
+- `create_indicator`, `update_indicator` : appellent `normalize_indicator_expression`.
+
+**`src/bin/server.rs`** :
+- Appel de `migrate_json_to_ids` au démarrage.
+- `create_rule`, `update_rule` : appellent `normalize_rule_definition` après validation.
+
+**Ce qui n'est pas encore migré** (hors scope étape 6) :
+- `coefficient.type` (format `{"type": "code"}`) — priorité moindre.
+- `via` (codes de caractéristiques, noms de tables `car_<code>`) — bloqué sur étape 5.
+- `ref` (codes de références directes) — pas encore renommable.
+- `app_config.pivot_currency` — toujours casté en garde (bloquant au rename devise).
+
+### Dimensions renommables aujourd'hui
+`variant`, `rate_set`, `perimeter_set`, `sous_classe`, `flow_scheme`, `method`,
+**`rules` (dim_rule)**, **`rulesets` (dim_ruleset)** — sous réserve que les
+JSON soient migrés (étape 6 garantit la migration au démarrage).
+
+### ⚠️ Étape 4 — diagnostic réel (le « stale build » était une fausse piste)
+
+L'hypothèse « artefact périmé » de la session précédente était **fausse** : le
+binaire était bien à jour. Deux vrais bugs (2026-06-26) :
+
+1. **`pipeline/staging.rs`** (`inject_by_prefix`) — `GROUP BY {col_list}` portait
+   sur des noms nus ; DuckDB liait `phase` à la colonne brute `stg_entry.phase`
+   (code) plutôt qu'à l'alias `_dphase.id AS phase`, laissant l'`id` ni groupé ni
+   agrégé → `Binder Error: column "id" must appear in the GROUP BY`. Le panic
+   pointait `indicators.rs:926` (le `unwrap` de `run_pipeline`), pas la vraie
+   source. **Même risque latent dans `aggregate.rs`** (`step_a`).
+   **Fix (les deux)** : isoler la résolution code→id dans une **sous-requête**,
+   puis `GROUP BY {col_list}` sur des noms propres et non-ambigus de la
+   sous-requête. (Ni le GROUP BY positionnel `1,2,3` — rejeté par DuckDB en
+   INSERT…SELECT — ni le GROUP BY sur alias — ambigu — ne marchaient.)
+2. **`indicators.rs`** (`build_aggregate_sql`, branche sélection directe) —
+   comparait le code (`'700'`) à `fact_entry.account`, désormais un id INTEGER
+   (B1). **Fix** : pour une dim à master data, joindre la master
+   (`LEFT JOIN dim_x imdd_x ON imdd_x.id = e.x`) et filtrer sur sa colonne code
+   (`imdd_x.code = ?`), comme les branches `via`/`ref`/`attr`. Test
+   `poste_direct_compile_et_filter` mis à jour (assertion `imdd_account.code`).
+3. **`rules.rs`** (`exec_operation`, branche sélection **directe**) — même classe :
+   l'opérande `e.<dim>` comparait un code à une colonne id. **Fix** : pour une dim
+   id-typée, remonter l'id → code via sous-requête
+   `(SELECT <code_col> FROM <table> WHERE id = e.<dim>)` (couvre `=`/`IN`/`IS NULL`).
+   `dest_expr` (override/map/map_ref) était déjà id-aware. NB : sous B1 une valeur
+   d'`override` doit exister dans la master data (FK NOT NULL) — les natures
+   synthétiques des tests sont désormais seedées.
+
+### ⚠️ Étape 4 — diagnostic réel (le « stale build » était une fausse piste)
+
+L'hypothèse « artefact périmé » de la session précédente était **fausse** : le
+binaire était bien à jour. Deux vrais bugs (2026-06-26) :
+
+1. **`pipeline/staging.rs`** (`inject_by_prefix`) — `GROUP BY {col_list}` portait
+   sur des noms nus ; DuckDB liait `phase` à la colonne brute `stg_entry.phase`
+   (code) plutôt qu'à l'alias `_dphase.id AS phase`, laissant l'`id` ni groupé ni
+   agrégé → `Binder Error: column "id" must appear in the GROUP BY`. Le panic
+   pointait `indicators.rs:926` (le `unwrap` de `run_pipeline`), pas la vraie
+   source. **Même risque latent dans `aggregate.rs`** (`step_a`).
+   **Fix (les deux)** : isoler la résolution code→id dans une **sous-requête**,
+   puis `GROUP BY {col_list}` sur des noms propres et non-ambigus de la
+   sous-requête. (Ni le GROUP BY positionnel `1,2,3` — rejeté par DuckDB en
+   INSERT…SELECT — ni le GROUP BY sur alias — ambigu — ne marchaient.)
+2. **`indicators.rs`** (`build_aggregate_sql`, branche sélection directe) —
+   comparait le code (`'700'`) à `fact_entry.account`, désormais un id INTEGER
+   (B1). **Fix** : pour une dim à master data, joindre la master
+   (`LEFT JOIN dim_x imdd_x ON imdd_x.id = e.x`) et filtrer sur sa colonne code
+   (`imdd_x.code = ?`), comme les branches `via`/`ref`/`attr`. Test
+   `poste_direct_compile_et_filter` mis à jour (assertion `imdd_account.code`).
+3. **`rules.rs`** (`exec_operation`, branche sélection **directe**) — même classe :
+   l'opérande `e.<dim>` comparait un code à une colonne id. **Fix** : pour une dim
+   id-typée, remonter l'id → code via sous-requête
+   `(SELECT <code_col> FROM <table> WHERE id = e.<dim>)` (couvre `=`/`IN`/`IS NULL`).
+   `dest_expr` (override/map/map_ref) était déjà id-aware. NB : sous B1 une valeur
+   d'`override` doit exister dans la master data (FK NOT NULL) — les natures
+   synthétiques des tests sont désormais seedées.
+
+**Adaptations des tests d'intégration (fact_entry en ids)** : helpers résolvant
+code→id (`a_nouveau::amt`, `pipeline::{flow_sum,flow_rows,amount_for,…}`, INSERTs
+directs via sous-requêtes) ; `rules.rs` : vue **`vfe`** code-aware ciblée par
+`ssum`/`scount` + `put` résolvant les codes + seed des natures d'override.
+
+**Reste : smoke-test serveur par l'utilisateur.**
 
 ### Modules clés (où regarder)
 - `src/surrogate.rs` — `ensure_ids` (id sur chaque dim) +
@@ -47,7 +151,8 @@ codes-renommables, branche `feat/renommage-codes`, voir
   `migrate_entity_fk_to_id` (devise_fonctionnelle + entite_parent, préserve les ids) +
   `migrate_sat_exchange_rate_fk_to_id` + `migrate_sat_perimeter_fk_to_id` +
   `migrate_sat_flow_scheme_item_scheme_to_id` (reconstructions in-place) +
-  `migrate_account_sous_classe_to_id` + `migrate_account_flow_scheme_to_id`
+  `migrate_account_sous_classe_to_id` + `migrate_account_flow_scheme_to_id` +
+  `migrate_sat_perimeter_methode_to_id` (methode TEXT→id INTEGER, B1 6ᵉ dim)
   (add+update+drop+rename, hors PK). Le **registre `SURROGATE_DIMS`**.
 - `src/resolve.rs` — résolution code↔id (unitaire + cartes batch).
 - `src/references.rs` — `Reference.target_display_column` + constructeur `ri()`
@@ -97,20 +202,23 @@ codes-renommables, branche `feat/renommage-codes`, voir
   exclure les colonnes listées dans le graphe `references_for("sat_perimeter")`.
   Piège générique : toute colonne FK passant `TEXT→INTEGER` peut être avalée par
   un filtre « colonnes numériques » data-driven.
-- **Rôle 3 (codes dans le JSON)** : non traité. La garde de `rename_code`
-  s'appuie sur le **graphe de références uniquement** — pas encore de scan des
-  codes dans `dim_rule.definition` / `dim_coefficient.expression` / indicateurs /
-  `app_config`. À faire **avant** de rendre renommables les dimensions citées
-  dans ces contenus (ex. `methode` est dans le scope d'une règle seedée).
+- **Rôle 3 (codes dans le JSON)** : ✅ garde livrée — `masterdata::scan_json_blockers`
+  scanne `dim_rule.definition` (scope/selection/destination/coeff/via),
+  `dim_aggregate.definition`, `dim_indicator.expression`, `app_config.pivot_currency`
+  avant tout renommage. C'est une **garde** (bloque le rename si le code est présent)
+  pas encore une **migration** (les JSON stockent encore des codes — étape 6, future).
+  `rules.rs` : `scope_effective_val` résout généricament les codes de scope vers ids
+  pour toute colonne `ri()` de `sat_perimeter` (mécanique générique, non hardcodée).
+- **⚠ Smoke-test en attente** : CRUD `/api/md/perimeter` (methode affiché en code),
+  renommage d'une méthode non citée dans les règles, `GET /api/consolidations`.
 
 ### Prochaine étape (au choix de l'utilisateur)
-Toutes les FK dim→dim **sauf `ruleset`** sont faites. Rôle 3 (garde JSON) livré. `method` renommable.
-- **`ruleset`** : 5 handlers custom (`server.rs`) + `dim_ruleset_item` (PK composite) —
-  volumineux mais mécanique. À faire en dernier (pas de dépendance fonctionnelle immédiate).
-- **Étape 4 (`fact_entry` en ids)** : la grosse étape — rend entités/comptes/
-  devises renommables.
-
-Recommandation : **étape 4** → `ruleset`.
+**Étapes 0–4, 6, 7 terminées + toutes les FK dim→dim flippées (`ruleset` inclus).**
+Reste le **smoke-test serveur** par l'utilisateur (server.rs non couvert par
+`cargo test`) pour la FK `ruleset` : CRUD `/api/rulesets`, renommer un jeu de règles,
+lancer le pipeline avec un ruleset.
+Ensuite : **étape 5** (objets dynamiques nommés par id : `car_<id>`, `lst_<id>`,
+rôle 2) — débloque la création de dimensions (chantier gelé §11).
 
 ### Hors chantier (ne pas committer)
 Travail parallèle sur le frontend (`web/`) — ergonomie des règles, formules,
@@ -367,20 +475,33 @@ depuis les données existantes (jamais de reseed).
        dans `rules.rs` (générique pour toute colonne ri() de sat_perimeter).
        `consolidate.rs` : `ON m.id = per.methode`. Garde rôle 3 = le seul frein
        résiduel (ex. `methode='globale'` dans un JSON de règle non encore migrée).
+       **Après étape 6** : la migration JSON traduit les codes de scope (`methode`) en
+       ids au démarrage → `method` est **pleinement renommable** après migration.
        ⚠️ À smoke-tester : CRUD perimeter, renommage `globale`, `GET /api/consolidations`.
-     - ⏭️ **`ruleset`** (en dernier).
-4. **Basculer `fact_entry` en ids** : réécrire la frontière étape A + jointures
-   pipeline + reports. *La grosse étape.*
+     - ✅ **`ruleset`** (session 2026-06-27bis) : `dim_ruleset_item.ruleset_code`
+       TEXT → INTEGER (`migrate_ruleset_item_fk_to_id`, PK composite → reconstruction).
+       `references.rs` : `rq()` → `ri()`. Sous-requête id dans `rules.rs` +
+       `server.rs` (5 handlers). Export/import B1-aware automatique. Tests verts.
+       ⚠️ Smoke-test serveur en attente.
+4. ✅ **Basculer `fact_entry` en ids** : frontière étape A (`aggregate.rs`) +
+   `staging.rs` (résolution code→id en sous-requête pour un GROUP BY propre) +
+   jointures pipeline + reports + lecteurs (`indicators.rs`, `rules.rs` sélection
+   directe id→code). *La grosse étape.* Suite `cargo test` verte (golden inclus).
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
-6. **Basculer les JSON en ids** via l'éditeur (§6) → rôle 3 réglé.
+6. ✅ **Basculer les JSON en ids** → rôle 3 réglé (session 2026-06-27).
+   Voir détail complet dans §0. Résumé : `json_migration.rs` (nouveau module),
+   moteur dual-mode dans `rules.rs` + `indicators.rs`, migration idempotente
+   au démarrage, normalisation à la sauvegarde.
+   **Reste hors scope** : `coefficient.type`, `via` (bloqué étape 5), `ref`,
+   `app_config.pivot_currency`.
 7. ✅ **Endpoint `rename` + UI** (livré en avance) : `POST /api/md/{table}/rename`
    (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
    refuse si une référence cible encore le code (liste les blocages). Effectif dès
-    qu'une dimension est entièrement flippée — aujourd'hui **`variant`**,
-    **`rate_set`**, **`perimeter_set`**, **`sous_classe`** et **`flow_scheme`**. S'étend
-   automatiquement aux suivantes. ⚠️ Garde basée sur le graphe ; **pas encore** de
-   scan des codes enfouis dans JSON/`app_config` (rôle 3) — à ajouter avant de
-   rendre renommables les dimensions présentes dans ces contenus (ex. `methode`).
+   qu'une dimension est entièrement flippée. **Session 2026-06-27** : `dim_rule` et
+   `dim_ruleset` ajoutées dans `TABLES` → bouton « Renommer » opérationnel dans
+   `RulesPage.tsx` pour les règles et jeux de règles. Cascade correcte :
+   `dim_ruleset_item.rule_code` et `.ruleset_code` (`rq()` → mis à jour) ;
+   `dim_consolidation.ruleset_code` (`ri()` → non affecté).
    Robustesse base : `CHECKPOINT` après migrations/import/reset/rename (sinon WAL
    DuckDB irrejouable au redémarrage). Import B1-aware (restaure un export en codes).
 8. **Retirer les chemins code-based** résiduels + finaliser la migration
