@@ -619,6 +619,32 @@ pub fn assign(
     Ok(())
 }
 
+/// Met à jour le libellé d'une caractéristique N1.
+pub fn update_characteristic(
+    con: &duckdb::Connection,
+    char_code: &str,
+    libelle: &str,
+) -> Result<(), AppError> {
+    let n: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM dim_characteristic WHERE code = ?",
+            [char_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if n == 0 {
+        return Err(AppError::not_found(format!(
+            "caractéristique inconnue : {char_code}"
+        )));
+    }
+    con.execute(
+        "UPDATE dim_characteristic SET libelle = ? WHERE code = ?",
+        [libelle, char_code],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -627,6 +653,11 @@ struct CreateCharacteristicBody {
     #[serde(default)]
     libelle: String,
     base_dimension: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateCharacteristicBody {
+    libelle: String,
 }
 
 #[derive(Deserialize)]
@@ -653,6 +684,17 @@ async fn create(
     let con = lock_con(&state)?;
     create_characteristic(&con, &body.code, &body.libelle, &body.base_dimension)?;
     Ok((StatusCode::CREATED, Json(json!({ "code": body.code }))))
+}
+
+/// PUT /api/meta/characteristics/{code} — modifie le libellé d'une N1.
+async fn update(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<UpdateCharacteristicBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    update_characteristic(&con, &code, &body.libelle)?;
+    Ok(Json(json!({ "code": code, "libelle": body.libelle })))
 }
 
 /// DELETE /api/meta/characteristics/{code} — supprime une N1 (et ses N2).
@@ -763,7 +805,7 @@ async fn assign_handler(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/characteristics", get(list).post(create))
-        .route("/api/meta/characteristics/{code}", delete(remove))
+        .route("/api/meta/characteristics/{code}", put(update).delete(remove))
         .route(
             "/api/meta/characteristics/{code}/attributes",
             post(add_attr),

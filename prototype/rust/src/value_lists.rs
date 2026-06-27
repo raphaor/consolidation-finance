@@ -30,7 +30,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete, get, put},
+    routing::{get, put},
     Json, Router,
 };
 use duckdb::types::Value as DbValue;
@@ -345,12 +345,43 @@ pub fn delete_value(
     Ok(())
 }
 
+/// Met à jour le libellé d'une liste de valeurs.
+pub fn update_list(
+    con: &duckdb::Connection,
+    list_code: &str,
+    libelle: &str,
+) -> Result<(), AppError> {
+    let n: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM dim_value_list WHERE code = ?",
+            [list_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if n == 0 {
+        return Err(AppError::not_found(format!(
+            "liste inconnue : {list_code}"
+        )));
+    }
+    con.execute(
+        "UPDATE dim_value_list SET libelle = ? WHERE code = ?",
+        [libelle, list_code],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
 
 #[derive(Deserialize)]
 struct CreateListBody {
     code: String,
     #[serde(default)]
+    libelle: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateListBody {
     libelle: String,
 }
 
@@ -368,6 +399,17 @@ async fn create(
     let con = lock_con(&state)?;
     create_list(&con, &body.code, &body.libelle)?;
     Ok((StatusCode::CREATED, Json(json!({ "code": body.code }))))
+}
+
+/// PUT /api/meta/value-lists/{code} — modifie le libellé d'une liste.
+async fn update(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<UpdateListBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    update_list(&con, &code, &body.libelle)?;
+    Ok(Json(json!({ "code": code, "libelle": body.libelle })))
 }
 
 /// DELETE /api/meta/value-lists/{code} — supprime une liste.
@@ -430,7 +472,7 @@ async fn values_delete(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/value-lists", get(list).post(create))
-        .route("/api/meta/value-lists/{code}", delete(remove))
+        .route("/api/meta/value-lists/{code}", put(update).delete(remove))
         .route(
             "/api/meta/value-lists/{code}/values",
             get(values_list).post(values_create),
