@@ -318,6 +318,11 @@ export const api = {
       deleteJson<unknown>(`/meta/characteristics/${code}/values/${value}`),
     assign: (code: string, body: { member: string; value: string | null }) =>
       putJson<unknown>(`/meta/characteristics/${code}/assign`, body),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/characteristics/${code}/rename`,
+        { new_code: newCode },
+      ),
   },
   // Listes de valeurs (référentiels) : nomenclatures code/libellé autonomes,
   // réutilisables comme cible d'un attribut N2, mais qui ne sont pas des
@@ -338,6 +343,11 @@ export const api = {
       putJson<unknown>(`/meta/value-lists/${code}/values/${value}`, row),
     removeValue: (code: string, value: string) =>
       deleteJson<unknown>(`/meta/value-lists/${code}/values/${value}`),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/value-lists/${code}/rename`,
+        { new_code: newCode },
+      ),
   },
   // Références directes (patron B) : colonne sur une dimension hôte pointant vers
   // une dimension cible (y compris elle-même). Cf. custom_references.rs.

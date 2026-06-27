@@ -30,7 +30,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use duckdb::types::Value as DbValue;
@@ -371,7 +371,75 @@ pub fn update_list(
     Ok(())
 }
 
+/// Renomme le code d'une liste de valeurs.
+///
+/// Cascade (code TEXT) :
+/// - `dim_characteristic_attribute.target_dimension`
+/// - `dim_custom_reference.target_dimension` (silencieux si la table n'existe pas)
+/// La table physique `lst_<id>` n'est **pas** touchée — c'est le gain B1.
+pub fn rename_value_list_code(
+    con: &duckdb::Connection,
+    old: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(());
+    }
+    ensure_valid_ident("code de liste", new)?;
+    if collides_with_dimension(con, new) {
+        return Err(AppError::bad_request(format!(
+            "'{new}' est déjà le nom d'une dimension"
+        )));
+    }
+    let old_exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_value_list WHERE code = ?",
+            [old],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !old_exists {
+        return Err(AppError::not_found(format!("liste inconnue : {old}")));
+    }
+    let conflict: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_value_list WHERE code = ?",
+            [new],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if conflict {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+    // Mettre à jour le registre.
+    con.execute(
+        "UPDATE dim_value_list SET code = ? WHERE code = ?",
+        [new, old],
+    )
+    .map_err(db_err)?;
+    // Cascade FK : attributs N2 dont la cible est cette liste.
+    let _ = con.execute(
+        "UPDATE dim_characteristic_attribute \
+         SET target_dimension = ? WHERE target_dimension = ?",
+        [new, old],
+    );
+    // Cascade FK : références directes (patron B) dont la cible est cette liste.
+    let _ = con.execute(
+        "UPDATE dim_custom_reference SET target_dimension = ? WHERE target_dimension = ?",
+        [new, old],
+    );
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenameListBody {
+    new_code: String,
+}
 
 #[derive(Deserialize)]
 struct CreateListBody {
@@ -383,6 +451,18 @@ struct CreateListBody {
 #[derive(Deserialize)]
 struct UpdateListBody {
     libelle: String,
+}
+
+/// POST /api/meta/value-lists/{code}/rename — renomme le code d'une liste.
+async fn rename_handler(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<RenameListBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_value_list_code(&con, &code, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": code, "new": body.new_code } })))
 }
 
 /// GET /api/meta/value-lists — liste les listes de valeurs.
@@ -473,6 +553,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/value-lists", get(list).post(create))
         .route("/api/meta/value-lists/{code}", put(update).delete(remove))
+        .route("/api/meta/value-lists/{code}/rename", post(rename_handler))
         .route(
             "/api/meta/value-lists/{code}/values",
             get(values_list).post(values_create),

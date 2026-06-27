@@ -597,6 +597,7 @@ function CharacteristicDetail({
   onChanged: () => Promise<void>;
 }) {
   const [editLibelle, setEditLibelle] = useState<string | null>(null);
+  const [editCode, setEditCode] = useState<string | null>(null);
   const [values, setValues] = useState<Row[]>([]);
   const [optCache, setOptCache] = useState<Record<string, Opt[]>>({});
   const [newField, setNewField] = useState({
@@ -631,6 +632,7 @@ function CharacteristicDetail({
 
   useEffect(() => {
     setEditLibelle(null);
+    setEditCode(null);
     setNewValue({});
     setAssignForm({ member: '', value: '' });
     void reload();
@@ -705,6 +707,19 @@ function CharacteristicDetail({
     }
   }
 
+  async function saveCode(e: FormEvent) {
+    e.preventDefault();
+    if (editCode === null) return;
+    try {
+      await api.characteristics.rename(char.code, editCode);
+      onNotice({ kind: 'success', text: `Code renommé en « ${editCode} ».` });
+      setEditCode(null);
+      await onChanged();
+    } catch (err) {
+      notifyErr(err);
+    }
+  }
+
   async function submitAssign(e: FormEvent) {
     e.preventDefault();
     try {
@@ -773,6 +788,39 @@ function CharacteristicDetail({
             Enregistrer
           </button>
           <button type="button" className="btn btn--sm" onClick={() => setEditLibelle(null)}>
+            Annuler
+          </button>
+        </form>
+      )}
+
+      {editCode === null ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => setEditCode(char.code)}
+          >
+            Renommer le code
+          </button>
+        </div>
+      ) : (
+        <form
+          style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
+          onSubmit={saveCode}
+        >
+          <input
+            className="field__input"
+            value={editCode}
+            onChange={(e) => setEditCode(e.target.value)}
+            autoFocus
+            style={{ flex: 1 }}
+            pattern="[a-zA-Z_][a-zA-Z0-9_]{0,49}"
+            title="Alphanumérique + underscore, premier caractère lettre ou underscore"
+          />
+          <button type="submit" className="btn btn--sm btn--primary">
+            Renommer
+          </button>
+          <button type="button" className="btn btn--sm" onClick={() => setEditCode(null)}>
             Annuler
           </button>
         </form>
@@ -1193,6 +1241,7 @@ function ListesTab({
   const [newList, setNewList] = useState({ code: '', libelle: '' });
   const [selected, setSelected] = useState<string | null>(null);
   const [editLibelle, setEditLibelle] = useState<string | null>(null);
+  const [editListCode, setEditListCode] = useState<string | null>(null);
   const [values, setValues] = useState<Row[]>([]);
   const [newValue, setNewValue] = useState({ code: '', libelle: '' });
 
@@ -1214,6 +1263,7 @@ function ListesTab({
 
   useEffect(() => {
     setEditLibelle(null);
+    setEditListCode(null);
     if (selectedList) {
       setNewValue({ code: '', libelle: '' });
       void reloadValues(selectedList.code);
@@ -1230,6 +1280,21 @@ function ListesTab({
       onNotice({ kind: 'success', text: 'Libellé mis à jour.' });
       setEditLibelle(null);
       await reloadAll();
+    } catch (err) {
+      notifyErr(err);
+    }
+  }
+
+  async function saveListCode(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedList || editListCode === null) return;
+    const oldCode = selectedList.code;
+    try {
+      await api.valueLists.rename(oldCode, editListCode);
+      onNotice({ kind: 'success', text: `Code renommé en « ${editListCode} ».` });
+      setEditListCode(null);
+      await reloadAll();
+      setSelected(editListCode);
     } catch (err) {
       notifyErr(err);
     }
@@ -1405,6 +1470,42 @@ function ListesTab({
                   </form>
                 )}
               </div>
+              {editListCode === null ? (
+                <div style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    onClick={() => setEditListCode(selectedList.code)}
+                  >
+                    Renommer le code
+                  </button>
+                </div>
+              ) : (
+                <form
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
+                  onSubmit={saveListCode}
+                >
+                  <input
+                    className="field__input"
+                    value={editListCode}
+                    onChange={(e) => setEditListCode(e.target.value)}
+                    autoFocus
+                    style={{ flex: 1 }}
+                    pattern="[a-zA-Z_][a-zA-Z0-9_]{0,49}"
+                    title="Alphanumérique + underscore, premier caractère lettre ou underscore"
+                  />
+                  <button type="submit" className="btn btn--sm btn--primary">
+                    Renommer
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    onClick={() => setEditListCode(null)}
+                  >
+                    Annuler
+                  </button>
+                </form>
+              )}
               <h3 className="rule-section__title">Valeurs</h3>
               <div className="table-wrap">
                 <table className="grid">

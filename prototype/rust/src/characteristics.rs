@@ -645,7 +645,80 @@ pub fn update_characteristic(
     Ok(())
 }
 
+/// Renomme le code d'une caractéristique N1.
+///
+/// Cascade :
+/// - colonne `{old}` sur la master data de la dimension de base → renommée `{new}` ;
+/// - `dim_characteristic_attribute.characteristic_code` : mise à jour en place.
+/// La table physique `car_<id>` n'est **pas** touchée — c'est le gain B1.
+pub fn rename_characteristic_code(
+    con: &duckdb::Connection,
+    old: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(());
+    }
+    if !is_valid_custom_name(new) {
+        return Err(AppError::bad_request(format!(
+            "code invalide : {new:?} (alphanumérique + underscore, \
+             premier caractère lettre ou underscore, non réservé)"
+        )));
+    }
+    // Résoudre l'ancien code : on a besoin de la dimension de base pour renommer la colonne.
+    let base_dim: Option<String> = con
+        .query_row(
+            "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+            [old],
+            |r| r.get(0),
+        )
+        .ok();
+    let base_dim = base_dim
+        .ok_or_else(|| AppError::not_found(format!("caractéristique inconnue : {old}")))?;
+    // Conflit : le nouveau code existe déjà.
+    let conflict: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_characteristic WHERE code = ?",
+            [new],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if conflict {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+    // Renommer la colonne sur la master data de la dimension de base.
+    if let Some((base_table, _)) = references::dimension_master(&base_dim) {
+        con.execute(
+            &format!("ALTER TABLE {base_table} RENAME COLUMN \"{old}\" TO \"{new}\""),
+            [],
+        )
+        .map_err(db_err)?;
+    }
+    // Mettre à jour le registre.
+    con.execute(
+        "UPDATE dim_characteristic SET code = ? WHERE code = ?",
+        [new, old],
+    )
+    .map_err(db_err)?;
+    // Cascade FK dans dim_characteristic_attribute.
+    con.execute(
+        "UPDATE dim_characteristic_attribute \
+         SET characteristic_code = ? WHERE characteristic_code = ?",
+        [new, old],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenameCharBody {
+    new_code: String,
+}
 
 #[derive(Deserialize)]
 struct CreateCharacteristicBody {
@@ -791,6 +864,18 @@ async fn values_delete(
     Ok(Json(json!({ "deleted": value })))
 }
 
+/// POST /api/meta/characteristics/{code}/rename — renomme le code d'une N1.
+async fn rename_char_handler(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<RenameCharBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_characteristic_code(&con, &code, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": code, "new": body.new_code } })))
+}
+
 /// PUT /api/meta/characteristics/{code}/assign — classe (ou déclasse) un membre.
 async fn assign_handler(
     State(state): State<Arc<AppState>>,
@@ -825,6 +910,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/api/meta/characteristics/{code}/assign",
             put(assign_handler),
+        )
+        .route(
+            "/api/meta/characteristics/{code}/rename",
+            post(rename_char_handler),
         )
 }
 
