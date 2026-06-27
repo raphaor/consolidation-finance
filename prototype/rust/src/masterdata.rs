@@ -344,19 +344,11 @@ fn find_table(api: &str) -> Option<&'static TableDef> {
 }
 
 /// Nom d'API (master data) correspondant à une table SQL, s'il en existe un.
-/// Sert à traduire les cibles du graphe de références (`references.rs` raisonne
-/// en noms SQL) vers les identifiants que le front consomme (`/api/md/{table}`).
-/// Pour les tables statiques, délègue à `api_name_for_sql`. Pour les tables
-/// dynamiques (`car_<id>`, `lst_<id>` après B1 étape 5), résout l'id → code
-/// depuis les registres pour produire le nom d'API attendu (`car_<code>`,
-/// `lst_<code>`).
-fn sql_to_api(sql: &str) -> String {
-    api_name_for_sql(sql).unwrap_or(sql).to_string()
-}
-
-/// Variante db-aware de [`sql_to_api`] — nécessaire pour les tables dynamiques
-/// dont le nom physique SQL diffère du nom d'API (B1 étape 5 : `car_<id>` /
-/// `lst_<id>` côté SQL, `car_<code>` / `lst_<code>` côté API).
+/// Traduit un nom de table SQL vers le nom d'API consommé par le frontend
+/// (`/api/md/{table}`). Pour les tables statiques, délègue à `api_name_for_sql`.
+/// Pour les tables dynamiques (`car_<id>` / `lst_<id>` après B1 étape 5),
+/// résout l'id → code depuis les registres pour produire `car_<code>` /
+/// `lst_<code>`.
 fn sql_to_api_dyn(con: &duckdb::Connection, sql: &str) -> String {
     if let Some(api) = api_name_for_sql(sql) {
         return api.to_string();
