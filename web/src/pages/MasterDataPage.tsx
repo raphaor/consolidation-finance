@@ -40,6 +40,7 @@ import { MASTER_TABLES } from '../types';
 import { FieldInput } from '../components/FieldInput';
 import { coerceValue, renderCell, toFormValue } from '../components/masterFields';
 import { findReferenceDrift } from '../utils/referenceCheck';
+import { RenameModal } from '../components/RenameModal';
 
 type Row = Record<string, unknown>;
 type FormState = { mode: 'create' } | { mode: 'edit'; row: Row } | null;
@@ -299,6 +300,7 @@ export function MasterDataPage({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [formState, setFormState] = useState<FormState>(null);
+  const [renameTarget, setRenameTarget] = useState<Row | null>(null);
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
   // Cohérence des optionsFrom front vs graphe de références serveur (autoritaire).
   const [refDrift, setRefDrift] = useState<string[]>([]);
@@ -474,25 +476,16 @@ export function MasterDataPage({
     [tableDef],
   );
 
-  const handleRename = useCallback(
-    async (row: Row) => {
-      if (codeCol === null) return;
-      const oldCode = String(row[codeCol] ?? '');
-      const newCode = window.prompt(
-        `Nouveau code pour « ${oldCode} » ?\n\n` +
-          `Renommage possible uniquement si plus aucune référence ne pointe vers ce code.`,
-        oldCode,
-      );
-      if (newCode === null || newCode.trim() === '' || newCode === oldCode) return;
-      try {
-        await api.masterData.rename(table, oldCode, newCode.trim());
-        setNotice({ kind: 'success', text: `Code renommé : ${oldCode} → ${newCode.trim()}` });
-        await load();
-      } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
-      }
+  const handleRenameConfirm = useCallback(
+    async (newCode: string) => {
+      if (codeCol === null || renameTarget === null) return;
+      const oldCode = String(renameTarget[codeCol] ?? '');
+      await api.masterData.rename(table, oldCode, newCode);
+      setNotice({ kind: 'success', text: `Code renommé : ${oldCode} → ${newCode}` });
+      setRenameTarget(null);
+      await load();
     },
-    [table, codeCol, load],
+    [table, codeCol, renameTarget, load],
   );
 
   const columns = useMemo<RTColumnDef<Row>[]>(() => {
@@ -522,7 +515,7 @@ export function MasterDataPage({
               type="button"
               className="btn btn--sm"
               title="Changer le code de cet objet (si plus aucune référence ne le cite)"
-              onClick={() => void handleRename(info.row.original)}
+              onClick={() => setRenameTarget(info.row.original)}
             >
               Renommer
             </button>
@@ -538,7 +531,7 @@ export function MasterDataPage({
       ),
     });
     return cols;
-  }, [tableDef, handleDelete, handleRename, codeCol, isView]);
+  }, [tableDef, handleDelete, codeCol, isView]);
 
   const tableState = useReactTable({
     data,
@@ -786,6 +779,14 @@ export function MasterDataPage({
           optionsData={optionsData}
           onSubmit={handleSubmit}
           onCancel={() => setFormState(null)}
+        />
+      )}
+      {renameTarget !== null && codeCol !== null && (
+        <RenameModal
+          oldCode={String(renameTarget[codeCol] ?? '')}
+          entityLabel={tableDef?.label ?? table}
+          onConfirm={handleRenameConfirm}
+          onCancel={() => setRenameTarget(null)}
         />
       )}
     </section>
