@@ -1602,9 +1602,16 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_custom_dimension_columns_to_id(&con) {
             eprintln!("   ⚠ migrate_custom_dimension_columns_to_id (non bloquant) : {e}");
         }
+        // B1 étape 11 : id + r<id> sur dim_custom_reference et ses colonnes hôtes.
+        if let Err(e) = conso_engine::surrogate::ensure_custom_reference_ids(&con) {
+            eprintln!("   ⚠ ensure_custom_reference_ids (non bloquant) : {e}");
+        }
+        if let Err(e) = conso_engine::surrogate::migrate_custom_reference_columns_to_id(&con) {
+            eprintln!("   ⚠ migrate_custom_reference_columns_to_id (non bloquant) : {e}");
+        }
         // Marqueur de version de schéma (idempotent).
         let _ = con.execute(
-            "INSERT INTO app_config (key, value) VALUES ('schema_version', '10') \
+            "INSERT INTO app_config (key, value) VALUES ('schema_version', '11') \
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             [],
         );

@@ -395,29 +395,47 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
     // Références directes (patron B) : dim_<host>.<column> → master data cible.
     // Auto-références tolérées comme les statiques (ex. compte_parent → account).
     if custom_reference_registry_exists(con) {
-        if let Ok(mut stmt) = con.prepare(
-            "SELECT host_dimension, column_name, target_dimension \
-             FROM dim_custom_reference ORDER BY host_dimension, column_name",
-        ) {
+        // B1 étape 11 : la colonne physique est r{id} pour les refs custom
+        // (non-natives). Pour les natives, col physique = column_name.
+        let has_id = con.query_row(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns \
+             WHERE table_schema = 'main' AND table_name = 'dim_custom_reference' \
+             AND column_name = 'id'",
+            [],
+            |r| r.get::<_, bool>(0),
+        ).unwrap_or(false);
+        let sql = if has_id {
+            "SELECT host_dimension, column_name, target_dimension, \
+                     COALESCE(native, FALSE), id \
+             FROM dim_custom_reference ORDER BY host_dimension, column_name"
+        } else {
+            "SELECT host_dimension, column_name, target_dimension, \
+                     COALESCE(native, FALSE), NULL \
+             FROM dim_custom_reference ORDER BY host_dimension, column_name"
+        };
+        if let Ok(mut stmt) = con.prepare(sql) {
             if let Ok(rows) = stmt.query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
+                    r.get::<_, bool>(3)?,
+                    r.get::<_, Option<i64>>(4)?,
                 ))
             }) {
-                for (host, column, target) in rows.flatten() {
+                for (host, column, target, native, id) in rows.flatten() {
+                    let phys_col = match (native, id) {
+                        (false, Some(i)) => format!("r{i}"),
+                        _ => column.clone(),
+                    };
                     if let (Some((ht, _)), Some((tt, tc))) =
                         (dimension_master(&host), dimension_master(&target))
                     {
-                        // Si cette (table, colonne) est déjà déclarée en `ri()` dans
-                        // les REFERENCES statiques (stockage id, contrat code), on
-                        // l'omet : ajouter un doublon à target_display_column=None
-                        // ferait croire à rename_code que c'est une FK code-keyed
-                        // cascadable, alors que la colonne est INTEGER (B1).
+                        // Si cette (table, colonne physique) est déjà déclarée en `ri()`,
+                        // l'omettre pour éviter le doublon (voir commentaire original).
                         let already_ri = REFERENCES.iter().any(|r| {
                             r.table == ht
-                                && r.column == column
+                                && r.column == phys_col
                                 && r.target_display_column.is_some()
                         });
                         if already_ri {
@@ -425,7 +443,7 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
                         }
                         out.push(OwnedReference {
                             table: ht.to_string(),
-                            column,
+                            column: phys_col,
                             target_table: tt.to_string(),
                             target_column: tc.to_string(),
                             target_display_column: None,

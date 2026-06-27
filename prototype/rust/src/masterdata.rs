@@ -559,22 +559,42 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
     // 1. Table native (whitelist statique) étendue des colonnes dynamiques.
     if let Some(def) = find_table(api) {
         let native: Vec<String> = def.columns.iter().map(|s| s.to_string()).collect();
-        // On complète avec toute colonne dynamique référencée sur cette table et
-        // absente de la whitelist native (caractéristiques N1 + références
-        // directes patron B). On s'appuie sur le graphe de références, déjà
-        // construit par `references::dynamic_references` à partir des registres.
-        let mut cols = native.clone();
+        // B1 étape 11 : les refs custom ont col physique r{id} ≠ nom API.
+        // On construit les deux listes séparément : `api_cols` = noms utilisateur
+        // (pour validation JSON et clés retournées), `sql_cols` = noms physiques.
+        // Les car_<id> (N1) utilisent `r.column` (car `dynamic_references` retourne
+        // le nom physique pour les caractéristiques, qui est déjà le nom API).
+        // Pour les refs custom, on résout via `custom_references::load_all`.
+        let cust_refs: Vec<crate::custom_references::CustomReferenceDef> =
+            crate::custom_references::load_all(con).unwrap_or_default();
+        let mut api_cols = native.clone();
+        let mut sql_cols = native.clone();
         for r in references::all_references(con) {
-            if r.table == def.sql_name && !cols.contains(&r.column) {
-                cols.push(r.column);
+            if r.table != def.sql_name {
+                continue;
+            }
+            // Chercher si c'est une ref custom (col physique ≠ API name).
+            let api_name = cust_refs
+                .iter()
+                .find(|cr| {
+                    let host_table = references::dimension_master(&cr.host_dimension)
+                        .map(|(t, _)| t)
+                        .unwrap_or("");
+                    host_table == def.sql_name && cr.col == r.column
+                })
+                .map(|cr| cr.column.clone())
+                .unwrap_or_else(|| r.column.clone());
+            if !api_cols.contains(&api_name) {
+                api_cols.push(api_name);
+                sql_cols.push(r.column.clone());
             }
         }
         return Ok(Some(OwnedTableDef {
             api_name: def.api_name.to_string(),
             label: def.label.to_string(),
             sql_name: def.sql_name.to_string(),
-            sql_columns: cols.clone(),
-            columns: cols,
+            sql_columns: sql_cols,
+            columns: api_cols,
             pk: def.pk.iter().map(|s| s.to_string()).collect(),
             auto_pk: def.auto_pk,
         }));

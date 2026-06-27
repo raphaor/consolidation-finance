@@ -728,6 +728,81 @@ pub fn migrate_custom_dimension_columns_to_id(con: &Connection) -> duckdb::Resul
     Ok(())
 }
 
+/// Migration B1 étape 11 : s'assure que `dim_custom_reference` possède une
+/// colonne `id` avec sa séquence, et backfille les lignes existantes.
+/// Idempotent (skip si la colonne existe déjà).
+///
+/// Les refs natives reçoivent un `id` comme les customs ; cela ne change pas
+/// leur colonne physique sur la master data hôte (qui reste le nom d'origine).
+pub fn ensure_custom_reference_ids(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_custom_reference")? {
+        return Ok(());
+    }
+    if column_exists(con, "dim_custom_reference", "id")? {
+        return Ok(()); // déjà migré
+    }
+    con.execute_batch(
+        "CREATE SEQUENCE IF NOT EXISTS seq_dim_custom_reference START 1 INCREMENT 1;",
+    )?;
+    con.execute(
+        "ALTER TABLE dim_custom_reference ADD COLUMN id INTEGER",
+        [],
+    )?;
+    con.execute(
+        "UPDATE dim_custom_reference SET id = nextval('seq_dim_custom_reference') WHERE id IS NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Migration B1 étape 11 : renomme les colonnes custom `<column_name>` → `r<id>`
+/// sur la master data hôte (`dim_<host>`), pour chaque référence non-native.
+/// Idempotent.
+///
+/// Les références natives (colonne du DDL statique comme `sous_classe`,
+/// `entite_parent`) gardent leur nom d'origine — elles ne sont pas renommées.
+///
+/// À appeler **après** `ensure_custom_reference_ids`.
+pub fn migrate_custom_reference_columns_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_custom_reference")? {
+        return Ok(());
+    }
+    let custom_refs: Vec<(String, String, i64)> = {
+        let mut stmt = con.prepare(
+            "SELECT host_dimension, column_name, id \
+             FROM dim_custom_reference \
+             WHERE native = FALSE AND id IS NOT NULL \
+             ORDER BY host_dimension, column_name",
+        )?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<duckdb::Result<_>>()?
+    };
+    for (host_dim, col_name, id) in custom_refs {
+        let phys_col = format!("r{id}");
+        // Résoudre la table hôte via le registre statique des master data.
+        let host_table = match crate::references::dimension_master(&host_dim) {
+            Some((t, _)) => t,
+            None => continue,
+        };
+        if !table_exists(con, host_table)? {
+            continue;
+        }
+        if column_exists(con, host_table, &phys_col)? {
+            continue; // déjà migré
+        }
+        if !column_exists(con, host_table, &col_name)? {
+            continue; // absente (reset récent ou déjà renommée)
+        }
+        con.execute(
+            &format!(
+                "ALTER TABLE {host_table} RENAME COLUMN \"{col_name}\" TO \"{phys_col}\""
+            ),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

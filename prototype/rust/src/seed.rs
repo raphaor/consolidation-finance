@@ -1127,9 +1127,12 @@ pub fn seed_demo_attributes(
     let parents_csv = data_dir.join("account_parents.csv");
     if parents_csv.exists() {
         let path = parents_csv.display().to_string();
+        // B1 étape 11 : col physique r{id} ; résoudre avant d'écrire le SQL.
+        let phys_col = crate::custom_references::col_of_ref(con, "account", "compte_parent")
+            .map_err(crate::state::db_err)?;
         con.execute(
             &format!(
-                "UPDATE dim_account AS a SET compte_parent = src.compte_parent \
+                "UPDATE dim_account AS a SET \"{phys_col}\" = src.compte_parent \
                  FROM read_csv('{path}', auto_detect=false, \
                      columns={{'code':'VARCHAR','compte_parent':'VARCHAR'}}, \
                      header=true, delim=',') AS src \
@@ -1149,8 +1152,11 @@ mod tests {
     use std::io::Write;
 
     fn parent_of(con: &Connection, code: &str) -> Option<String> {
+        // B1 étape 11 : la col physique est r{id} — résoudre dynamiquement.
+        let phys = crate::custom_references::col_of_ref(con, "account", "compte_parent")
+            .unwrap_or_else(|_| "compte_parent".to_string());
         con.query_row(
-            "SELECT compte_parent FROM dim_account WHERE code = ?",
+            &format!("SELECT \"{phys}\" FROM dim_account WHERE code = ?"),
             [code],
             |r| r.get(0),
         )

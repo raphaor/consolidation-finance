@@ -1,6 +1,6 @@
 # Plan d'action — Codes renommables via clés techniques (option B1)
 
-> Statut : **étapes 0–10 terminées** (branche `feat/renommage-codes`) — smoke-test runtime en attente. Reste étape 11.
+> Statut : **étapes 0–11 terminées** (branche `feat/renommage-codes`) — chantier B1 complet. Smoke-test runtime à valider.
 > Décision : **option B1** — chaque objet gagne un `id` technique immuable ;
 > le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
 > in-place en §7.
@@ -11,7 +11,7 @@
 codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
-### Où on en est (2026-06-27 — état final)
+### Où on en est (2026-06-27 — chantier B1 terminé)
 
 **Étapes 0–10 terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
@@ -66,7 +66,14 @@ codes-renommables, branche `feat/renommage-codes`, voir
   - `rules.rs` : `dest_expr` prend `col` (physique) séparé de `dim` (API) ; `exec_operation` utilise `dim_col_map`.
   - `indicators.rs` : `build_aggregate_sql` et `compile_indicator` utilisent `col_of` pour les colonnes SQL.
   - `server.rs` : migration au démarrage, `POST /api/meta/dimensions/{name}/rename`, `schema_version` → `'10'`.
-- **Étape 11** : colonnes références directes `<col>` → `r<id>` sur `dim_<host>`
+- ✅ **Étape 11** (2026-06-27) : colonnes références directes `<col>` → `r<id>` sur `dim_<host>`.
+  - `schema.rs` : séquence `seq_dim_custom_reference` + colonne `id` dans `DDL_DIM_CUSTOM_REFERENCE`.
+  - `surrogate.rs` : `ensure_custom_reference_ids` (ajoute `id`/séquence si absent) + `migrate_custom_reference_columns_to_id` (RENAME COLUMN `<col>` → `r{id}` sur les tables hôtes).
+  - `custom_references.rs` : `CustomReferenceDef.col` (physique), `load_all` résout `col`, `col_of_ref`, `reapply`/`create`/`remove`/`assign` utilisent col physique, `scan_blockers`, `rename_custom_ref`, handler `rename_handler` et route `POST /api/meta/references-custom/{host}/{column}/rename`.
+  - `references.rs` : `dynamic_references` query-safe, utilise `r{id}` comme col physique dans `OwnedReference`.
+  - `rules.rs` : `RuleContext.ref_col_map`, JOINs destination `map_ref` et sélection `ref` → col physique.
+  - `indicators.rs` : `imdr_{rf}."{rf_phys}"` → col physique.
+  - `server.rs` : migrations `ensure_custom_reference_ids` + `migrate_custom_reference_columns_to_id` au démarrage, `schema_version` → `'11'`.
 
 ### Nouveaux sujets intégrés au plan (2026-06-27)
 

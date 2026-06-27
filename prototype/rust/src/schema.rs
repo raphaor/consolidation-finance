@@ -427,8 +427,13 @@ CREATE TABLE IF NOT EXISTS dim_characteristic_attribute (
 /// par `custom_references::seed_native` depuis le catalogue statique
 /// `references::NATIVE_MASTER_REFS` (FK natives des master data). Elles sont
 /// verrouillées (non éditables/supprimables via l'API) car elles reflètent le DDL.
+/// Séquence pour les `id` de `dim_custom_reference` (B1 étape 11).
+pub const DDL_SEQ_DIM_CUSTOM_REFERENCE: &str =
+    "CREATE SEQUENCE IF NOT EXISTS seq_dim_custom_reference START 1 INCREMENT 1;";
+
 pub const DDL_DIM_CUSTOM_REFERENCE: &str = "\
 CREATE TABLE IF NOT EXISTS dim_custom_reference (
+    id               INTEGER DEFAULT nextval('seq_dim_custom_reference'),
     host_dimension   TEXT NOT NULL,
     column_name      TEXT NOT NULL,
     target_dimension TEXT NOT NULL,
@@ -633,6 +638,7 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_CUSTOM_DIMENSION,
     DDL_DIM_CHARACTERISTIC,
     DDL_DIM_CHARACTERISTIC_ATTRIBUTE,
+    DDL_SEQ_DIM_CUSTOM_REFERENCE,
     DDL_DIM_CUSTOM_REFERENCE,
     DDL_DIM_VALUE_LIST,
     DDL_DIM_COEFFICIENT,

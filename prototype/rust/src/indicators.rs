@@ -270,12 +270,15 @@ fn build_aggregate_sql(
                 .ok_or_else(|| format!("référence inconnue : {}.{}", s.dim, rf))?;
             let (ht, _) = references::dimension_master_id_join(&s.dim)
                 .ok_or_else(|| format!("dimension sans master data : {}", s.dim))?;
+            // B1 étape 11 : col physique r{id} pour refs custom, nom API pour natives.
+            let rf_phys = custom_references::col_of_ref(con, &s.dim, rf)
+                .unwrap_or_else(|_| rf.clone());
             add_join(
                 b,
                 &format!("ref_{}_{rf}", s.dim),
                 format!("\nLEFT JOIN {ht} imdr_{rf} ON imdr_{rf}.id = e.{}", s.dim),
             );
-            format!("imdr_{rf}.\"{rf}\"")
+            format!("imdr_{rf}.\"{rf_phys}\"")
         } else if let Some(attr) = &s.attr {
             if !dimensions::is_valid_custom_name(attr) {
                 return Err(format!("attr invalide : {attr:?}"));

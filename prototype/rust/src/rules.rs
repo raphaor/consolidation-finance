@@ -127,12 +127,14 @@ const ALLOWED_OPS: &[&str] = &[
 ///   pour valider les clés de règle (JSON stocke des noms API).
 /// - `pilotable_dims` : colonnes physiques pilotables (pour INSERT/SELECT SQL).
 /// - `dim_col_map` : nom API → colonne physique (`x{id}` pour les custom).
+/// - `ref_col_map` : `(host_dim, api_col)` → colonne physique (`r{id}` pour les custom).
 /// - `scope_dims` : colonnes de `sat_perimeter` autorisées dans `scope.dim`.
 #[derive(Debug, Clone)]
 pub struct RuleContext {
     pub selection_dims: Vec<String>,
     pub pilotable_dims: Vec<String>,
     pub dim_col_map: std::collections::HashMap<String, String>,
+    pub ref_col_map: std::collections::HashMap<(String, String), String>,
     pub scope_dims: Vec<String>,
 }
 
@@ -152,11 +154,18 @@ impl RuleContext {
             .iter()
             .map(|d| (d.name.clone(), d.col.clone()))
             .collect();
+        let ref_col_map: std::collections::HashMap<(String, String), String> =
+            crate::custom_references::load_all(con)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|r| ((r.host_dimension, r.column), r.col))
+                .collect();
         let scope_dims = allowed_scope_dims(con);
         Ok(Self {
             selection_dims,
             pilotable_dims,
             dim_col_map,
+            ref_col_map,
             scope_dims,
         })
     }
@@ -995,11 +1004,14 @@ fn dest_expr(
                         format!("mdrt_{r}.id")
                     }
                     None => {
-                        // Patron B (TEXT) : mdr_<r>.{r} est un code → résoudre en id.
+                        // Patron B : col physique r{id} pour custom, nom API pour native.
+                        let r_phys = con
+                            .and_then(|c| crate::custom_references::col_of_ref(c, dim, &r).ok())
+                            .unwrap_or_else(|| r.clone());
                         if let Some((table, code_col)) = id_typed {
-                            format!("(SELECT id FROM {table} WHERE {code_col} = mdr_{r}.\"{r}\")")
+                            format!("(SELECT id FROM {table} WHERE {code_col} = mdr_{r}.\"{r_phys}\")")
                         } else {
-                            format!("mdr_{r}.\"{r}\"")
+                            format!("mdr_{r}.\"{r_phys}\"")
                         }
                     }
                 }
@@ -1341,17 +1353,23 @@ fn exec_operation(
                 "destination map_ref : dimension hôte sans master data : {host_dim}"
             ))
         })?;
+        // B1 étape 11 : col physique r{id} pour custom, nom API pour natives.
+        let r_phys = ctx.ref_col_map
+            .get(&(host_dim.clone(), r.clone()))
+            .map(|s| s.as_str())
+            .unwrap_or(r.as_str());
         // FK native ri() : la colonne hôte stocke un id → on joint la cible sur
         // l'id (alias mdrt_<ref>) pour lire l'id via mdrt_<ref>.id dans dest_expr.
         let target_join = match references::ref_code_contract(&host_dim, r) {
             Some((target_table, _)) => {
-                format!("\nJOIN {target_table} mdrt_{r}\n  ON mdrt_{r}.id = mdr_{r}.\"{r}\"")
+                // Pour une native ri(), r_phys == r (nom d'origine inchangé).
+                format!("\nJOIN {target_table} mdrt_{r}\n  ON mdrt_{r}.id = mdr_{r}.\"{r_phys}\"")
             }
             None => String::new(),
         };
         joins.push_str(&format!(
             "\nJOIN {host_table} mdr_{r}\n  ON mdr_{r}.id = e.{host_dim}\
-             \n  AND mdr_{r}.\"{r}\" IS NOT NULL{target_join}"
+             \n  AND mdr_{r}.\"{r_phys}\" IS NOT NULL{target_join}"
         ));
     }
 
@@ -1466,15 +1484,20 @@ fn exec_operation(
                 "selection ref : dimension hôte sans master data : {host_dim}"
             ))
         })?;
+        // B1 étape 11 : col physique r{id} pour custom, nom API pour natives.
+        let rf_phys = ctx.ref_col_map
+            .get(&(host_dim.clone(), rf.clone()))
+            .map(|s| s.as_str())
+            .unwrap_or(rf.as_str());
         let target_join = match references::ref_code_contract(host_dim, rf) {
             Some((target_table, _)) => {
-                format!("\nJOIN {target_table} smdrt_{rf}\n  ON smdrt_{rf}.id = smdr_{rf}.\"{rf}\"")
+                format!("\nJOIN {target_table} smdrt_{rf}\n  ON smdrt_{rf}.id = smdr_{rf}.\"{rf_phys}\"")
             }
             None => String::new(),
         };
         joins.push_str(&format!(
             "\nJOIN {host_table} smdr_{rf}\n  ON smdr_{rf}.id = e.{host_dim}\
-             \n  AND smdr_{rf}.\"{rf}\" IS NOT NULL{target_join}"
+             \n  AND smdr_{rf}.\"{rf_phys}\" IS NOT NULL{target_join}"
         ));
     }
     for (attr, host_dim) in &sel_attrs {
@@ -1502,7 +1525,14 @@ fn exec_operation(
             // (joint via smdrt_<rf>) ; sinon lecture directe de la colonne hôte.
             match references::ref_code_contract(&sel.dim, rf) {
                 Some((_, code_col)) => format!("smdrt_{rf}.\"{code_col}\""),
-                None => format!("smdr_{rf}.\"{rf}\""),
+                None => {
+                    // B1 étape 11 : col physique r{id} pour custom, API name pour natives.
+                    let rf_phys = ctx.ref_col_map
+                        .get(&(sel.dim.clone(), rf.clone()))
+                        .map(|s| s.as_str())
+                        .unwrap_or(rf.as_str());
+                    format!("smdr_{rf}.\"{rf_phys}\"")
+                }
             }
         } else if let Some(attr) = &sel.attr {
             format!("smda_{}_{}.{}", sel.dim, attr, attr)
@@ -1815,6 +1845,8 @@ mod tests {
                 ];
                 names.iter().map(|n| (n.to_string(), n.to_string())).collect()
             },
+            // Pas de références directes custom dans le fixture.
+            ref_col_map: std::collections::HashMap::new(),
             scope_dims: vec![
                 "methode".into(),
                 "pct_interet".into(),

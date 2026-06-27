@@ -31,7 +31,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete, get, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use duckdb::{params_from_iter, types::Value as DbValue};
@@ -47,8 +47,13 @@ use crate::state::{db_err, lock_con, AppError, AppState};
 /// Une référence directe : `dim_<host>.<column> → dim_<target>.<clé>`.
 #[derive(Serialize)]
 pub struct CustomReferenceDef {
+    /// Identifiant technique immuable (B1 étape 11). `None` sur bases non migrées.
+    pub id: Option<i64>,
     pub host_dimension: String,
+    /// Nom API de la référence (mutable, stocké dans `dim_custom_reference.column_name`).
     pub column: String,
+    /// Colonne physique sur `dim_<host>` : `r{id}` pour les customs, `column` pour les natives.
+    pub col: String,
     pub target_dimension: String,
     /// `true` pour une référence native (FK du DDL statique, peuplée par
     /// [`seed_native`]). Verrouillée contre l'édition/suppression via l'API.
@@ -72,20 +77,62 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CustomReferenceD
     if !registry_exists(con) {
         return Ok(Vec::new());
     }
-    let mut stmt = con.prepare(
+    let has_id = con.query_row(
+        "SELECT COUNT(*) > 0 FROM information_schema.columns \
+         WHERE table_schema = 'main' AND table_name = 'dim_custom_reference' AND column_name = 'id'",
+        [],
+        |r| r.get::<_, bool>(0),
+    ).unwrap_or(false);
+    let sql = if has_id {
         "SELECT host_dimension, column_name, target_dimension, \
-                 COALESCE(native, FALSE) AS native \
-         FROM dim_custom_reference ORDER BY host_dimension, column_name",
-    )?;
+                 COALESCE(native, FALSE), id \
+         FROM dim_custom_reference ORDER BY host_dimension, column_name"
+    } else {
+        "SELECT host_dimension, column_name, target_dimension, \
+                 COALESCE(native, FALSE), NULL \
+         FROM dim_custom_reference ORDER BY host_dimension, column_name"
+    };
+    let mut stmt = con.prepare(sql)?;
     let rows = stmt.query_map([], |row| {
+        let column: String = row.get(1)?;
+        let native: bool = row.get(3)?;
+        let id: Option<i64> = row.get(4)?;
+        let col = match (native, id) {
+            (false, Some(i)) => format!("r{i}"),
+            _ => column.clone(), // native ou non migré : col physique = nom API
+        };
         Ok(CustomReferenceDef {
-            host_dimension: row.get::<_, String>(0)?,
-            column: row.get::<_, String>(1)?,
-            target_dimension: row.get::<_, String>(2)?,
-            native: row.get::<_, bool>(3)?,
+            id,
+            host_dimension: row.get(0)?,
+            column,
+            col,
+            target_dimension: row.get(2)?,
+            native,
         })
     })?;
     rows.collect()
+}
+
+/// Retourne la colonne physique d'une référence directe `(host, column_name)`.
+/// Pour les custom (non-native) : `r{id}`. Pour les natives ou non migrées : `column_name`.
+pub fn col_of_ref(
+    con: &duckdb::Connection,
+    host: &str,
+    column_name: &str,
+) -> duckdb::Result<String> {
+    if !registry_exists(con) {
+        return Ok(column_name.to_string());
+    }
+    let result: Option<(bool, Option<i64>)> = con.query_row(
+        "SELECT COALESCE(native, FALSE), id \
+         FROM dim_custom_reference WHERE host_dimension = ? AND column_name = ?",
+        [host, column_name],
+        |r| Ok((r.get::<_, bool>(0)?, r.get::<_, Option<i64>>(1)?)),
+    ).ok();
+    Ok(match result {
+        Some((false, Some(id))) => format!("r{id}"),
+        _ => column_name.to_string(),
+    })
 }
 
 /// `true` si `(host, column)` est marqué `native=true`. Retourne `false` si la
@@ -140,7 +187,7 @@ pub fn reapply(con: &duckdb::Connection) -> duckdb::Result<()> {
     for r in load_all(con)? {
         if let Some((host_table, _)) = references::dimension_master(&r.host_dimension) {
             let _ = con.execute(
-                &format!("ALTER TABLE {host_table} ADD COLUMN {} TEXT", r.column),
+                &format!("ALTER TABLE {host_table} ADD COLUMN \"{}\" TEXT", r.col),
                 [],
             );
         }
@@ -264,15 +311,26 @@ pub fn create(
             "référence déjà existante : {host}.{column}"
         )));
     }
-    con.execute(
-        &format!("ALTER TABLE {host_table} ADD COLUMN {column} TEXT"),
-        [],
-    )
-    .map_err(db_err)?;
+    // INSERT d'abord pour obtenir l'id généré par la séquence,
+    // puis ADD COLUMN avec le nom physique r{id}.
     con.execute(
         "INSERT INTO dim_custom_reference (host_dimension, column_name, target_dimension, native) \
          VALUES (?, ?, ?, FALSE)",
         &[&host, &column, &target],
+    )
+    .map_err(db_err)?;
+    let new_id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_custom_reference \
+             WHERE host_dimension = ? AND column_name = ?",
+            [&host, &column],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    let phys_col = format!("r{new_id}");
+    con.execute(
+        &format!("ALTER TABLE {host_table} ADD COLUMN \"{phys_col}\" TEXT"),
+        [],
     )
     .map_err(db_err)?;
     Ok(())
@@ -302,10 +360,11 @@ pub fn remove(con: &duckdb::Connection, host: &str, column: &str) -> Result<(), 
             "référence inexistante : {host}.{column}"
         )));
     }
+    let phys_col = col_of_ref(con, host, column).map_err(db_err)?;
     if let Some((host_table, _)) = references::dimension_master(host) {
         // Silencieux si la colonne a déjà disparu (ex. après un reset partiel).
         let _ = con.execute(
-            &format!("ALTER TABLE {host_table} DROP COLUMN {column}"),
+            &format!("ALTER TABLE {host_table} DROP COLUMN \"{phys_col}\""),
             [],
         );
     }
@@ -356,10 +415,116 @@ pub fn assign(
         }
         _ => DbValue::Null, // désaffectation
     };
-    let sql = format!("UPDATE {host_table} SET \"{column}\" = ? WHERE \"{host_key}\" = ?");
+    let phys_col = col_of_ref(con, host, column).map_err(db_err)?;
+    let sql = format!("UPDATE {host_table} SET \"{phys_col}\" = ? WHERE \"{host_key}\" = ?");
     con.execute(
         &sql,
         params_from_iter(vec![dbval, DbValue::Text(member.to_string())]),
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Scanne les JSON de règles et postes pour détecter les blockers avant un
+/// renommage de colonne API `(host, column_name)`. Retourne une liste de codes
+/// bloquants, ou `Ok(vec![])` si aucun.
+pub fn scan_blockers(
+    con: &duckdb::Connection,
+    host: &str,
+    column_name: &str,
+) -> duckdb::Result<Vec<String>> {
+    let mut blockers = Vec::new();
+    // dim_rule.definition : `"ref": "<column_name>"` sous `selection` ou `destination`
+    let mut stmt = con.prepare(
+        "SELECT code, definition FROM dim_rule WHERE definition IS NOT NULL",
+    )?;
+    let rules: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .flatten()
+        .collect();
+    for (code, def) in &rules {
+        if def.contains(column_name) {
+            blockers.push(format!("règle {code}"));
+        }
+    }
+    // dim_aggregate.definition : idem
+    if let Ok(mut stmt2) = con.prepare(
+        "SELECT code, definition FROM dim_aggregate WHERE definition IS NOT NULL",
+    ) {
+        let aggs: Vec<(String, String)> = stmt2
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .flatten()
+            .collect();
+        for (code, def) in &aggs {
+            if def.contains(column_name) {
+                blockers.push(format!("poste {code}"));
+            }
+        }
+    }
+    // Filtre faux positifs : si le column_name est très court, la recherche
+    // naive peut matcher des sous-chaînes. On l'accepte (conservateur = sûr).
+    let _ = host; // host non utilisé pour l'instant (scan global sur le nom)
+    Ok(blockers)
+}
+
+/// Renomme le nom API d'une référence directe custom (UPDATE `column_name`).
+/// La colonne physique (`r{id}`) reste inchangée. Refuse les natifs.
+pub fn rename_custom_ref(
+    con: &duckdb::Connection,
+    host: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), AppError> {
+    if !is_valid_custom_name(new_name) {
+        return Err(AppError::bad_request(format!(
+            "nom invalide : {new_name:?}"
+        )));
+    }
+    if is_native(con, host, old_name).map_err(db_err)? {
+        return Err(AppError::conflict(format!(
+            "référence native (non renommable) : {host}.{old_name}"
+        )));
+    }
+    // Blocker check
+    let blockers = scan_blockers(con, host, old_name).map_err(db_err)?;
+    if !blockers.is_empty() {
+        return Err(AppError::conflict(format!(
+            "référence citée dans : {}",
+            blockers.join(", ")
+        )));
+    }
+    // Vérifier que old_name existe
+    let exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_custom_reference \
+             WHERE host_dimension = ? AND column_name = ?",
+            [host, old_name],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!(
+            "référence inexistante : {host}.{old_name}"
+        )));
+    }
+    // Vérifier que new_name est libre
+    let conflict: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_custom_reference \
+             WHERE host_dimension = ? AND column_name = ?",
+            [host, new_name],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if conflict {
+        return Err(AppError::conflict(format!(
+            "nom déjà utilisé : {host}.{new_name}"
+        )));
+    }
+    con.execute(
+        "UPDATE dim_custom_reference SET column_name = ? \
+         WHERE host_dimension = ? AND column_name = ?",
+        [new_name, host, old_name],
     )
     .map_err(db_err)?;
     Ok(())
@@ -429,6 +594,25 @@ async fn assign_handler(
     Ok(Json(json!({ "member": body.member, "value": body.value })))
 }
 
+#[derive(Deserialize)]
+struct RenameBody {
+    new_name: String,
+}
+
+/// POST /api/meta/references-custom/{host}/{column}/rename — renomme le nom API.
+///
+/// La colonne physique (`r{id}`) reste inchangée. Retourne 409 si des règles
+/// ou postes citent encore ce nom, 404 si la référence est inconnue.
+async fn rename_handler(
+    Path((host, column)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_custom_ref(&con, &host, &column, &body.new_name)?;
+    Ok(Json(json!({ "renamed": true, "column": body.new_name })))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
@@ -442,6 +626,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/api/meta/references-custom/{host}/{column}/assign",
             put(assign_handler),
+        )
+        .route(
+            "/api/meta/references-custom/{host}/{column}/rename",
+            post(rename_handler),
         )
 }
 
@@ -472,10 +660,6 @@ mod tests {
     fn cree_reference_avec_colonne() {
         let con = setup();
         create(&con, "account", "compte_parent", "account").unwrap();
-        assert!(
-            col_exists(&con, "dim_account", "compte_parent"),
-            "colonne ajoutée sur dim_account"
-        );
         // La référence créée est trouvée et marquée non-native (les natives sont
         // peuplées par `seed_native` au setup).
         let all = load_all(&con).unwrap();
@@ -485,19 +669,27 @@ mod tests {
             .expect("référence custom présente");
         assert_eq!(ours.target_dimension, "account");
         assert!(!ours.native, "référence utilisateur = native FALSE");
+        // B1 étape 11 : la colonne physique est r{id}, pas le nom API.
+        assert!(
+            col_exists(&con, "dim_account", &ours.col),
+            "colonne physique {} ajoutée sur dim_account", ours.col
+        );
+        assert!(ours.col.starts_with('r'), "col physique commence par r");
     }
 
     #[test]
     fn exposee_dans_le_graphe_de_references() {
         let con = setup();
         create(&con, "account", "compte_parent", "account").unwrap();
+        // B1 étape 11 : dynamic_references retourne la col physique r{id}.
+        let phys = col_of_ref(&con, "account", "compte_parent").unwrap();
         let refs = references::dynamic_references(&con);
         assert!(
             refs.iter().any(|r| r.table == "dim_account"
-                && r.column == "compte_parent"
+                && r.column == phys
                 && r.target_table == "dim_account"
                 && r.target_column == "code"),
-            "la référence directe apparaît dans dynamic_references"
+            "la référence directe apparaît dans dynamic_references (col physique {phys})"
         );
     }
 
@@ -620,12 +812,14 @@ mod tests {
         )
         .unwrap();
         create(&con, "account", "compte_parent", "account").unwrap();
+        // B1 étape 11 : la col physique est r{id}.
+        let phys = col_of_ref(&con, "account", "compte_parent").unwrap();
 
         // Affecte le parent 60 au compte 600.
         assign(&con, "account", "compte_parent", "600", Some("60")).unwrap();
         let parent: Option<String> = con
             .query_row(
-                "SELECT compte_parent FROM dim_account WHERE code = '600'",
+                &format!("SELECT \"{phys}\" FROM dim_account WHERE code = '600'"),
                 [],
                 |r| r.get(0),
             )
@@ -641,7 +835,7 @@ mod tests {
         assign(&con, "account", "compte_parent", "600", None).unwrap();
         let after: Option<String> = con
             .query_row(
-                "SELECT compte_parent FROM dim_account WHERE code = '600'",
+                &format!("SELECT \"{phys}\" FROM dim_account WHERE code = '600'"),
                 [],
                 |r| r.get(0),
             )
@@ -653,6 +847,8 @@ mod tests {
     fn survit_au_reset() {
         let con = setup();
         create(&con, "account", "compte_parent", "account").unwrap();
+        // B1 étape 11 : la col physique est r{id}.
+        let phys = col_of_ref(&con, "account", "compte_parent").unwrap();
         // Combien de références avant reset (natives + notre custom).
         let before: i64 = con
             .query_row("SELECT COUNT(*) FROM dim_custom_reference", [], |r| r.get(0))
@@ -668,8 +864,8 @@ mod tests {
             .unwrap();
         assert_eq!(before, after, "registre survit au reset (natives + custom)");
         assert!(
-            col_exists(&con, "dim_account", "compte_parent"),
-            "colonne réappliquée après reset"
+            col_exists(&con, "dim_account", &phys),
+            "colonne physique {phys} réappliquée après reset"
         );
     }
 
@@ -677,10 +873,11 @@ mod tests {
     fn suppression_nettoie() {
         let con = setup();
         create(&con, "account", "compte_parent", "account").unwrap();
+        let phys = col_of_ref(&con, "account", "compte_parent").unwrap();
         remove(&con, "account", "compte_parent").unwrap();
         assert!(
-            !col_exists(&con, "dim_account", "compte_parent"),
-            "colonne retirée"
+            !col_exists(&con, "dim_account", &phys),
+            "colonne physique {phys} retirée"
         );
         // Les natives restent (le custom supprimé ne touche pas aux autres).
         let all = load_all(&con).unwrap();
