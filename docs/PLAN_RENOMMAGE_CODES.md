@@ -1,6 +1,6 @@
 # Plan d'action — Codes renommables via clés techniques (option B1)
 
-> Statut : **terminé sur les dimensions statiques** (branche `feat/renommage-codes`) — smoke-test runtime en attente.
+> Statut : **étapes 0–9 terminées** (branche `feat/renommage-codes`) — smoke-test runtime en attente. Restent étapes 10 et 11.
 > Décision : **option B1** — chaque objet gagne un `id` technique immuable ;
 > le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
 > in-place en §7.
@@ -31,7 +31,7 @@ codes-renommables, branche `feat/renommage-codes`, voir
   - `server.rs` : 3 appels de migration au startup.
 - **Smoke-tests OK (2026-06-27)** : CRUD rulesets, renommage jeu de règles,
   pipeline, perimeter/method, consolidations — aucun bug runtime détecté.
-- Fait : **étapes 0–8 + 5.1 + 6b + 7b** entièrement (2026-06-29).
+- Fait : **étapes 0–9 + 5.1 + 6b + 7b** entièrement (2026-06-29).
 - **Étape 6b** (2026-06-29) : `via` dans les JSON migré en ids de caractéristiques.
 - **Étape 7b** (2026-06-29) : endpoint + UI renommage code caractéristique / liste de valeurs.
 - **Étape 8** (2026-06-29) : `pivot_currency` → `pivot_currency_id` (id INTEGER) ;
