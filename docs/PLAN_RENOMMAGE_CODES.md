@@ -33,22 +33,47 @@ codes-renommables, branche `feat/renommage-codes`, voir
   pipeline, perimeter/method, consolidations — aucun bug runtime détecté.
 - Fait : **étapes 0, 1, 2, 3, 4, 5, 6, 7** entièrement.
 
-### Prochaine étape : smoke-tests runtime étape 5
+### Smoke-tests runtime étape 5 — partiellement validés
 
-**À valider par l'utilisateur (serveur) :**
-- Créer une caractéristique → vérifier `car_1` dans DuckDB.
-- Créer une liste de valeurs → vérifier `lst_1`.
-- Renommer un code de dimension → pas de blocage sur `car_*`/`lst_*`.
-- `POST /api/reset` → `car_1`/`lst_1` survivent, colonnes de rattachement réappliquées.
+- ✅ Créer une caractéristique / une liste de valeurs → fonctionnel (vérifié par l'utilisateur
+  2026-06-27). Bug runtime `GET /api/md/car_3 → 400` corrigé : `sql_to_api_dyn` résout
+  `car_<id>` → `car_<code>` avant de retourner le nom d'API au frontend.
+- ⏳ Renommer un code de dimension → pas testé post-étape 5.
+- ⏳ `POST /api/reset` → `car_1`/`lst_1` survivent, colonnes de rattachement réappliquées.
 
 **Différé (scope réduit étape 5) :**
 - Colonnes attributs N2 : `<attr_code>` sur `car_<id>` → `c<attr_id>` (non fait)
 - Colonnes custom : `<name>` sur `fact_entry`/`stg_entry` → `x<id>` (non fait)
 - Colonnes références directes : `<col>` sur `dim_<host>` → `r<id>` (non fait)
 
-**Ce que ça débloque :**
-- Migration `via` dans les JSON de règles/postes vers ids (étape 6 résiduelle)
-- Création de dimensions custom sans blocage (chantier gelé §11)
+### Nouveaux sujets intégrés au plan (2026-06-27)
+
+Trois sujets identifiés lors des smoke-tests étape 5, repositionnés dans la
+feuille de route (§8) :
+
+**Sujet A — Modifier le libellé d'une caractéristique ou d'une liste de valeurs**
+→ Lacune CRUD basique : aucun endpoint `PUT` n'existe sur `dim_characteristic` /
+`dim_value_list` pour modifier leur libellé (ni leur code). Simple à ajouter.
+**Classé : étape 5.1** (indépendant du reste, peut être fait immédiatement).
+
+**Sujet B — Renommer le code d'une caractéristique ou d'une liste de valeurs**
+→ C'est l'objectif même de B1 pour ces objets. L'étape 5 a préparé le terrain
+(`car_<id>` : le nom physique ne dépend plus du code). Il reste deux prérequis :
+1. Migrer `via` dans les JSON de règles/postes en ids de caractéristiques
+   (étape 6 résiduelle, bloquant la garde JSON qui refuserait le rename sinon).
+2. Exposer un endpoint de renommage pour `dim_characteristic` / `dim_value_list`
+   (via `rename_code` étendu ou endpoint dédié).
+**Classé : étape 6b** (migration `via` → ids) **+ étape 7b** (endpoint + UI rename).
+
+**Sujet C — Renommer le code d'une *valeur* dans une caractéristique ou une liste**
+→ Extension de portée supplémentaire. Les codes de valeurs (`car_<id>.code`,
+`lst_<id>.code`) peuvent être cités dans les règles (selection `val` avec `via`),
+dans `stg_entry` (si une dimension custom rattachée), dans les exports/imports.
+Sous B1 actuel, ces valeurs n'ont pas d'`id` propre : leur `code` est immuable par
+convention. Pour rendre ce code mutable il faudrait ajouter un `id` dans `car_<id>`
+et `lst_<id>`, et migrer les `val` des règles en conséquence — soit une extension
+B1 significative.
+**Classé : chantier B1+ futur** (§11), non bloquant pour la fin du chantier actuel.
 
 ### Détail étape 6 (JSON → ids)
 
@@ -502,12 +527,23 @@ depuis les données existantes (jamais de reseed).
    jointures pipeline + reports + lecteurs (`indicators.rs`, `rules.rs` sélection
    directe id→code). *La grosse étape.* Suite `cargo test` verte (golden inclus).
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
+   ✅ Scope livré : `car_<id>` / `lst_<id>`. Bug runtime `sql_to_api_dyn` corrigé.
+   Scope différé : colonnes `c<id>` / `x<id>` / `r<id>`.
+5.1. **CRUD libellé caractéristique / liste de valeurs** (sujet A) — endpoint
+   `PUT /api/meta/characteristics/{code}` et `PUT /api/meta/value-lists/{code}`
+   permettant de modifier `libelle` (et à terme `code`, cf. étape 7b). Indépendant
+   du reste ; peut être livré immédiatement.
 6. ✅ **Basculer les JSON en ids** → rôle 3 réglé (session 2026-06-27).
    Voir détail complet dans §0. Résumé : `json_migration.rs` (nouveau module),
    moteur dual-mode dans `rules.rs` + `indicators.rs`, migration idempotente
    au démarrage, normalisation à la sauvegarde.
    **Reste hors scope** : `coefficient.type`, `via` (bloqué étape 5), `ref`,
    `app_config.pivot_currency`.
+6b. **Migrer `via` en ids de caractéristiques** (sujet B, prérequis rename) —
+   débloqué par étape 5 (`car_<id>` établi). Étend `json_migration.rs` :
+   `selection[*].via` passe de code de caractéristique à son `id` entier.
+   Idem pour les postes (`dim_aggregate.definition`). La garde JSON de `rename_code`
+   cesse alors de bloquer le renommage d'une caractéristique.
 7. ✅ **Endpoint `rename` + UI** (livré en avance) : `POST /api/md/{table}/rename`
    (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
    refuse si une référence cible encore le code (liste les blocages). Effectif dès
@@ -518,6 +554,11 @@ depuis les données existantes (jamais de reseed).
    `dim_consolidation.ruleset_code` (`ri()` → non affecté).
    Robustesse base : `CHECKPOINT` après migrations/import/reset/rename (sinon WAL
    DuckDB irrejouable au redémarrage). Import B1-aware (restaure un export en codes).
+7b. **Renommage code de caractéristique / liste de valeurs** (sujet B, dépend de 6b) —
+   étendre `rename_code` (ou endpoint dédié) pour `dim_characteristic` /
+   `dim_value_list` : `UPDATE … SET code = ? WHERE code = ?`, cascade dans
+   `stg_entry` si nécessaire. Exposer le bouton « Renommer » dans la page
+   Caractéristiques et la page Listes de valeurs.
 8. **Retirer les chemins code-based** résiduels + finaliser la migration
    in-place versionnée (§7).
 
@@ -575,6 +616,26 @@ ensuite, avec des conflits de fusion sur `references.rs` / `masterdata.rs` /
 moins **étape 4 (fact_entry en ids)** et **étape 5 (objets dynamiques nommés par
 id)**. La création s'appuiera alors directement sur les conventions id-based
 (références via `ri()`, objets `*_<id>`), sans double travail.
+
+## 12. Chantier adjacent GELÉ — renommage des *valeurs* de caractéristique / liste (B1+, sujet C)
+
+**Demande** : pouvoir renommer le `code` d'une valeur dans `car_<id>` ou `lst_<id>`
+(ex. renommer la modalité `"ACT"` en `"ACTIF"` dans une caractéristique de comportement).
+
+**État actuel** : le code d'une valeur est immuable dans l'API (champ `code` ignoré
+dans les PUT de `update_value` pour les deux modules). C'est délibéré : sous B1
+actuel, aucun `id` technique ne stabilise les valeurs de `car_<id>` / `lst_<id>`.
+Ces codes peuvent être cités dans :
+- les règles (`selection.val` couplé à `via = <code_caractéristique>`) ;
+- les saisies / exports / `stg_entry` (si une dimension custom s'appuie dessus).
+
+**Ce qu'il faudrait** : ajouter un `id` auto dans `car_<id>` et `lst_<id>`,
+migrer les `val` des règles pointant via `via` vers ces ids, puis exposer un
+endpoint de renommage + cascade.
+
+**Décision : gelé** — extension B1 significative (un deuxième niveau de surrogate),
+non bloquante pour fermer le chantier actuel. À réévaluer selon les besoins
+terrain.
 
 **Déjà livré côté UI (sans risque B1, déjà committé sur cette branche)** : page
 « Dimensions » (groupe Référentiel) listant les axes + colonne « Valeurs depuis »
