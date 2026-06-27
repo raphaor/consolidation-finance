@@ -11,30 +11,56 @@
 codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
-### Où on en est
-- **Le renommage fonctionne de bout en bout** pour toutes les dimensions flippées,
-  **y compris les règles et jeux de règles** (bouton « Renommer » dans RulesPage).
+### Où on en est (2026-06-27 — état final)
+
+**Étapes 0–4, 6, 7 entièrement terminées + smoke-tests validés.**
+
+- **Smoke-tests OK (2026-06-27)** : CRUD rulesets, renommage jeu de règles,
+  pipeline, perimeter/method, consolidations — aucun bug runtime détecté.
+- **Dénormalisation ids→codes (2026-06-27)** : `GET /api/rules/{code}` et
+  `GET /api/aggregates` dénormalisent les ids stockés en codes avant renvoi
+  (`json_migration::denormalize_rule_definition` / `denormalize_aggregate_definition`).
+  L'éditeur de règles affiche à nouveau les codes lisibles.
+- **RenameModal harmonisée (2026-06-27)** : `MasterDataPage` utilisait
+  `window.prompt()` (hors-thème). Remplacé par la modale standard (backdrop,
+  input autofocus, erreur inline). Composant partagé extrait dans
+  `web/src/components/RenameModal.tsx`.
 - Fait : **étapes 0, 1, 2, 3, 4, 6, 7** entièrement. **Étape 3 — COMPLÈTE** :
   toutes FK dim→dim flippées dont `ruleset` (session 2026-06-27bis).
-- **FK `ruleset` (session 2026-06-27bis)** : `dim_ruleset_item.ruleset_code`
-  TEXT → INTEGER via `migrate_ruleset_item_fk_to_id` (reconstruction PK composite).
-  `references.rs` : `rq()` → `ri()`. Moteur `rules.rs` et handlers `server.rs`
-  utilisent sous-requête `(SELECT id FROM dim_ruleset WHERE code = ?)`. Export/import
-  B1-aware automatique via `import_db_value`. Suite verte : **183 tests, 0 échec**.
-  ⚠️ **Smoke-test serveur en attente** : CRUD `/api/rulesets`, créer/modifier/
-  supprimer un ruleset, renommer un jeu de règles, lancer le pipeline.
-- **ÉTAPE 6 — TERMINÉE (session 2026-06-27)** : les JSON de règles/postes/indicateurs
-  stockent désormais des **ids entiers** au lieu de codes strings. Moteur dual-mode
-  (lit indifféremment ids ou codes legacy). Migration idempotente au démarrage.
-  Voir détail ci-dessous.
-- **Renommage règles/rulesets** (session 2026-06-27) : `dim_rule` + `dim_ruleset`
-  ajoutées dans `TABLES` → `POST /api/md/rules/rename` et `.../rulesets/rename`
-  opérationnels. Bouton « Renommer » ajouté dans `RulesPage.tsx` (onglets
-  Bibliothèque et Jeux de règles).
 - **Corrections smoke-test (session 2026-06-27)** : 4 faux blocages au renommage
   d'un compte corrigés — `fact_entry.*` refs passées en `ri()` (invisibles à la
   garde code-keyed) ; `stg_entry`/`car_*`/patron B en cascade plutôt qu'en blocage.
   Suite tests verte à **183 tests, 0 échec** après ces corrections.
+
+### Prochaine étape : **étape 5** — objets dynamiques nommés par id
+
+**Objectif** : les noms physiques `car_<code>`, `lst_<code>`, colonnes custom
+(`<name>`, attributs N2) ne dépendent plus du code mutable.
+
+**4 registres à basculer :**
+
+| Objet | Avant | Après | Migration DuckDB |
+|---|---|---|---|
+| Tables caractéristiques | `car_<code>` | `car_<id>` | `ALTER TABLE … RENAME TO` |
+| Attributs N2 (colonnes) | `<attr_code>` sur `car_*` | `c<id>` | `ALTER TABLE … RENAME COLUMN` |
+| Tables listes de valeurs | `lst_<code>` | `lst_<id>` | `ALTER TABLE … RENAME TO` |
+| Colonnes dims custom | `<name>` sur `fact_entry`/`stg_entry` | `x<id>` | `ALTER TABLE … RENAME COLUMN` |
+
+> Référence directe (`r<id>`) : à traiter en même temps ou juste après.
+> DuckDB supporte RENAME TABLE et RENAME COLUMN directement (pas de reconstruction).
+
+**Fichiers principaux touchés :**
+- `characteristics.rs` — `format!("car_{code}")` → lookup id ; idem attributs N2
+- `value_lists.rs` — `format!("lst_{code}")` → lookup id
+- `dimensions.rs` + `custom_references.rs` — nommage colonnes custom
+- `surrogate.rs` — 4 nouvelles fonctions de migration idempotentes
+- `references.rs` — `all_references` construit noms depuis ids
+- `json_migration.rs` — migration `via`/`ref` dans JSON (déblocage post-étape 5)
+- Tests : `car_comportement`, `lst_incoterm`, tests `via`/`ref` dans `rules.rs`
+
+**Ce que ça débloque :**
+- `via` et `ref` dans les JSON de règles/postes entièrement migrables (étape 6 résiduelle)
+- Création de dimensions custom (chantier gelé §11)
 
 ### Détail étape 6 (JSON → ids)
 
