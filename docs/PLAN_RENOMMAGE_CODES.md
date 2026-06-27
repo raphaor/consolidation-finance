@@ -5,7 +5,7 @@
 > le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
 > in-place en §7.
 
-## 0. Reprise rapide (dernière session : 2026-06-28)
+## 0. Reprise rapide (dernière session : 2026-06-29)
 
 **Point de départ d'une prochaine session.** Donner : « Reprends le chantier
 codes-renommables, branche `feat/renommage-codes`, voir
@@ -13,7 +13,7 @@ codes-renommables, branche `feat/renommage-codes`, voir
 
 ### Où on en est (2026-06-28 — état final)
 
-**Étapes 0–7 + étape 5.1 terminées. Smoke-tests runtime étape 5 partiellement validés.**
+**Étapes 0–7 + étape 5.1 + étape 6b terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
 - **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
   `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
@@ -538,11 +538,12 @@ depuis les données existantes (jamais de reseed).
    au démarrage, normalisation à la sauvegarde.
    **Reste hors scope** : `coefficient.type`, `via` (bloqué étape 5), `ref`,
    `app_config.pivot_currency`.
-6b. **Migrer `via` en ids de caractéristiques** (sujet B, prérequis rename) —
-   débloqué par étape 5 (`car_<id>` établi). Étend `json_migration.rs` :
-   `selection[*].via` passe de code de caractéristique à son `id` entier.
-   Idem pour les postes (`dim_aggregate.definition`). La garde JSON de `rename_code`
-   cesse alors de bloquer le renommage d'une caractéristique.
+6b. ✅ **Migrer `via` en ids de caractéristiques** (livré 2026-06-29) —
+   `json_migration.rs` : `translate_via_to_id` / `translate_via_to_code` +
+   normalize/denormalize étendus à `selection[*].via` et `destination.map.via`.
+   Chemins d'exécution (`rules.rs` : 2 sites, `indicators.rs` : `IndicatorResolver`)
+   pré-dénormalisent avant parsing (DB = ids, parser = codes).
+   4 tests unitaires + 2 tests intégration end-to-end. 19 tests rules, 0 échec.
 7. ✅ **Endpoint `rename` + UI** (livré en avance) : `POST /api/md/{table}/rename`
    (`masterdata::rename_code`) + bouton « Renommer » dans MasterDataPage. **Gardé** :
    refuse si une référence cible encore le code (liste les blocages). Effectif dès
