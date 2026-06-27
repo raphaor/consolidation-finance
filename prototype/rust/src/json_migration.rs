@@ -20,7 +20,8 @@
 //! ## Ce qui n'est pas encore migré (hors scope)
 //!
 //! - `coefficient.type` (format `{"type": "code"}`) — priorité moindre.
-//! - `via` (codes de caractéristiques, noms de tables `car_<code>`) — bloqué sur étape 5.
+//! - `selection[*].val` quand `via` est présent : cite une valeur N1 (`car_<id>.code`),
+//!   pas un membre de dimension — hors scope (sujet C, B1+ futur).
 //! - `ref` (codes de références directes) — pas encore renommable.
 //!
 //! ## Idempotence
@@ -32,6 +33,49 @@ use duckdb::{params, Connection};
 use serde_json::Value as JsonValue;
 
 use crate::{formula, references, resolve};
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Primitives `via` (code de caractéristique ↔ id technique)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Traduit un code de caractéristique → son id technique dans `dim_characteristic`.
+/// Retourne `None` si le champ est déjà un entier (idempotence) ou inconnu.
+fn translate_via_to_id(con: &Connection, via: &JsonValue) -> duckdb::Result<Option<JsonValue>> {
+    if via.is_number() {
+        return Ok(None); // déjà migré
+    }
+    let Some(code) = via.as_str() else {
+        return Ok(None);
+    };
+    let id: duckdb::Result<i64> = con.query_row(
+        "SELECT id FROM dim_characteristic WHERE code = ?",
+        params![code],
+        |r| r.get(0),
+    );
+    match id {
+        Ok(id) => Ok(Some(JsonValue::Number(id.into()))),
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Traduit un id de caractéristique → son code dans `dim_characteristic`.
+/// Retourne `None` si le champ n'est pas un entier (déjà un code) ou inconnu.
+fn translate_via_to_code(con: &Connection, via: &JsonValue) -> duckdb::Result<Option<JsonValue>> {
+    let Some(id) = via.as_i64() else {
+        return Ok(None); // déjà un code string ou valeur inattendue
+    };
+    let code: duckdb::Result<String> = con.query_row(
+        "SELECT code FROM dim_characteristic WHERE id = ?",
+        params![id],
+        |r| r.get(0),
+    );
+    match code {
+        Ok(code) => Ok(Some(JsonValue::String(code))),
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Primitives de résolution
@@ -209,12 +253,18 @@ fn denormalize_selection_conds(con: &Connection, sel: &mut JsonValue) -> duckdb:
     };
     let mut changed = false;
     for cond in arr.iter_mut() {
-        if cond.get("via").is_some()
-            || cond.get("ref").is_some()
-            || cond.get("attr").is_some()
-        {
-            continue; // traversées : hors scope
+        if cond.get("ref").is_some() || cond.get("attr").is_some() {
+            continue;
         }
+        // Traversée `via` : dénormaliser l'id de caractéristique → code.
+        if let Some(via) = cond.get("via").cloned() {
+            if let Some(new_via) = translate_via_to_code(con, &via)? {
+                cond["via"] = new_via;
+                changed = true;
+            }
+            continue;
+        }
+        // Condition directe : dénormaliser `val` id → code.
         let dim = match cond.get("dim").and_then(|x| x.as_str()) {
             Some(d) => d.to_string(),
             None => continue,
@@ -244,7 +294,7 @@ fn denormalize_selection_conds(con: &Connection, sel: &mut JsonValue) -> duckdb:
     Ok(changed)
 }
 
-/// Dénormalise les destinations mode=override d'une opération (ids → codes).
+/// Dénormalise les destinations d'une opération (ids → codes).
 /// Miroir de [`normalize_destinations`].
 fn denormalize_destinations(con: &Connection, dest: &mut JsonValue) -> duckdb::Result<bool> {
     let Some(obj) = dest.as_object_mut() else {
@@ -255,20 +305,32 @@ fn denormalize_destinations(con: &Connection, dest: &mut JsonValue) -> duckdb::R
     for dim in dims {
         if let Some(entry) = obj.get_mut(&dim) {
             let mode = entry.get("mode").and_then(|m| m.as_str()).map(str::to_string);
-            if mode.as_deref() != Some("override") {
-                continue;
-            }
-            let val = match entry.get("value") {
-                Some(v) => v.clone(),
-                None => continue,
-            };
-            if !val.is_number() {
-                continue; // déjà un code ou null
-            }
-            let new_val = translate_id_to_code(con, &dim, &val)?;
-            if new_val != val {
-                entry["value"] = new_val;
-                changed = true;
+            match mode.as_deref() {
+                Some("override") => {
+                    let val = match entry.get("value") {
+                        Some(v) => v.clone(),
+                        None => continue,
+                    };
+                    if !val.is_number() {
+                        continue; // déjà un code ou null
+                    }
+                    let new_val = translate_id_to_code(con, &dim, &val)?;
+                    if new_val != val {
+                        entry["value"] = new_val;
+                        changed = true;
+                    }
+                }
+                Some("map") => {
+                    let via = match entry.get("via").cloned() {
+                        Some(v) => v,
+                        None => continue,
+                    };
+                    if let Some(new_via) = translate_via_to_code(con, &via)? {
+                        entry["via"] = new_via;
+                        changed = true;
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -341,8 +403,13 @@ pub fn denormalize_aggregate_definition(con: &Connection, json: &str) -> duckdb:
 //  Normalisation des JSON de règles
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Normalise les valeurs d'un tableau de conditions de sélection (règle ou poste) :
-/// traduit `val` de code string vers id entier pour les dims avec master data.
+/// Normalise les valeurs d'un tableau de conditions de sélection (règle ou poste).
+///
+/// - Traversée `via` : traduit le **code de caractéristique** en id entier.
+///   Le champ `val` cite une valeur N1 (`car_<id>.code`) — hors scope (sujet C).
+/// - Traversée `ref` / `attr` : ignorées (hors scope).
+/// - Condition directe : traduit `val` de code string vers id entier.
+///
 /// Modifie le JSON en place ; retourne `true` si des changements ont été faits.
 fn normalize_selection_conds(con: &Connection, sel: &mut JsonValue) -> duckdb::Result<bool> {
     let Some(arr) = sel.as_array_mut() else {
@@ -350,14 +417,20 @@ fn normalize_selection_conds(con: &Connection, sel: &mut JsonValue) -> duckdb::R
     };
     let mut changed = false;
     for cond in arr.iter_mut() {
-        // Ignorer les traversées (via / ref / attr) : leurs valeurs ciblent
-        // d'autres tables (car_*, master data cible) hors scope de cette migration.
-        if cond.get("via").is_some()
-            || cond.get("ref").is_some()
-            || cond.get("attr").is_some()
-        {
+        // `ref` et `attr` : hors scope (pas de table de caractéristiques à migrer).
+        if cond.get("ref").is_some() || cond.get("attr").is_some() {
             continue;
         }
+        // Traversée `via` : migrer le code de caractéristique → id.
+        // Ne pas toucher `val` (code de valeur N1, hors scope — sujet C).
+        if let Some(via) = cond.get("via").cloned() {
+            if let Some(new_via) = translate_via_to_id(con, &via)? {
+                cond["via"] = new_via;
+                changed = true;
+            }
+            continue;
+        }
+        // Condition directe (sans traversée) : migrer `val` code → id.
         let dim = match cond.get("dim").and_then(|x| x.as_str()) {
             Some(d) => d.to_string(),
             None => continue,
@@ -375,7 +448,10 @@ fn normalize_selection_conds(con: &Connection, sel: &mut JsonValue) -> duckdb::R
     Ok(changed)
 }
 
-/// Normalise les valeurs de destination mode=override d'une opération.
+/// Normalise les valeurs de destination d'une opération :
+/// - mode `override` : traduit `value` code → id (dim member).
+/// - mode `map` : traduit `via` code de caractéristique → id.
+/// - autres modes : ignorés.
 fn normalize_destinations(con: &Connection, dest: &mut JsonValue) -> duckdb::Result<bool> {
     let Some(obj) = dest.as_object_mut() else {
         return Ok(false);
@@ -386,20 +462,32 @@ fn normalize_destinations(con: &Connection, dest: &mut JsonValue) -> duckdb::Res
     for dim in dims {
         if let Some(entry) = obj.get_mut(&dim) {
             let mode = entry.get("mode").and_then(|m| m.as_str()).map(str::to_string);
-            if mode.as_deref() != Some("override") {
-                continue;
-            }
-            let val = match entry.get("value") {
-                Some(v) => v.clone(),
-                None => continue,
-            };
-            if val.is_number() {
-                continue; // déjà un id
-            }
-            let new_val = translate_dim_val(con, &dim, &val)?;
-            if new_val != val {
-                entry["value"] = new_val;
-                changed = true;
+            match mode.as_deref() {
+                Some("override") => {
+                    let val = match entry.get("value") {
+                        Some(v) => v.clone(),
+                        None => continue,
+                    };
+                    if val.is_number() {
+                        continue; // déjà un id
+                    }
+                    let new_val = translate_dim_val(con, &dim, &val)?;
+                    if new_val != val {
+                        entry["value"] = new_val;
+                        changed = true;
+                    }
+                }
+                Some("map") => {
+                    let via = match entry.get("via").cloned() {
+                        Some(v) => v,
+                        None => continue,
+                    };
+                    if let Some(new_via) = translate_via_to_id(con, &via)? {
+                        entry["via"] = new_via;
+                        changed = true;
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -570,4 +658,111 @@ pub fn migrate_json_to_ids(con: &Connection) -> duckdb::Result<()> {
     }
 
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::characteristics::create_characteristic;
+
+    fn setup() -> Connection {
+        let con = Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        con
+    }
+
+    #[test]
+    fn normalise_via_selection_code_vers_id() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        let id: i64 = con
+            .query_row("SELECT id FROM dim_characteristic WHERE code='comportement'", [], |r| r.get(0))
+            .unwrap();
+
+        let json = format!(
+            r#"{{"scope":[],"operations":[{{"seq":1,"level":"corporate",
+               "selection":[{{"dim":"account","via":"comportement","op":"=","val":"VENTES"}}]}}]}}"#
+        );
+        let norm = normalize_rule_definition(&con, &json).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&norm).unwrap();
+        let via = &v["operations"][0]["selection"][0]["via"];
+        assert_eq!(via.as_i64(), Some(id), "via doit être l'id après normalisation");
+
+        // val n'est pas touché (valeur N1, hors scope)
+        let val = &v["operations"][0]["selection"][0]["val"];
+        assert_eq!(val.as_str(), Some("VENTES"), "val doit rester un code N1");
+
+        // Dénormalisation : retour au code.
+        let denorm = denormalize_rule_definition(&con, &norm).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&denorm).unwrap();
+        assert_eq!(
+            v2["operations"][0]["selection"][0]["via"].as_str(),
+            Some("comportement"),
+            "via doit être le code après dénormalisation"
+        );
+    }
+
+    #[test]
+    fn normalise_via_destination_map_code_vers_id() {
+        let con = setup();
+        create_characteristic(&con, "regroupement", "R", "account").unwrap();
+        let id: i64 = con
+            .query_row("SELECT id FROM dim_characteristic WHERE code='regroupement'", [], |r| r.get(0))
+            .unwrap();
+
+        let json = r#"{"scope":[],"operations":[{"seq":1,"level":"corporate",
+            "destination":{"nature":{"mode":"map","via":"regroupement","attr":"nat_dest"}}}]}"#;
+        let norm = normalize_rule_definition(&con, json).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&norm).unwrap();
+        let via = &v["operations"][0]["destination"]["nature"]["via"];
+        assert_eq!(via.as_i64(), Some(id), "via destination.map doit être l'id");
+
+        let denorm = denormalize_rule_definition(&con, &norm).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&denorm).unwrap();
+        assert_eq!(
+            v2["operations"][0]["destination"]["nature"]["via"].as_str(),
+            Some("regroupement"),
+            "via doit être le code après dénormalisation"
+        );
+    }
+
+    #[test]
+    fn normalise_via_poste_selection() {
+        let con = setup();
+        create_characteristic(&con, "classe_compte", "C", "account").unwrap();
+        let id: i64 = con
+            .query_row("SELECT id FROM dim_characteristic WHERE code='classe_compte'", [], |r| r.get(0))
+            .unwrap();
+
+        let json = r#"{"level":"corporate","selection":[{"dim":"account","via":"classe_compte","op":"=","val":"ACT"}]}"#;
+        let norm = normalize_aggregate_definition(&con, json).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&norm).unwrap();
+        assert_eq!(v["selection"][0]["via"].as_i64(), Some(id));
+
+        let denorm = denormalize_aggregate_definition(&con, &norm).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&denorm).unwrap();
+        assert_eq!(v2["selection"][0]["via"].as_str(), Some("classe_compte"));
+    }
+
+    #[test]
+    fn idempotent_via_deja_id() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        let id: i64 = con
+            .query_row("SELECT id FROM dim_characteristic WHERE code='comportement'", [], |r| r.get(0))
+            .unwrap();
+
+        // JSON déjà avec un id dans `via`.
+        let json = format!(
+            r#"{{"scope":[],"operations":[{{"seq":1,"level":"corporate",
+               "selection":[{{"dim":"account","via":{id},"op":"=","val":"V"}}]}}]}}"#
+        );
+        let norm = normalize_rule_definition(&con, &json).unwrap();
+        // Aucun changement attendu.
+        assert_eq!(norm, json, "aucune modification si via est déjà un id");
+    }
 }

@@ -914,3 +914,119 @@ fn coefficient_elim_ic_corp_sans_a_nouveau_n1_nul() {
         "Var = N − 0 = 500"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  6b. Règle stockée avec `via` en id entier (post-migration JSON étape 6b) :
+//      le chemin d'exécution doit dénormaliser avant parsing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn via_id_selection_fonctionne_apres_normalisation() {
+    use conso_engine::characteristics::create_characteristic;
+    use conso_engine::json_migration::{denormalize_rule_definition, normalize_rule_definition};
+
+    let con = engine();
+
+    create_characteristic(&con, "regroupement", "R", "account").unwrap();
+    let reg_id = conso_engine::characteristics::id_of(&con, "regroupement").unwrap();
+    let reg_table = conso_engine::characteristics::value_table(reg_id);
+    con.execute(
+        &format!("INSERT INTO {reg_table} (code, libelle) VALUES ('PROD', 'Produits')"),
+        [],
+    )
+    .unwrap();
+    con.execute(
+        "UPDATE dim_account SET regroupement = 'PROD' WHERE code IN ('700','705')",
+        [],
+    )
+    .unwrap();
+    put(&con, "M", "700", "F20", None, "0LIASS", 100.0, "converted"); // classé PROD → match
+    put(&con, "M", "600", "F20", None, "0LIASS", 100.0, "converted"); // non classé → exclu
+
+    // Normaliser la définition avant stockage (simule ce que fait le serveur).
+    let def_code = r#"{"scope":[],"operations":[
+        {"seq":1,"level":"converted",
+         "selection":[{"dim":"account","via":"regroupement","op":"=","val":"PROD"}],
+         "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+         "destination":{"nature":{"mode":"override","value":"SELN1"}}}]}"#;
+    let def_id = normalize_rule_definition(&con, def_code).unwrap();
+
+    // Vérifier que `via` est devenu un entier après normalisation.
+    let v: serde_json::Value = serde_json::from_str(&def_id).unwrap();
+    assert_eq!(
+        v["operations"][0]["selection"][0]["via"].as_i64(),
+        Some(reg_id),
+        "via doit être l'id après normalisation"
+    );
+
+    // Vérifier que la dénormalisation redonne le code.
+    let def_back = denormalize_rule_definition(&con, &def_id).unwrap();
+    assert!(
+        def_back.contains("\"via\":\"regroupement\""),
+        "via doit être le code après dénormalisation : {def_back}"
+    );
+
+    // Stocker la règle sous forme normalisée (ids) et exécuter.
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES ('RVIA', 'test_via', ?)",
+        duckdb::params![def_id],
+    )
+    .unwrap();
+    let n = run_one(&con, "RVIA");
+    assert_eq!(n, 1, "règle avec via=id doit exécuter (seul le compte classé PROD)");
+    assert_eq!(scount(&con, "nature='SELN1' AND account='700'"), 1, "700 sélectionné");
+    assert_eq!(scount(&con, "nature='SELN1' AND account='600'"), 0, "600 exclu");
+}
+
+#[test]
+fn via_id_destination_map_fonctionne_apres_normalisation() {
+    use conso_engine::characteristics::{add_attribute, create_characteristic};
+    use conso_engine::json_migration::normalize_rule_definition;
+
+    let con = engine();
+
+    create_characteristic(&con, "comportement", "C", "account").unwrap();
+    add_attribute(&con, "comportement", "compte_destination", "Cpt dest", "account").unwrap();
+    add_attribute(&con, "comportement", "nat", "Nature", "nature").unwrap();
+    let char_id = conso_engine::characteristics::id_of(&con, "comportement").unwrap();
+    let car_table = conso_engine::characteristics::value_table(char_id);
+    con.execute(
+        &format!(
+            "INSERT INTO {car_table} (code, libelle, compte_destination, nat) \
+             VALUES ('VENTES_IC', 'V', '471L', '1AJUST')"
+        ),
+        [],
+    )
+    .unwrap();
+    con.execute(
+        "UPDATE dim_account SET comportement = 'VENTES_IC' WHERE code = '468'",
+        [],
+    )
+    .unwrap();
+    put(&con, "M", "468", "F20", None, "0LIASS", 100.0, "converted");
+
+    // Normaliser la définition (via code → id dans destination.map).
+    let def_code = r#"{"scope":[],"operations":[
+        {"seq":1,"level":"converted",
+         "selection":[{"dim":"flow","op":"=","val":"F20"}],
+         "coefficient":{"type":"constant","value":1},"multiplicateur":-1,
+         "destination":{
+            "account":{"mode":"map","via":"comportement","attr":"compte_destination"},
+            "nature":{"mode":"map","via":"comportement","attr":"nat"}}}]}"#;
+    let def_id = normalize_rule_definition(&con, def_code).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&def_id).unwrap();
+    assert_eq!(
+        v["operations"][0]["destination"]["account"]["via"].as_i64(),
+        Some(char_id),
+        "via dans destination.map doit être l'id"
+    );
+
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES ('RMAP', 'test_map', ?)",
+        duckdb::params![def_id],
+    )
+    .unwrap();
+    let n = run_one(&con, "RMAP");
+    assert_eq!(n, 1, "destination map avec via=id doit exécuter");
+    assert_eq!(scount(&con, "account='471L' AND nature='1AJUST'"), 1, "compte + nature mappés");
+}

@@ -347,7 +347,10 @@ impl<'a> OperandResolver for IndicatorResolver<'a> {
             load_aggregate_def(self.con, name).map_err(|e| e.to_string())?
         };
         if let Some(def) = agg_def {
-            let agg = parse_aggregate(&def)?;
+            // Dénormaliser avant parsing : la DB stocke `via` en ids entiers (étape 6b).
+            let def_denorm = denormalize_aggregate_definition(self.con, &def)
+                .map_err(|e| e.to_string())?;
+            let agg = parse_aggregate(&def_denorm)?;
             let mut b = self.builder.borrow_mut();
             let sql = build_aggregate_sql(self.con, &mut b, name, &agg)?;
             return Ok(Resolved {

@@ -48,6 +48,7 @@
 use crate::characteristics;
 use crate::dimensions;
 use crate::formula::CoeffJoins;
+use crate::json_migration;
 use crate::pipeline::materialize_closures::materialize_closures;
 use crate::references;
 use duckdb::{params, params_from_iter, types::Value as DbValue, Connection};
@@ -1590,7 +1591,11 @@ pub fn run_ruleset(
     let mut total_generated = 0usize;
 
     for (rule_code, definition_json) in &rules {
-        let definition = parse_definition(definition_json, &ctx).map_err(duckdb_synthesis_error)?;
+        // Dénormaliser avant parsing : la DB stocke `via` en ids entiers (étape 6b),
+        // mais le parser attend des codes de caractéristiques (strings).
+        let definition_json_denorm = json_migration::denormalize_rule_definition(con, definition_json)
+            .map_err(|e| duckdb_synthesis_error(e.to_string()))?;
+        let definition = parse_definition(&definition_json_denorm, &ctx).map_err(duckdb_synthesis_error)?;
 
         // Niveaux distincts touchés par les opérations de la règle.
         let levels: BTreeSet<&str> = definition
@@ -1695,7 +1700,10 @@ pub fn run_ruleset_at_level(
 
     let mut results: Vec<RuleResult> = Vec::new();
     for (rule_code, definition_json) in &rules {
-        let definition = parse_definition(definition_json, &ctx).map_err(duckdb_synthesis_error)?;
+        // Dénormaliser avant parsing : la DB stocke `via` en ids entiers (étape 6b).
+        let definition_json_denorm = json_migration::denormalize_rule_definition(con, definition_json)
+            .map_err(|e| duckdb_synthesis_error(e.to_string()))?;
+        let definition = parse_definition(&definition_json_denorm, &ctx).map_err(duckdb_synthesis_error)?;
         let has_ops_here = definition.operations.iter().any(|op| op.level == level);
         if !has_ops_here {
             continue;
