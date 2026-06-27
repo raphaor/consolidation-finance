@@ -596,6 +596,7 @@ function CharacteristicDetail({
   notifyErr: (err: unknown) => void;
   onChanged: () => Promise<void>;
 }) {
+  const [editLibelle, setEditLibelle] = useState<string | null>(null);
   const [values, setValues] = useState<Row[]>([]);
   const [optCache, setOptCache] = useState<Record<string, Opt[]>>({});
   const [newField, setNewField] = useState({
@@ -629,6 +630,7 @@ function CharacteristicDetail({
   }, [char, loadOptions, notifyErr]);
 
   useEffect(() => {
+    setEditLibelle(null);
     setNewValue({});
     setAssignForm({ member: '', value: '' });
     void reload();
@@ -690,6 +692,19 @@ function CharacteristicDetail({
     }
   }
 
+  async function saveLibelle(e: FormEvent) {
+    e.preventDefault();
+    if (editLibelle === null) return;
+    try {
+      await api.characteristics.update(char.code, { libelle: editLibelle });
+      onNotice({ kind: 'success', text: 'Libellé mis à jour.' });
+      setEditLibelle(null);
+      await onChanged();
+    } catch (err) {
+      notifyErr(err);
+    }
+  }
+
   async function submitAssign(e: FormEvent) {
     e.preventDefault();
     try {
@@ -728,6 +743,40 @@ function CharacteristicDetail({
         </h2>
         <span className="attr-badge attr-badge--char">caractéristique</span>
       </div>
+
+      {editLibelle === null ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span className="muted" style={{ fontSize: '0.875rem' }}>
+            {char.libelle || <em>sans libellé</em>}
+          </span>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => setEditLibelle(char.libelle ?? '')}
+          >
+            Modifier le libellé
+          </button>
+        </div>
+      ) : (
+        <form
+          style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}
+          onSubmit={saveLibelle}
+        >
+          <input
+            className="field__input"
+            value={editLibelle}
+            onChange={(e) => setEditLibelle(e.target.value)}
+            autoFocus
+            style={{ flex: 1 }}
+          />
+          <button type="submit" className="btn btn--sm btn--primary">
+            Enregistrer
+          </button>
+          <button type="button" className="btn btn--sm" onClick={() => setEditLibelle(null)}>
+            Annuler
+          </button>
+        </form>
+      )}
 
       <div className="rule-op-summary">
         <span className="rule-op-summary__tag">en clair</span>
@@ -1143,6 +1192,7 @@ function ListesTab({
 }) {
   const [newList, setNewList] = useState({ code: '', libelle: '' });
   const [selected, setSelected] = useState<string | null>(null);
+  const [editLibelle, setEditLibelle] = useState<string | null>(null);
   const [values, setValues] = useState<Row[]>([]);
   const [newValue, setNewValue] = useState({ code: '', libelle: '' });
 
@@ -1163,6 +1213,7 @@ function ListesTab({
   );
 
   useEffect(() => {
+    setEditLibelle(null);
     if (selectedList) {
       setNewValue({ code: '', libelle: '' });
       void reloadValues(selectedList.code);
@@ -1170,6 +1221,19 @@ function ListesTab({
       setValues([]);
     }
   }, [selectedList, reloadValues]);
+
+  async function saveListLibelle(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedList || editLibelle === null) return;
+    try {
+      await api.valueLists.update(selectedList.code, { libelle: editLibelle });
+      onNotice({ kind: 'success', text: 'Libellé mis à jour.' });
+      setEditLibelle(null);
+      await reloadAll();
+    } catch (err) {
+      notifyErr(err);
+    }
+  }
 
   async function submitNewList(e: FormEvent) {
     e.preventDefault();
@@ -1299,7 +1363,49 @@ function ListesTab({
             </div>
           ) : (
             <div className="rule-section">
-              <h3 className="rule-section__title">{selectedList.code} — valeurs</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <h3 className="rule-section__title" style={{ margin: 0 }}>
+                  {selectedList.code}
+                </h3>
+                {editLibelle === null ? (
+                  <>
+                    <span className="muted" style={{ fontSize: '0.875rem' }}>
+                      {selectedList.libelle || <em>sans libellé</em>}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      onClick={() => setEditLibelle(selectedList.libelle ?? '')}
+                    >
+                      Modifier le libellé
+                    </button>
+                  </>
+                ) : (
+                  <form
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}
+                    onSubmit={saveListLibelle}
+                  >
+                    <input
+                      className="field__input"
+                      value={editLibelle}
+                      onChange={(e) => setEditLibelle(e.target.value)}
+                      autoFocus
+                      style={{ flex: 1 }}
+                    />
+                    <button type="submit" className="btn btn--sm btn--primary">
+                      Enregistrer
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      onClick={() => setEditLibelle(null)}
+                    >
+                      Annuler
+                    </button>
+                  </form>
+                )}
+              </div>
+              <h3 className="rule-section__title">Valeurs</h3>
               <div className="table-wrap">
                 <table className="grid">
                   <thead>

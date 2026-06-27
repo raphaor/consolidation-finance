@@ -298,6 +298,8 @@ export const api = {
     list: () => getJson<Characteristic[]>('/meta/characteristics'),
     create: (body: { code: string; libelle: string; base_dimension: string }) =>
       postJsonRaw<{ code: string }>('/meta/characteristics', body),
+    update: (code: string, body: { libelle: string }) =>
+      putJson<{ code: string; libelle: string }>(`/meta/characteristics/${code}`, body),
     remove: (code: string) =>
       deleteJson<{ deleted: string }>(`/meta/characteristics/${code}`),
     addAttribute: (
@@ -324,6 +326,8 @@ export const api = {
     list: () => getJson<ValueList[]>('/meta/value-lists'),
     create: (body: { code: string; libelle: string }) =>
       postJsonRaw<{ code: string }>('/meta/value-lists', body),
+    update: (code: string, body: { libelle: string }) =>
+      putJson<{ code: string; libelle: string }>(`/meta/value-lists/${code}`, body),
     remove: (code: string) =>
       deleteJson<{ deleted: string }>(`/meta/value-lists/${code}`),
     listValues: (code: string) =>
