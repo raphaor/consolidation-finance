@@ -13,7 +13,7 @@ codes-renommables, branche `feat/renommage-codes`, voir
 
 ### Où on en est (2026-06-28 — état final)
 
-**Étapes 0–7 + étape 5.1 + étape 6b terminées. Smoke-tests runtime étape 5 partiellement validés.**
+**Étapes 0–7 + étape 5.1 + étape 6b + étape 7b terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
 - **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
   `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
@@ -554,11 +554,16 @@ depuis les données existantes (jamais de reseed).
    `dim_consolidation.ruleset_code` (`ri()` → non affecté).
    Robustesse base : `CHECKPOINT` après migrations/import/reset/rename (sinon WAL
    DuckDB irrejouable au redémarrage). Import B1-aware (restaure un export en codes).
-7b. **Renommage code de caractéristique / liste de valeurs** (sujet B, dépend de 6b) —
-   étendre `rename_code` (ou endpoint dédié) pour `dim_characteristic` /
-   `dim_value_list` : `UPDATE … SET code = ? WHERE code = ?`, cascade dans
-   `stg_entry` si nécessaire. Exposer le bouton « Renommer » dans la page
-   Caractéristiques et la page Listes de valeurs.
+7b. ✅ **Renommage code de caractéristique / liste de valeurs** (livré 2026-06-29) —
+   - `characteristics.rs` : `rename_characteristic_code()` — `UPDATE dim_characteristic`,
+     cascade `dim_characteristic_attribute.characteristic_code`, `ALTER TABLE … RENAME COLUMN`
+     sur la master data de la dimension de base. Route `POST /api/meta/characteristics/{code}/rename`.
+   - `value_lists.rs` : `rename_value_list_code()` — `UPDATE dim_value_list`, cascade
+     `dim_characteristic_attribute.target_dimension` + `dim_custom_reference.target_dimension`.
+     Route `POST /api/meta/value-lists/{code}/rename`. Table `lst_<id>` inchangée (gain B1).
+   - `api.ts` : `api.characteristics.rename()` + `api.valueLists.rename()`.
+   - `CaracteristiquesPage.tsx` : bouton « Renommer le code » inline dans
+     `CharacteristicDetail` et dans `ListesTab`. 19 tests rules, 0 échec.
 8. **Retirer les chemins code-based** résiduels + finaliser la migration
    in-place versionnée (§7).
 
