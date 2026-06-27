@@ -33,26 +33,22 @@ codes-renommables, branche `feat/renommage-codes`, voir
   pipeline, perimeter/method, consolidations — aucun bug runtime détecté.
 - Fait : **étapes 0, 1, 2, 3, 4, 5, 6, 7** entièrement.
 
-### Prochaine étape : **smoke-test étape 5** + optionnel : `via` dans JSON
+### Prochaine étape : smoke-tests runtime étape 5
 
-**À valider par l'utilisateur (serveur runtime) :**
-- Créer une caractéristique, vérifier `car_1` créé.
-- Créer une liste de valeurs, vérifier `lst_1` créé.
+**À valider par l'utilisateur (serveur) :**
+- Créer une caractéristique → vérifier `car_1` dans DuckDB.
+- Créer une liste de valeurs → vérifier `lst_1`.
 - Renommer un code de dimension → pas de blocage sur `car_*`/`lst_*`.
-- POST /api/reset → `car_1`/`lst_1` survivent, reapply OK.
+- `POST /api/reset` → `car_1`/`lst_1` survivent, colonnes de rattachement réappliquées.
 
 **Différé (scope réduit étape 5) :**
-
-**✅ TERMINÉ (2026-06-27bis)** — scope réduit (tables seulement) :
-- `car_<code>` → `car_<id>` ✅
-- `lst_<code>` → `lst_<id>` ✅
-- Attributs N2 `c<id>` : **différé**
-- Colonnes custom `x<id>` : **différé**
-- Référence directe `r<id>` : **différé**
+- Colonnes attributs N2 : `<attr_code>` sur `car_<id>` → `c<attr_id>` (non fait)
+- Colonnes custom : `<name>` sur `fact_entry`/`stg_entry` → `x<id>` (non fait)
+- Colonnes références directes : `<col>` sur `dim_<host>` → `r<id>` (non fait)
 
 **Ce que ça débloque :**
-- `via` dans les JSON de règles/postes migrables vers ids (étape 6 résiduelle)
-- Création de dimensions custom (chantier gelé §11)
+- Migration `via` dans les JSON de règles/postes vers ids (étape 6 résiduelle)
+- Création de dimensions custom sans blocage (chantier gelé §11)
 
 ### Détail étape 6 (JSON → ids)
 
