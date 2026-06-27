@@ -346,10 +346,44 @@ fn find_table(api: &str) -> Option<&'static TableDef> {
 /// Nom d'API (master data) correspondant à une table SQL, s'il en existe un.
 /// Sert à traduire les cibles du graphe de références (`references.rs` raisonne
 /// en noms SQL) vers les identifiants que le front consomme (`/api/md/{table}`).
-/// Pour les tables dynamiques (`car_<code>`, `lst_<code>`), le nom SQL est aussi
-/// le nom d'API — on le renvoie tel quel.
+/// Pour les tables statiques, délègue à `api_name_for_sql`. Pour les tables
+/// dynamiques (`car_<id>`, `lst_<id>` après B1 étape 5), résout l'id → code
+/// depuis les registres pour produire le nom d'API attendu (`car_<code>`,
+/// `lst_<code>`).
 fn sql_to_api(sql: &str) -> String {
     api_name_for_sql(sql).unwrap_or(sql).to_string()
+}
+
+/// Variante db-aware de [`sql_to_api`] — nécessaire pour les tables dynamiques
+/// dont le nom physique SQL diffère du nom d'API (B1 étape 5 : `car_<id>` /
+/// `lst_<id>` côté SQL, `car_<code>` / `lst_<code>` côté API).
+fn sql_to_api_dyn(con: &duckdb::Connection, sql: &str) -> String {
+    if let Some(api) = api_name_for_sql(sql) {
+        return api.to_string();
+    }
+    if let Some(id_str) = sql.strip_prefix("car_") {
+        if let Ok(id) = id_str.parse::<i64>() {
+            if let Ok(code) = con.query_row(
+                "SELECT code FROM dim_characteristic WHERE id = ?",
+                [id],
+                |r| r.get::<_, String>(0),
+            ) {
+                return format!("car_{code}");
+            }
+        }
+    }
+    if let Some(id_str) = sql.strip_prefix("lst_") {
+        if let Ok(id) = id_str.parse::<i64>() {
+            if let Ok(code) = con.query_row(
+                "SELECT code FROM dim_value_list WHERE id = ?",
+                [id],
+                |r| r.get::<_, String>(0),
+            ) {
+                return format!("lst_{code}");
+            }
+        }
+    }
+    sql.to_string()
 }
 
 /// Variante stricte (tables natives uniquement) — utilisée par les endpoints
@@ -1353,7 +1387,7 @@ async fn table_schema(
         .map(|name| {
             let pk = def.pk.iter().any(|p| p == name);
             let fk = refs.iter().find(|r| r.column == *name).map(|r| FkTarget {
-                table: sql_to_api(&r.target_table),
+                table: sql_to_api_dyn(&con, &r.target_table),
                 // FK à contrat code : on expose la colonne d'affichage (code) afin
                 // que le dropdown propose/soumette des codes, même si le stockage
                 // est en `id` (traduit côté serveur).
@@ -1409,9 +1443,9 @@ async fn get_references(
     let out = references::all_references(&con)
         .into_iter()
         .map(|r| ReferenceDto {
-            table: sql_to_api(&r.table),
+            table: sql_to_api_dyn(&con, &r.table),
             column: r.column.clone(),
-            target_table: sql_to_api(&r.target_table),
+            target_table: sql_to_api_dyn(&con, &r.target_table),
             // FK à contrat code : on expose la colonne **code** (et non `id`), pour
             // que le front (qui manipule des codes) reste aligné — cf. table_schema.
             target_column: r
@@ -1527,9 +1561,9 @@ async fn get_data_health(
         }
         total += count;
         checks.push(OrphanCheck {
-            table: sql_to_api(tbl),
+            table: sql_to_api_dyn(&con, tbl),
             column: col.to_string(),
-            target_table: sql_to_api(tt),
+            target_table: sql_to_api_dyn(&con, tt),
             target_column: tc.to_string(),
             count,
             sample,
