@@ -42,7 +42,77 @@ const postesIndicateursContent = (
       Ce sont les briques du moteur de formules qui permettent de créer des mesures dérivées à partir des données consolidées.
     </p>
 
-    <h2>1. Postes (dim_aggregate)</h2>
+    <h2>1. Ordre de calcul des postes</h2>
+    <p>
+      Les postes sont toujours calculés <strong>APRÈS</strong> le pipeline de consolidation et les règles de consolidation.
+      Ils ne modifient jamais les données de base (<code>fact_entry</code>) et ne participent pas au pipeline.
+    </p>
+
+    <h3>Ordre d'exécution complet</h3>
+    <pre>
+{`1. Pipeline de consolidation
+   ├─ corporate (agrégation stg_entry)
+   ├─ converted (conversion multi-devises)
+   └─ consolidated (méthodes + RÈGLES)
+      └─ Les règles s'exécutent APRÈS les automatismes de niveau
+
+2. Calcul des postes (à la demande)
+   ├─ Sur fact_entry consolidé
+   ├─ Via SQL : SUM(amount) FILTER (WHERE ...)
+   └─ Les postes ne modifient PAS fact_entry`}
+    </pre>
+
+    <h3>Automatismes vs Règles</h3>
+    <p>À un niveau donné du pipeline, l'ordre d'exécution est :</p>
+    <ol>
+      <li><strong>Automatismes du niveau</strong> s'exécutent d'abord sur les données du pipeline (ex : conversion au niveau converted, reconstruction des clôtures F99)</li>
+      <li><strong>Puis les règles</strong> sélectionnent sur ce niveau <strong>achevé</strong></li>
+      <li>Les écritures générées sont ajoutées à ce même niveau <strong>sans re-déclencher les automatismes</strong></li>
+    </ol>
+
+    <h2>2. Deux types de postes</h2>
+    <p>Il existe deux concepts distincts de « postes » dans le système :</p>
+
+    <h3>2.1 Postes hiérarchiques (comptes parents)</h3>
+    <p>
+      Ce sont les totaux des comptes parents dans la hiérarchie du plan de compte (via la référence directe <code>compte_parent</code>).
+    </p>
+
+    <h4>Caractéristiques</h4>
+    <ul>
+      <li><strong>JAMAIS stockés</strong> en base comme des écritures</li>
+      <li><strong>Calculés à la demande</strong> uniquement lors des restitutions (bilan par flux)</li>
+      <li>L'agrégation se fait via <code>SUM(amount)</code> au moment de l'affichage</li>
+      <li>Ne participent <strong>PAS</strong> au pipeline de consolidation</li>
+    </ul>
+
+    <h4>Calcul SQL</h4>
+    <pre>
+{`SELECT da.code AS account, df.code AS flow, SUM(f.amount) AS amount
+ FROM fact_entry f
+ JOIN dim_account da ON da.id = f.account
+ WHERE f.level = ?
+ GROUP BY da.code, df.code`}
+    </pre>
+
+    <h4>Références circulaires</h4>
+    <p>NON possible — structure arborescente (un seul parent par compte)</p>
+
+    <h3>2.2 Postes nommés (dim_aggregate)</h3>
+    <p>
+      Ce sont des sélections nommées réutilisables sur <code>fact_entry</code> (ex: « CA » = tous les comptes de vente).
+      Ces postes servent de briques pour les indicateurs.
+    </p>
+
+    <h4>Caractéristiques</h4>
+    <ul>
+      <li><strong>Compilés en SQL</strong> : <code>SUM(e.amount) FILTER (WHERE level=... AND &lt;sélection&gt;)</code></li>
+      <li><strong>Calculés à la demande</strong> via API <code>/api/indicators/preview</code></li>
+      <li><strong>Ne sont JAMAIS réinjectés</strong> dans <code>fact_entry</code></li>
+      <li>Peuvent être définis à n'importe quel niveau (<code>corporate</code>, <code>converted</code>, <code>consolidated</code>)</li>
+    </ul>
+
+    <h2>3. Postes (dim_aggregate) - Définition détaillée</h2>
     <h3>Définition</h3>
     <p>
       Un <strong>Poste</strong> est une sélection nommée sur la table <code>fact_entry</code>, agrégée en un montant signé.
@@ -104,7 +174,7 @@ const postesIndicateursContent = (
     <h3>Utilisation</h3>
     <p>Les postes sont des <strong>opérandes</strong> insérables dans les formules d'indicateurs via la syntaxe <code>[code_poste]</code>.</p>
 
-    <h2>2. Indicateurs (dim_indicator)</h2>
+    <h2>4. Indicateurs (dim_indicator)</h2>
     <h3>Définition</h3>
     <p>
       Un <strong>Indicateur</strong> est une <strong>formule</strong> combinant des postes et d'autres indicateurs,
@@ -156,7 +226,7 @@ GROUP BY entity`}
       <li><strong>Jamais réinjecté</strong> dans <code>fact_entry</code> — couche de présentation uniquement</li>
     </ul>
 
-    <h2>3. Relation entre Postes et Indicateurs</h2>
+    <h2>5. Relation entre Postes et Indicateurs</h2>
     <pre>
 {`Postes (dim_aggregate)
    ↓
@@ -176,7 +246,7 @@ Résultats affichés (rapports, dashboard)`}
       <li>Les indicateurs peuvent <strong>référencer d'autres indicateurs</strong> (avec détection de cycle)</li>
     </ul>
 
-    <h2>4. Persistance et API</h2>
+    <h2>6. Persistance et API</h2>
     <h3>Stockage</h3>
     <p>Les deux objets survivent au reset de la base (registre hors <code>ALL_DROP</code>) :</p>
     <ul>
@@ -194,7 +264,7 @@ Résultats affichés (rapports, dashboard)`}
       <li><code>POST /api/indicators/preview</code> — évaluation sans sauvegarde</li>
     </ul>
 
-    <h2>5. UI et ergonomie</h2>
+    <h2>7. UI et ergonomie</h2>
     <h3>Page Postes</h3>
     <ul>
       <li>Liste des postes existants (code, niveau)</li>
@@ -212,7 +282,51 @@ Résultats affichés (rapports, dashboard)`}
       <li>Format d'affichage (nombre, %, ratio)</li>
     </ul>
 
-    <h2>6. Sécurité SQL</h2>
+    <h2>6. Résolution des dépendances et références circulaires</h2>
+    <h3>Moteur de résolution</h3>
+    <p>Pour les <strong>indicateurs</strong> qui combinent des postes et d'autres indicateurs :</p>
+    <ul>
+      <li>Le moteur détecte automatiquement les dépendances entre indicateurs</li>
+      <li><strong>Détection de cycles</strong> : rejette les références circulaires à la compilation</li>
+      <li>Résolution en <strong>une seule requête SQL ensembliste</strong></li>
+    </ul>
+
+    <h3>Compilation d'un indicateur</h3>
+    <pre>
+{`SELECT entity,
+       SAFE_DIVIDE( SUM(e.amount) FILTER (WHERE <sél. résultat>),
+                    SUM(e.amount) FILTER (WHERE <sél. ca>) ) AS marge_op
+FROM fact_entry e
+WHERE e.consolidation_id = ?
+GROUP BY entity`}
+    </pre>
+    <p>Chaque poste devient un <code>SUM(amount) FILTER (WHERE …)</code>, la formule devient de l'arithmétique dans le <code>SELECT</code>.</p>
+
+    <h3>Gestion des références circulaires</h3>
+    <table className="help-table">
+      <thead>
+        <tr>
+          <th>Type de référence</th>
+          <th>Circulaire possible ?</th>
+          <th>Mécanisme</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Postes hiérarchiques</strong> (compte_parent)</td><td>NON</td><td>Structure arborescente (un seul parent par compte)</td></tr>
+        <tr><td><strong>Indicateurs</strong> (postes → indicateurs)</td><td>NON</td><td>Détection automatique à la compilation</td></tr>
+        <tr><td><strong>Postes nommés</strong> → indicateurs</td><td>NON</td><td>Détecté à la compilation des formules</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Ordre de calcul des indicateurs</h3>
+    <p>Pour un indicateur qui référence d'autres indicateurs :</p>
+    <ol>
+      <li>Le moteur construit le <strong>graphe de dépendances</strong></li>
+      <li>Il détecte les <strong>cycles</strong> (A → B → A) et les rejette</li>
+      <li>Il compile la formule en <strong>une seule requête SQL</strong> où chaque référence devient un agrégat conditionnel</li>
+    </ol>
+
+    <h2>7. Sécurité SQL</h2>
     <p>
       Identifiants (dimensions, <code>via</code>/<code>ref</code>/<code>attr</code>, <code>level</code>, grain) <strong>validés contre des whitelists</strong> dérivées du registre.
       Seules les valeurs utilisateur passent par des paramètres <code>?</code> — aucune interpolation brute.

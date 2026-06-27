@@ -1167,6 +1167,71 @@ function RuleFormModal({
 }
 
 // =================================================================
+// Modal de renommage de code (règle ou jeu de règles)
+// =================================================================
+
+interface RenameModalProps {
+  oldCode: string;
+  entityLabel: string;
+  onConfirm: (newCode: string) => Promise<void>;
+  onCancel: () => void;
+}
+
+function RenameModal({ oldCode, entityLabel, onConfirm, onCancel }: RenameModalProps) {
+  const [newCode, setNewCode] = useState(oldCode);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const trimmed = newCode.trim();
+    if (!trimmed || trimmed === oldCode) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onConfirm(trimmed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'erreur');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal__backdrop" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal__header">Renommer {entityLabel} « {oldCode} »</div>
+        <form className="modal__body" onSubmit={submit}>
+          <label className="field">
+            <span>Nouveau code •</span>
+            <input
+              type="text"
+              value={newCode}
+              onChange={(e) => setNewCode(e.target.value)}
+              required
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+            />
+          </label>
+          {error && <div className="alert alert--error" style={{ marginTop: 8 }}>{error}</div>}
+          <div className="form-actions">
+            <button type="button" className="btn" onClick={onCancel} disabled={submitting}>
+              Annuler
+            </button>
+            <button
+              type="submit"
+              className="btn btn--primary"
+              disabled={submitting || newCode.trim() === oldCode || !newCode.trim()}
+            >
+              {submitting ? 'Renommage…' : 'Renommer'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// =================================================================
 // Modal d'édition d'un jeu de règles
 // =================================================================
 
@@ -1389,6 +1454,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
     | { mode: 'duplicate'; draft: RuleDraft }
     | null
   >(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1421,6 +1487,17 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
       }
     },
     [load],
+  );
+
+  const handleRename = useCallback(
+    async (newCode: string) => {
+      if (!renaming) return;
+      await api.masterData.rename('rules', renaming, newCode);
+      setNotice({ kind: 'success', text: `Règle renommée : ${renaming} → ${newCode}.` });
+      setRenaming(null);
+      await load();
+    },
+    [renaming, load],
   );
 
   const openEdit = useCallback(async (code: string) => {
@@ -1507,6 +1584,13 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
             </button>
             <button
               type="button"
+              className="btn btn--sm"
+              onClick={() => setRenaming(info.row.original.code)}
+            >
+              Renommer
+            </button>
+            <button
+              type="button"
               className="btn btn--sm btn--danger"
               onClick={() => void handleDelete(info.row.original.code)}
             >
@@ -1516,7 +1600,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         ),
       },
     ],
-    [openEdit, openDuplicate, handleDelete],
+    [openEdit, openDuplicate, handleRename, handleDelete],
   );
 
   const table = useReactTable({
@@ -1627,6 +1711,14 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
           onCancel={() => setForm(null)}
         />
       )}
+      {renaming !== null && (
+        <RenameModal
+          oldCode={renaming}
+          entityLabel="la règle"
+          onConfirm={handleRename}
+          onCancel={() => setRenaming(null)}
+        />
+      )}
     </>
   );
 }
@@ -1647,6 +1739,7 @@ function JeuxTab() {
     | { mode: 'edit'; draft: RulesetDraft }
     | null
   >(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1704,6 +1797,17 @@ function JeuxTab() {
     [load],
   );
 
+  const handleRenameRuleset = useCallback(
+    async (newCode: string) => {
+      if (!renaming) return;
+      await api.masterData.rename('rulesets', renaming, newCode);
+      setNotice({ kind: 'success', text: `Jeu renommé : ${renaming} → ${newCode}.` });
+      setRenaming(null);
+      await load();
+    },
+    [renaming, load],
+  );
+
   async function handleSubmit(draft: RulesetDraft) {
     const payloadItems = draft.items.map((it) => ({
       ordre: it.ordre,
@@ -1754,6 +1858,13 @@ function JeuxTab() {
               </button>
               <button
                 type="button"
+                className="btn btn--sm"
+                onClick={() => setRenaming(code)}
+              >
+                Renommer
+              </button>
+              <button
+                type="button"
                 className="btn btn--sm btn--danger"
                 onClick={() => void handleDelete(code)}
               >
@@ -1764,7 +1875,7 @@ function JeuxTab() {
         },
       },
     ],
-    [openEdit, handleDelete],
+    [openEdit, handleRenameRuleset, handleDelete],
   );
 
   const table = useReactTable({
@@ -1867,6 +1978,14 @@ function JeuxTab() {
           ruleOptions={ruleOptions}
           onSubmit={handleSubmit}
           onCancel={() => setForm(null)}
+        />
+      )}
+      {renaming !== null && (
+        <RenameModal
+          oldCode={renaming}
+          entityLabel="le jeu de règles"
+          onConfirm={handleRenameRuleset}
+          onCancel={() => setRenaming(null)}
         />
       )}
     </>
