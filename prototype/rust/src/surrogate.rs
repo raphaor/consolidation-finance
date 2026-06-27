@@ -593,11 +593,10 @@ pub fn migrate_fact_entry_to_ids(con: &Connection) -> duckdb::Result<()> {
          DROP TABLE fact_entry;
          ALTER TABLE fact_entry__b1 RENAME TO fact_entry;"
     ))?;
-    // Réapplique les colonnes custom (dimensions analytiques) perdues lors de
-    // la reconstruction (les customs TEXT ne sont pas dans DDL_FACT_ENTRY).
+    // Réapplique les colonnes custom (colonnes physiques x{id}, B1 étape 10).
     let customs = crate::dimensions::load_customs(con).unwrap_or_default();
     for d in &customs {
-        let _ = con.execute(&format!("ALTER TABLE fact_entry ADD COLUMN {} TEXT", d.name), []);
+        let _ = con.execute(&format!("ALTER TABLE fact_entry ADD COLUMN {} TEXT", d.col), []);
     }
     // Mise à jour de la vue v_flow_behavior → définition id-aware.
     let _ = con.execute_batch("DROP VIEW IF EXISTS v_flow_behavior");
@@ -684,6 +683,47 @@ pub fn migrate_attribute_columns_to_id(con: &Connection) -> duckdb::Result<()> {
             &format!("ALTER TABLE {car_table} RENAME COLUMN \"{attr_name}\" TO \"{new_col}\""),
             [],
         )?;
+    }
+    Ok(())
+}
+
+/// Migration B1 étape 10 : renomme les colonnes custom `<name>` → `x<id>` sur
+/// `fact_entry` et `stg_entry`. Idempotent.
+///
+/// Après `migrate_fact_entry_to_ids` (étape 4), les colonnes custom de
+/// `fact_entry` portent encore le nom API si la table a été reconstruite avec
+/// l'ancien code. Cette migration les passe au nom physique stable. Idem pour
+/// `stg_entry`.
+///
+/// À appeler au démarrage serveur **après** [`migrate_fact_entry_to_ids`] et
+/// [`ensure_ids`] (`dim_custom_dimension` doit déjà avoir ses `id`).
+pub fn migrate_custom_dimension_columns_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_custom_dimension")? {
+        return Ok(());
+    }
+    let customs: Vec<(String, i64)> = {
+        let mut stmt =
+            con.prepare("SELECT name, id FROM dim_custom_dimension ORDER BY name")?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<duckdb::Result<_>>()?
+    };
+    for (name, id) in customs {
+        let new_col = format!("x{id}");
+        for table in &["fact_entry", "stg_entry"] {
+            if !table_exists(con, table)? {
+                continue;
+            }
+            if column_exists(con, table, &new_col)? {
+                continue; // déjà migré
+            }
+            if !column_exists(con, table, &name)? {
+                continue; // colonne absente (base fraîche ou déjà renommée)
+            }
+            con.execute(
+                &format!("ALTER TABLE {table} RENAME COLUMN \"{name}\" TO \"{new_col}\""),
+                [],
+            )?;
+        }
     }
     Ok(())
 }

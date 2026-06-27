@@ -2390,6 +2390,261 @@ REEL,A,2024,2024,400,F20,USD,0LIASS,,,,LIASSE_A_2024,-2000.00`}
   </div>
 );
 
+const controlesContent = (
+  <div className="help-content">
+    <h2>Vue d'ensemble</h2>
+    <p>
+      Les <strong>contrôles de données</strong> permettent de vérifier la cohérence et la complétude des données saisies et/ou consolidées.
+      Chaque contrôle sélectionne des données, les agrège par grain, et évalue des assertions (seuils, non-nullité, existence).
+      Les contrôles s'exécutent <strong>à la demande</strong> (bouton) et produisent un rapport différenciant les contrôles réussis, en warning, en erreur, ou sans objet.
+    </p>
+
+    <h2>1. Modèle d'un contrôle</h2>
+    <pre>
+{`CONTRÔLE
+├── Identité : code, libellé
+├── Niveaux cibles : 1 à 4 parmi (raw, corporate, converted, consolidated)
+├── Grain : dimensions de regroupement (entity, partner, account, ...)
+├── Sélection : filtres sur les données
+├── Expression : formule optionnelle (par défaut SUM(amount))
+├── Assertions : 1 à N règles de validation
+└── Comparaison inter-périodes (optionnel)`}
+    </pre>
+
+    <h2>2. Niveaux cibles</h2>
+    <p>Un contrôle peut cibler <strong>plusieurs niveaux</strong> simultanément. Le moteur exécute le contrôle une fois par niveau et produit un rapport séparé.</p>
+
+    <table className="help-table">
+      <thead>
+        <tr>
+          <th>Niveau</th>
+          <th>Source</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>raw</code></td><td><code>stg_entry</code></td><td>Données brutes saisies (CSV, saisie manuelle). Filtres sur codes TEXT.</td></tr>
+        <tr><td><code>corporate</code></td><td><code>fact_entry</code></td><td>Données après agrégation. Filtres sur IDs résolus.</td></tr>
+        <tr><td><code>converted</code></td><td><code>fact_entry</code></td><td>Données après conversion multi-devises.</td></tr>
+        <tr><td><code>consolidated</code></td><td><code>fact_entry</code></td><td>Données après application des méthodes et règles.</td></tr>
+      </tbody>
+    </table>
+
+    <p>Cela évite de dupliquer un contrôle qui s'applique à tous les niveaux.</p>
+
+    <h2>3. Grain</h2>
+    <p>Le grain définit le niveau de détail du contrôle. Le moteur agrège les données <code>GROUP BY &lt;grain&gt;</code> et évalue l'assertion pour chaque combinaison de valeurs.</p>
+
+    <h3>Exemples</h3>
+    <ul>
+      <li><code>["entity"]</code> → contrôle par entité</li>
+      <li><code>["entity", "partner"]</code> → contrôle par paire entité/partenaire (éliminations IC)</li>
+      <li><code>[]</code> (vide) → contrôle sur le total (ex : le bilan est-il équilibré ?)</li>
+    </ul>
+
+    <h2>4. Sélection</h2>
+    <p>Même modèle que les postes et les règles : filtres sur les dimensions avec opérateurs <code>=</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>IN</code>, <code>IS NULL</code>, <code>IS NOT NULL</code>, et traversées <code>via</code> / <code>ref</code> / <code>attr</code>.</p>
+
+    <h3>Traversées</h3>
+    <ul>
+      <li><strong>via</strong> : caractéristique N1 (regroupement). Ex : <code>account.comportement = 'VENTES'</code></li>
+      <li><strong>ref</strong> : référence directe. Ex : <code>account.compte_parent = '60'</code></li>
+      <li><strong>attr</strong> : enum natif. Ex : <code>account.classe = 'bilan'</code></li>
+    </ul>
+
+    <h2>5. Expression</h2>
+    <p>Formule optionnelle utilisant le moteur de formules. Si omise, le moteur calcule <code>SUM(amount)</code> sur la sélection.</p>
+    <p>L'expression peut utiliser les fonctions : <code>ABS</code>, <code>MIN</code>, <code>MAX</code>, <code>SAFE_DIV</code>, <code>IF</code>, <code>ROUND</code>.</p>
+
+    <h3>Contraintes par niveau</h3>
+    <ul>
+      <li><strong>Niveaux pipeline</strong> (corporate/converted/consolidated) : l'expression peut référencer des postes (<code>[code_poste]</code>) et des indicateurs (<code>[code_indicateur]</code>)</li>
+      <li><strong>Niveau raw</strong> : seules les formules arithmétiques simples sont supportées (pas de postes/indicateurs, qui portent sur <code>fact_entry</code>)</li>
+    </ul>
+
+    <h2>6. Assertions</h2>
+    <p>Chaque contrôle peut avoir <strong>plusieurs assertions</strong>. Si au moins une assertion est en <code>error</code>, le contrôle est en <code>error</code>. Sinon, si au moins une est en <code>warn</code>, le contrôle est en <code>warn</code>. Sinon, <code>pass</code>.</p>
+
+    <table className="help-table">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Signification</th>
+          <th>Paramètres</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>range</code></td><td>La valeur absolue doit être ≤ au seuil</td><td><code>warn</code>, <code>error</code></td></tr>
+        <tr><td><code>nonzero</code></td><td>La valeur agrégée doit être ≠ 0</td><td>(aucun)</td></tr>
+        <tr><td><code>existence</code></td><td>Au moins une ligne doit exister par grain</td><td>(aucun)</td></tr>
+        <tr><td><code>equals</code></td><td>La valeur doit être égale à une cible</td><td><code>target</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Statuts du rapport</h3>
+    <table className="help-table">
+      <thead>
+        <tr>
+          <th>Statut</th>
+          <th>Signification</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>✅ <code>pass</code></td><td>Toutes les assertions sont vérifiées</td></tr>
+        <tr><td>⚠️ <code>warn</code></td><td>Le seuil warning est dépassé (mais pas error)</td></tr>
+        <tr><td>❌ <code>error</code></td><td>Le seuil error est dépassé ou l'assertion est violée</td></tr>
+        <tr><td>⬜ <code>no_data</code></td><td>Aucune donnée pour ce grain (la sélection est vide)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>7. Comparaison inter-périodes</h2>
+    <p>Optionnelle. Permet de comparer les données d'une consolidation N avec une baseline (N-1 ou autre consolidation).</p>
+
+    <h3>Métriques</h3>
+    <table className="help-table">
+      <thead>
+        <tr>
+          <th>Métrique</th>
+          <th>Calcul</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>variation_abs</code></td><td><code>|N - N-1|</code></td></tr>
+        <tr><td><code>variation_pct</code></td><td><code>|(N - N-1) / N-1| × 100</code></td></tr>
+        <tr><td><code>variation</code></td><td><code>N - N-1</code> (signée)</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Baseline</h3>
+    <ul>
+      <li>Si <code>baseline_consolidation_id</code> est renseigné : compare avec cette consolidation spécifique</li>
+      <li>Si absent : le moteur déduit automatiquement la même phase N-1</li>
+      <li>La comparaison se fait <strong>par niveau</strong> : on compare <code>corporate N</code> vs <code>corporate N-1</code>, jamais de croisement</li>
+      <li>La comparaison ne s'applique <strong>pas au niveau raw</strong> (pas de notion de consolidation)</li>
+    </ul>
+
+    <h2>8. Jeux de contrôles</h2>
+    <p>Les contrôles s'assemblent en <strong>jeux de contrôles</strong> (comme les règles s'assemblent en règles de consolidation).</p>
+    <ul>
+      <li>Un jeu référence N contrôles ordonnés</li>
+      <li>L'exécution d'un jeu exécute tous ses contrôles séquentiellement</li>
+      <li>Le rapport agrège les résultats de tous les contrôles</li>
+    </ul>
+
+    <h2>9. Exemples de contrôles</h2>
+
+    <h3>Élimination IC soldée</h3>
+    <pre>
+{`Code       : CTRL_IC_SOLD
+Niveaux    : consolidated
+Grain      : [entity, partner]
+Sélection  : account IN (600, 700), flow = F99
+Assertion  : range (warn: 100, error: 1000)
+→ Vérifie que les soldes interco sont proches de 0`}
+    </pre>
+
+    <h3>CA saisi par entité</h3>
+    <pre>
+{`Code       : CTRL_CA_PRESENT
+Niveaux    : [raw, corporate]
+Grain      : [entity]
+Sélection  : account = 700
+Assertion  : nonzero
+→ Vérifie que chaque entité a saisi du chiffre d'affaires`}
+    </pre>
+
+    <h3>Variation % du CA</h3>
+    <pre>
+{`Code       : CTRL_VAR_CA
+Niveaux    : consolidated
+Grain      : [entity]
+Sélection  : account = 700
+Assertion  : range (warn: 10, error: 50)
+Comparaison: variation_pct (warn: 10%, error: 50%)
+→ Détecte les variations anormales du CA vs N-1`}
+    </pre>
+
+    <h3>Balance débit/crédit</h3>
+    <pre>
+{`Code       : CTRL_BALANCE
+Niveaux    : raw
+Grain      : [nature]
+Sélection  : (vide = toutes les écritures)
+Assertion  : range (warn: 1, error: 10)
+→ Vérifie que chaque nature est équilibrée`}
+    </pre>
+
+    <h2>10. API REST</h2>
+    <h3>Contrôles</h3>
+    <ul>
+      <li><code>GET /api/controls</code> — liste des contrôles</li>
+      <li><code>POST /api/controls</code> — créer un contrôle</li>
+      <li><code>GET /api/controls/{`{code}`}</code> — détail d'un contrôle</li>
+      <li><code>PUT /api/controls/{`{code}`}</code> — modifier un contrôle</li>
+      <li><code>DELETE /api/controls/{`{code}`}</code> — supprimer un contrôle</li>
+      <li><code>POST /api/controls/{`{code}`}/run</code> — exécuter un contrôle isolé</li>
+      <li><code>GET /api/controls/operands</code> — catalogue des opérandes (postes + indicateurs)</li>
+    </ul>
+
+    <h3>Jeux de contrôles</h3>
+    <ul>
+      <li><code>GET /api/control-sets</code> — liste des jeux</li>
+      <li><code>POST /api/control-sets</code> — créer un jeu</li>
+      <li><code>GET /api/control-sets/{`{code}`}</code> — détail d'un jeu</li>
+      <li><code>PUT /api/control-sets/{`{code}`}</code> — modifier un jeu</li>
+      <li><code>DELETE /api/control-sets/{`{code}`}</code> — supprimer un jeu</li>
+      <li><code>POST /api/control-sets/{`{code}`}/run</code> — exécuter un jeu → rapport</li>
+    </ul>
+
+    <h3>Paramètres d'exécution</h3>
+    <p>Le body de <code>POST .../run</code> accepte :</p>
+    <ul>
+      <li><code>consolidation_id</code> : integer (requis pour les niveaux pipeline)</li>
+      <li><code>phase</code> : string (requis pour le niveau raw, ex. <code>"REEL"</code>)</li>
+      <li><code>entry_period</code> : string (requis pour le niveau raw, ex. <code>"2026-12"</code>)</li>
+    </ul>
+
+    <h2>11. Interface utilisateur</h2>
+    <h3>Page Contrôles</h3>
+    <p>Accessible sous <strong>Calculs → Contrôles</strong>. Layout en split panel :</p>
+    <ul>
+      <li><strong>Colonne gauche</strong> : bibliothèque de contrôles + jeux de contrôles + paramètres d'exécution</li>
+      <li><strong>Colonne droite</strong> : éditeur de contrôle (quand un contrôle est sélectionné) ou rapport d'exécution (après exécution)</li>
+    </ul>
+
+    <h3>Éditeur de contrôle</h3>
+    <ul>
+      <li><strong>Identité</strong> : code + libellé</li>
+      <li><strong>Niveaux</strong> : multi-sélection par chips (raw, corporate, converted, consolidated)</li>
+      <li><strong>Grain</strong> : chips cliquables pour ajouter/retirer des dimensions</li>
+      <li><strong>Sélection</strong> : conditions dimensionnelles avec traversées (comme les postes)</li>
+      <li><strong>Expression</strong> : champ texte optionnel</li>
+      <li><strong>Assertions</strong> : liste dynamique avec type et paramètres</li>
+      <li><strong>Comparaison</strong> : toggle + métrique + seuils</li>
+    </ul>
+
+    <h3>Rapport d'exécution</h3>
+    <ul>
+      <li>Résumé par niveau (pass/warn/error/no_data)</li>
+      <li>Tableau des contrôles avec statut global</li>
+      <li>Détail expandable : lignes en cause avec valeur, baseline, variation</li>
+    </ul>
+
+    <h2>12. Sécurité SQL</h2>
+    <p>
+      Mêmes règles que les règles et les indicateurs : identifiants (dimensions, opérateurs, traversées) validés contre des whitelists dérivées du registre.
+      Seules les valeurs passent par des paramètres <code>?</code> — aucune interpolation brute.
+    </p>
+
+    <h3>Voir aussi</h3>
+    <ul>
+      <li><NavLink to='postes-indicateurs'>Postes et Indicateurs (opérandes des expressions)</NavLink></li>
+      <li><NavLink to='regles'>Règles de consolidation (même modèle de sélection)</NavLink></li>
+      <li><NavLink to='import-saisie'>Import et Saisie (données niveau raw)</NavLink></li>
+    </ul>
+  </div>
+);
+
 const tauxChangeContent = (
   <div className="help-content">
     <h2>Vue d'ensemble</h2>
@@ -2609,6 +2864,11 @@ const HELP_PAGES: HelpPage[] = [
     id: 'regles',
     title: 'Règles',
     content: reglesContent,
+  },
+  {
+    id: 'controles',
+    title: 'Contrôles de données',
+    content: controlesContent,
   },
   {
     id: 'schemas-flux',

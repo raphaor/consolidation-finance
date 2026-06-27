@@ -18,6 +18,7 @@ Tenus à jour avec le code. À lire avant d'implémenter.
 | [`A_NOUVEAU.md`](./A_NOUVEAU.md) | Spec du report d'ouverture (à-nouveau) : snapshot N-1 figé → F00 N. |
 | [`A_NOUVEAU_IMPL.md`](./A_NOUVEAU_IMPL.md) | Notes d'implémentation de l'à-nouveau (runtime confirmé). |
 | [`REGLES_CONSO.md`](./REGLES_CONSO.md) | Spécification de l'éditeur de règles de consolidation. |
+| [`CONTROLES_DONNEES.md`](./CONTROLES_DONNEES.md) | Spécification et plan d'implémentation des contrôles de données (validation configurable, rapports). |
 | [`FORMULES.md`](./FORMULES.md) | Spécification du moteur de formules. **Volets 1 (coefficients) et 2 (indicateurs/KPI) implémentés.** |
 | [`FLOW_SCHEME_EXPLICITE.md`](./FLOW_SCHEME_EXPLICITE.md) | Mini-spec : `flow_scheme` sans défaut (Q45), user-driven. |
 | [`TECHNIQUE.md`](./TECHNIQUE.md) | Architecture et justifications de la stack. |

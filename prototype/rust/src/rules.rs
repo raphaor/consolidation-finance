@@ -123,18 +123,16 @@ const ALLOWED_OPS: &[&str] = &[
 /// Contexte de validation construit depuis le registre des dimensions et
 /// passé aux fonctions de parsing.
 ///
-/// - `selection_dims` : toutes les dimensions propagées + `level` (qui est une
-///   colonne de `fact_entry` sans être une dimension pilotable). Construit
-///   dynamiquement depuis [`dimensions::load_all`].
-/// - `pilotable_dims` : dimensions pilotables (Active + Analytical), cibles
-///   autorisées pour `destination.<dim>`.
+/// - `selection_dims` : noms API de toutes les dimensions + `level`. Utilisé
+///   pour valider les clés de règle (JSON stocke des noms API).
+/// - `pilotable_dims` : colonnes physiques pilotables (pour INSERT/SELECT SQL).
+/// - `dim_col_map` : nom API → colonne physique (`x{id}` pour les custom).
 /// - `scope_dims` : colonnes de `sat_perimeter` autorisées dans `scope.dim`.
-///   Construit dynamiquement depuis `information_schema` (cf.
-///   [`allowed_scope_dims`]).
 #[derive(Debug, Clone)]
 pub struct RuleContext {
     pub selection_dims: Vec<String>,
     pub pilotable_dims: Vec<String>,
+    pub dim_col_map: std::collections::HashMap<String, String>,
     pub scope_dims: Vec<String>,
 }
 
@@ -150,10 +148,15 @@ impl RuleContext {
             .into_iter()
             .map(String::from)
             .collect();
+        let dim_col_map: std::collections::HashMap<String, String> = dims
+            .iter()
+            .map(|d| (d.name.clone(), d.col.clone()))
+            .collect();
         let scope_dims = allowed_scope_dims(con);
         Ok(Self {
             selection_dims,
             pilotable_dims,
+            dim_col_map,
             scope_dims,
         })
     }
@@ -931,12 +934,16 @@ fn json_to_dbvalue(v: &JsonValue) -> DbValue {
 
 /// Construit l'expression SQL de la destination pour une dimension pilotable.
 ///
-/// - `"inherit"` → `e.<dim>`
+/// - `dim` : nom API (clé dans le JSON de la règle, dans `destinations`).
+/// - `col` : colonne physique dans `fact_entry` (= `dim` pour les built-ins,
+///   `x{id}` pour les custom — B1 étape 10).
+/// - `"inherit"` → `e.<col>`
 /// - `"override", value` → pousse `value` dans `params`, renvoie `?`
 /// - `"null"` → `NULL`
 fn dest_expr(
     con: Option<&Connection>,
     dim: &str,
+    col: &str,
     destinations: &[(String, Destination)],
     params: &mut Vec<DbValue>,
 ) -> String {
@@ -945,9 +952,9 @@ fn dest_expr(
     // les modes override / map / map_ref doivent produire un id, pas un code TEXT.
     let id_typed = references::dimension_master(dim);
     match found {
-        None => format!("e.{dim}"),
+        None => format!("e.{col}"),
         Some((_, d)) => match d.mode.as_str() {
-            "inherit" => format!("e.{dim}"),
+            "inherit" => format!("e.{col}"),
             "null" => "NULL".to_string(),
             "override" => match &d.value {
                 Some(JsonValue::Number(n)) if n.as_i64().is_some() => {
@@ -964,20 +971,20 @@ fn dest_expr(
                         "?".to_string()
                     }
                 }
-                None => format!("e.{dim}"),
+                None => format!("e.{col}"),
             },
             "map" => {
                 let via = d.via.clone().unwrap_or_default();
                 let attr = d.attr.clone().unwrap_or_default();
                 // Résoudre le nom de colonne physique c{attr_id} si possible ;
                 // fallback sur le nom attr (legacy ou DB fraîche sans migration).
-                let col = con
+                let attr_col = con
                     .and_then(|c| characteristics::attr_col_for(c, &via, &attr))
                     .unwrap_or_else(|| attr.clone());
                 if let Some((table, code_col)) = id_typed {
-                    format!("(SELECT id FROM {table} WHERE {code_col} = cg_{via}.\"{col}\")")
+                    format!("(SELECT id FROM {table} WHERE {code_col} = cg_{via}.\"{attr_col}\")")
                 } else {
-                    format!("cg_{via}.\"{col}\"")
+                    format!("cg_{via}.\"{attr_col}\"")
                 }
             }
             "map_ref" => {
@@ -997,7 +1004,7 @@ fn dest_expr(
                     }
                 }
             }
-            _ => format!("e.{dim}"),
+            _ => format!("e.{col}"),
         },
     }
 }
@@ -1141,9 +1148,10 @@ fn exec_operation(
     let mut insert_parts: Vec<&str> = Vec::with_capacity(propagated.len() + 2);
 
     for dim in &propagated {
-        insert_parts.push(dim);
-        let expr = dest_expr(Some(con), dim, &op.destination, &mut params);
-        select_parts.push(format!("{expr} AS {dim}"));
+        let col = ctx.dim_col_map.get(*dim).map(|s| s.as_str()).unwrap_or(dim);
+        insert_parts.push(col);
+        let expr = dest_expr(Some(con), dim, col, &op.destination, &mut params);
+        select_parts.push(format!("{expr} AS {col}"));
     }
     // `consolidation_id` : colonne technique (hors dimensions propagées) recopiée
     // depuis le snapshot pour que les écritures de règle restent isolées dans le
@@ -1798,6 +1806,15 @@ mod tests {
                 "analysis".into(),
                 "analysis2".into(),
             ],
+            // Pour les built-ins, col == name (pas de custom dans le fixture).
+            dim_col_map: {
+                let names = [
+                    "phase", "entity", "entry_period", "period", "account",
+                    "flow", "currency", "nature", "partner", "share",
+                    "analysis", "analysis2",
+                ];
+                names.iter().map(|n| (n.to_string(), n.to_string())).collect()
+            },
             scope_dims: vec![
                 "methode".into(),
                 "pct_interet".into(),
@@ -2358,7 +2375,7 @@ mod tests {
     fn dest_expr_héritage_par_défaut_quand_dim_absente() {
         // Une dimension absente de la liste des destinations est héritée.
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr(None, "account", &[], &mut params);
+        let expr = dest_expr(None, "account", "account", &[], &mut params);
         assert_eq!(expr, "e.account", "héritage par défaut");
         assert!(params.is_empty());
     }
@@ -2376,7 +2393,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr(None, "partner", &dests, &mut params);
+        let expr = dest_expr(None, "partner", "partner", &dests, &mut params);
         assert_eq!(expr, "NULL", "mode null → NULL littéral");
         assert!(params.is_empty(), "mode null ne bind rien");
     }
@@ -2394,7 +2411,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr(None, "nature", &dests, &mut params);
+        let expr = dest_expr(None, "nature", "nature", &dests, &mut params);
         // B1 étape 4 : nature est id-typée → override code génère une sous-requête code→id.
         assert_eq!(
             expr,
@@ -2422,7 +2439,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr(None, "nature", &dests, &mut params);
+        let expr = dest_expr(None, "nature", "nature", &dests, &mut params);
         assert_eq!(expr, "?", "mode override id → liaison directe");
         assert_eq!(params.len(), 1);
         match &params[0] {
@@ -2446,7 +2463,7 @@ mod tests {
             },
         )];
         let mut params: Vec<DbValue> = Vec::new();
-        let expr = dest_expr(None, "account", &dests, &mut params);
+        let expr = dest_expr(None, "account", "account", &dests, &mut params);
         assert_eq!(
             expr,
             "(SELECT id FROM dim_account WHERE code = mdr_compte_parent.\"compte_parent\")",

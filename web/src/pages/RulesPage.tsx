@@ -127,7 +127,6 @@ const BUILTIN_DIMS_FALLBACK: DimensionInfo[] = [
 ];
 
 type Notice = { kind: 'success' | 'error'; text: string } | null;
-type Subtab = 'biblio' | 'jeux';
 type DestMode = 'inherit' | 'override' | 'null' | 'map' | 'map_ref';
 
 interface RuleDraft {
@@ -1937,11 +1936,8 @@ function JeuxTab() {
 // =================================================================
 
 export function RulesPage() {
-  const [subtab, setSubtab] = useState<Subtab>('biblio');
   const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [dimsError, setDimsError] = useState<string | null>(null);
-  // Mapping dimension → table master data, dérivé du graphe de références
-  // serveur (`GET /api/meta/references`). Fallback codé en dur si injoignable.
   const [dimToTable, setDimToTable] = useState<DimToTable>(DIM_TO_TABLE_FALLBACK);
 
   useEffect(() => {
@@ -1951,8 +1947,6 @@ export function RulesPage() {
         const refs = await api.references();
         if (!cancelled) setDimToTable(buildDimToTable(refs));
       } catch {
-        // Mode dégradé : on conserve le fallback (les dropdowns restent
-        // fonctionnels sur les dimensions built-in).
         if (!cancelled) setDimToTable(DIM_TO_TABLE_FALLBACK);
       }
     })();
@@ -1961,11 +1955,6 @@ export function RulesPage() {
     };
   }, []);
 
-  // Charge les dimensions une fois pour toutes (Bibliothèque en a besoin pour
-  // construire les listes dynamiques pilotableDims / selectionDims).
-  // En cas d'échec (serveur obsolète, /api/meta/dimensions absent), on bascule
-  // sur le fallback builtin pour que l'éditeur reste utilisable, et on signale
-  // le mode dégradé via dimsError.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2004,25 +1993,7 @@ export function RulesPage() {
         </div>
       )}
 
-      <div className="subtabs">
-        <button
-          type="button"
-          className={`subtab ${subtab === 'biblio' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('biblio')}
-        >
-          Bibliothèque
-        </button>
-        <button
-          type="button"
-          className={`subtab ${subtab === 'jeux' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('jeux')}
-        >
-          Jeux de règles
-        </button>
-      </div>
-
-      {subtab === 'biblio' && <BibliothequeTab dims={dims} />}
-      {subtab === 'jeux' && <JeuxTab />}
+      <BibliothequeTab dims={dims} />
     </section>
     </DimRefContext.Provider>
   );

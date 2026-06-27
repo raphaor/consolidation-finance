@@ -41,6 +41,7 @@
 
 pub mod characteristics;
 pub mod coefficients;
+pub mod controls;
 pub mod custom_references;
 pub mod entries;
 pub mod formula;

@@ -18,6 +18,12 @@ import type {
   Coefficient,
   CoefficientOperand,
   CoefficientPreview,
+  Control,
+  ControlDefinition,
+  ControlOperand,
+  ControlReport,
+  ControlSet,
+  ControlSetReport,
   CustomReference,
   DataHealthReport,
   Aggregate,
@@ -276,6 +282,31 @@ export const api = {
       body: { libelle?: string; expression: string; grain?: string[]; format?: string },
     ) => putJson<Indicator>(`/indicators/${code}`, { code, ...body }),
     remove: (code: string) => deleteJson<{ deleted: string }>(`/indicators/${code}`),
+  },
+  // Contrôles de données
+  controls: {
+    list: () => getJson<Control[]>('/controls'),
+    get: (code: string) => getJson<Control>(`/controls/${code}`),
+    create: (body: { code: string; libelle?: string; definition: ControlDefinition }) =>
+      postJsonRaw<Control>('/controls', body),
+    update: (code: string, body: { libelle?: string; definition: ControlDefinition }) =>
+      putJson<Control>(`/controls/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/controls/${code}`),
+    run: (code: string, params: { consolidation_id?: number; phase?: string; entry_period?: string }) =>
+      postJsonRaw<ControlReport>(`/controls/${code}/run`, params),
+    operands: () => getJson<ControlOperand[]>('/controls/operands'),
+  },
+  controlSets: {
+    list: () => getJson<ControlSet[]>('/control-sets'),
+    get: (code: string) => getJson<ControlSet>(`/control-sets/${code}`),
+    create: (body: { code: string; libelle?: string; controls: { code: string; ord?: number }[] }) =>
+      postJsonRaw<ControlSet>('/control-sets', body),
+    update: (code: string, body: { libelle?: string; controls: { code: string; ord?: number }[] }) =>
+      putJson<ControlSet>(`/control-sets/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/control-sets/${code}`),
+    run: (code: string, params: { consolidation_id?: number; phase?: string; entry_period?: string }) =>
+      postJsonRaw<ControlSetReport>(`/control-sets/${code}/run`, params),
+    results: (code: string) => getJson<ControlSetReport>(`/control-sets/${code}/results`),
   },
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.

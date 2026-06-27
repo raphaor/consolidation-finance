@@ -23,6 +23,7 @@ export type PageId =
   | 'schemas'
   | 'regles'
   | 'jeux-regles'
+  | 'controles'
   | 'coefficients'
   | 'postes'
   | 'indicateurs'
@@ -76,6 +77,7 @@ const GROUPS: Group[] = [
       { id: 'schemas', label: 'Schémas de flux' },
       { id: 'regles', label: 'Règles' },
       { id: 'jeux-regles', label: 'Jeux de règles' },
+      { id: 'controles', label: 'Contrôles' },
       { id: 'coefficients', label: 'Coefficients' },
       { id: 'postes', label: 'Postes' },
       { id: 'indicateurs', label: 'Indicateurs' },

@@ -160,14 +160,6 @@ struct QueryParts {
     stack: Vec<String>, // détection de cycle entre indicateurs
 }
 
-/// Liste des dimensions propagées (colonnes de `fact_entry`), pour valider `dim`
-/// d'une condition et les colonnes de grain.
-fn propagated_dims(con: &Connection) -> Vec<String> {
-    dimensions::load_all(con)
-        .map(|dims| dims.into_iter().map(|d| d.name).collect())
-        .unwrap_or_default()
-}
-
 /// Pousse une condition `operand op val` et renvoie le fragment SQL (avec `?`).
 fn push_condition(
     operand: &str,
@@ -233,7 +225,8 @@ fn build_aggregate_sql(
     code: &str,
     agg: &Aggregate,
 ) -> Result<String, String> {
-    let dims = propagated_dims(con);
+    let all_dims = dimensions::load_all(con).map_err(|e| e.to_string())?;
+    let dims: Vec<String> = all_dims.iter().map(|d| d.name.clone()).collect();
     let mut clauses: Vec<String> = vec![format!("e.level = '{}'", agg.level)]; // level whitelisté
     for s in &agg.selection {
         // Validation de la dimension cible.
@@ -318,7 +311,9 @@ fn build_aggregate_sql(
             format!("imdd_{}.{code_col}", s.dim)
         } else {
             // Dimension libre (analysis, analysis2, custom) : reste en TEXT.
-            format!("e.{}", s.dim)
+            // B1 étape 10 : colonnes custom sont x{id}, pas le nom API.
+            let col = dimensions::col_of(&all_dims, &s.dim);
+            format!("e.{col}")
         };
         let cond = push_condition(&operand, &s.op, &s.val, &mut b.params)?;
         clauses.push(cond);
@@ -451,9 +446,10 @@ fn compile_indicator(
     consolidation_id: i64,
 ) -> Result<(String, Vec<DbValue>, Vec<String>), String> {
     // Valider le grain contre les dimensions propagées.
-    let dims = propagated_dims(con);
+    let all_dims = dimensions::load_all(con).map_err(|e| e.to_string())?;
+    let api_names: Vec<String> = all_dims.iter().map(|d| d.name.clone()).collect();
     for g in grain {
-        if !dims.contains(g) {
+        if !api_names.contains(g) {
             return Err(format!("grain : dimension inconnue '{g}'"));
         }
     }
@@ -466,9 +462,19 @@ fn compile_indicator(
         joins_sql, mut params, ..
     } = resolver.builder.into_inner();
 
+    // B1 étape 10 : e.{col} pour les cols physiques (x{id} pour custom),
+    // alias en nom API pour la sérialisation (IndicatorRow.grain).
     let select_grain: String = grain
         .iter()
-        .map(|g| format!("e.{g} AS {g}"))
+        .map(|g| {
+            let col = dimensions::col_of(&all_dims, g);
+            format!("e.{col} AS {g}")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let group_cols: String = grain
+        .iter()
+        .map(|g| dimensions::col_of(&all_dims, g).to_string())
         .collect::<Vec<_>>()
         .join(", ");
     let select = if grain.is_empty() {
@@ -479,7 +485,7 @@ fn compile_indicator(
     let group = if grain.is_empty() {
         String::new()
     } else {
-        format!("\nGROUP BY {}", grain.join(", "))
+        format!("\nGROUP BY {group_cols}")
     };
 
     // `consolidation_id` poussé en dernier (apparaît dans le WHERE, après les

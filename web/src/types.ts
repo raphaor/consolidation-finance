@@ -889,3 +889,94 @@ export interface DataHealthReport {
   total: number;
   checks: OrphanCheck[];
 }
+
+// ---------- Contrôles de données ----------
+
+export interface ControlAssertion {
+  type: 'range' | 'nonzero' | 'existence' | 'equals';
+  warn?: number;
+  error?: number;
+  target?: number;
+}
+
+export interface ControlCompare {
+  metric: 'variation_abs' | 'variation_pct' | 'variation';
+  baseline_consolidation_id: number | null;
+  warn: number;
+  error: number;
+}
+
+export interface ControlDefinition {
+  levels: ('raw' | 'corporate' | 'converted' | 'consolidated')[];
+  grain: string[];
+  selection: SelectionCond[];
+  expression: string | null;
+  assertions: ControlAssertion[];
+  compare: ControlCompare | null;
+}
+
+export interface Control {
+  code: string;
+  libelle: string | null;
+  definition: ControlDefinition;
+}
+
+export interface ControlSetItem {
+  code: string;
+  libelle: string | null;
+  ord: number;
+}
+
+export interface ControlSet {
+  code: string;
+  libelle: string | null;
+  controls: ControlSetItem[];
+}
+
+export type ControlStatus = 'pass' | 'warn' | 'error' | 'no_data';
+
+export interface ControlRowResult {
+  grain: Record<string, string | null>;
+  value: number | null;
+  baseline: number | null;
+  variation: number | null;
+  status: ControlStatus;
+  row_count: number;
+}
+
+export interface ControlLevelResult {
+  status: ControlStatus;
+  rows: ControlRowResult[];
+}
+
+export interface ControlReport {
+  control_code: string;
+  control_libelle: string | null;
+  levels: Record<string, ControlLevelResult>;
+}
+
+export interface LevelSummary {
+  pass: number;
+  warn: number;
+  error: number;
+  no_data: number;
+}
+
+export interface ControlSetReport {
+  set_code: string;
+  executed_at: string;
+  consolidation_id: number | null;
+  phase: string | null;
+  entry_period: string | null;
+  summary: {
+    total: number;
+    by_level: Record<string, LevelSummary>;
+  };
+  details: ControlReport[];
+}
+
+export interface ControlOperand {
+  token: string;
+  label: string;
+  kind: 'poste' | 'indicateur';
+}

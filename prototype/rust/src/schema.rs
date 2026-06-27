@@ -500,6 +500,36 @@ CREATE TABLE IF NOT EXISTS dim_indicator (
     format     TEXT
 );";
 
+/// 8o. dim_control : **contrôles de données** — vérifications configurables.
+///
+/// Chaque contrôle est une sélection + assertion exécutée à la demande sur
+/// les données staging ou consolidées. Survit au reset (hors `ALL_DROP`).
+/// Spec : `docs/CONTROLES_DONNEES.md`.
+pub const DDL_DIM_CONTROL: &str = "\
+CREATE TABLE IF NOT EXISTS dim_control (
+    code       TEXT PRIMARY KEY,
+    libelle    TEXT,
+    definition TEXT NOT NULL
+);";
+
+/// 8p. dim_control_set : **jeux de contrôles** — ensembles ordonnés de contrôles.
+/// Survit au reset.
+pub const DDL_DIM_CONTROL_SET: &str = "\
+CREATE TABLE IF NOT EXISTS dim_control_set (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
+/// 8q. dim_control_set_item : items d'un jeu de contrôles (liens ordonnés).
+/// Survit au reset.
+pub const DDL_DIM_CONTROL_SET_ITEM: &str = "\
+CREATE TABLE IF NOT EXISTS dim_control_set_item (
+    set_code     TEXT,
+    control_code TEXT,
+    ord          INTEGER,
+    PRIMARY KEY (set_code, control_code)
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — au grain **remontée** (phase + entry_period).
@@ -608,6 +638,9 @@ pub const ALL_DDL: &[&str] = &[
     DDL_DIM_COEFFICIENT,
     DDL_DIM_AGGREGATE,
     DDL_DIM_INDICATOR,
+    DDL_DIM_CONTROL,
+    DDL_DIM_CONTROL_SET,
+    DDL_DIM_CONTROL_SET_ITEM,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];

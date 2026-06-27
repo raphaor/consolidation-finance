@@ -47,8 +47,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
-    characteristics, coefficients, create_schema, custom_references, dimensions, entries, export,
-    import, indicators, load_all, masterdata, money::Money, references, run_pipeline,
+    characteristics, coefficients, controls, create_schema, custom_references, dimensions, entries,
+    export, import, indicators, load_all, masterdata, money::Money, references, run_pipeline,
     run_pipeline_with_hook, seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
 };
 
@@ -893,6 +893,32 @@ async fn delete_dimension(
     Ok(Json(serde_json::json!({ "deleted": deleted })))
 }
 
+/// Corps accepté par `POST /api/meta/dimensions/{name}/rename`.
+#[derive(Deserialize)]
+struct DimensionRenameBody {
+    new_name: String,
+}
+
+/// POST /api/meta/dimensions/{name}/rename — renomme une dimension custom.
+///
+/// La colonne physique (`x{id}`) reste inchangée. Seul le nom API mute.
+/// Retourne 409 si `new_name` est déjà utilisé, 404 si `name` est inconnu.
+async fn rename_dimension(
+    Path(name): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DimensionRenameBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    dimensions::rename_custom(&con, &name, &body.new_name).map_err(|e| {
+        if matches!(e, duckdb::Error::InvalidParameterName(_)) {
+            AppError::not_found(e.to_string())
+        } else {
+            db_err(e)
+        }
+    })?;
+    Ok(Json(serde_json::json!({ "renamed": true, "name": body.new_name })))
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Règles de consolidation — CRUD + exécution
 //
@@ -1572,9 +1598,13 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_attribute_columns_to_id(&con) {
             eprintln!("   ⚠ migrate_attribute_columns_to_id (non bloquant) : {e}");
         }
+        // B1 étape 10 : colonnes custom <name> → x<id> sur fact_entry/stg_entry.
+        if let Err(e) = conso_engine::surrogate::migrate_custom_dimension_columns_to_id(&con) {
+            eprintln!("   ⚠ migrate_custom_dimension_columns_to_id (non bloquant) : {e}");
+        }
         // Marqueur de version de schéma (idempotent).
         let _ = con.execute(
-            "INSERT INTO app_config (key, value) VALUES ('schema_version', '9') \
+            "INSERT INTO app_config (key, value) VALUES ('schema_version', '10') \
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             [],
         );
@@ -1678,6 +1708,10 @@ async fn main() {
             get(list_dimensions).post(create_dimension),
         )
         .route("/api/meta/dimensions/{name}", delete(delete_dimension))
+        .route(
+            "/api/meta/dimensions/{name}/rename",
+            post(rename_dimension),
+        )
         // Règles de consolidation (CRUD). L'exécution des règles passe par le
         // pipeline (/api/run applique le ruleset du scénario), pas par une route
         // standalone.
@@ -1697,6 +1731,7 @@ async fn main() {
         .merge(value_lists::router())
         .merge(coefficients::router())
         .merge(indicators::router())
+        .merge(controls::router())
         .merge(import::router())
         .merge(export::router())
         .fallback_service(serve_dir)

@@ -33,8 +33,12 @@ pub enum DimCategory {
 /// Définition d'une dimension.
 #[derive(Debug, Clone)]
 pub struct DimDef {
-    /// Nom technique de la colonne (`scenario`, `partner`, …).
+    /// Nom technique de la colonne (`scenario`, `partner`, …) — identifiant API.
     pub name: String,
+    /// Nom physique dans `fact_entry` / `stg_entry`.
+    /// Pour les built-ins : identique à `name`.
+    /// Pour les custom : `x{id}` (B1 étape 10).
+    pub col: String,
     /// Catégorie (Fixed / Active / Analytical).
     pub category: DimCategory,
     /// `true` si ajoutée par l'utilisateur (custom).
@@ -73,86 +77,30 @@ impl DimDef {
 /// `fact_entry` et garantit que le SQL généré pour les 12 colonnes builtin
 /// reste identique au SQL statique historique (test golden).
 pub fn builtin_dims() -> Vec<DimDef> {
+    macro_rules! builtin {
+        ($name:literal, $cat:expr, $label:literal) => {
+            DimDef {
+                name: $name.into(),
+                col: $name.into(),
+                category: $cat,
+                custom: false,
+                label: $label.into(),
+            }
+        };
+    }
     vec![
-        // Fixed
-        DimDef {
-            name: "phase".into(),
-            category: DimCategory::Fixed,
-            custom: false,
-            label: "Phase".into(),
-        },
-        // Active
-        DimDef {
-            name: "entity".into(),
-            category: DimCategory::Active,
-            custom: false,
-            label: "Entité".into(),
-        },
-        // Fixed
-        DimDef {
-            name: "entry_period".into(),
-            category: DimCategory::Fixed,
-            custom: false,
-            label: "Exercice".into(),
-        },
-        DimDef {
-            name: "period".into(),
-            category: DimCategory::Fixed,
-            custom: false,
-            label: "Période".into(),
-        },
-        // Active
-        DimDef {
-            name: "account".into(),
-            category: DimCategory::Active,
-            custom: false,
-            label: "Compte".into(),
-        },
-        DimDef {
-            name: "flow".into(),
-            category: DimCategory::Active,
-            custom: false,
-            label: "Flux".into(),
-        },
-        // Fixed
-        DimDef {
-            name: "currency".into(),
-            category: DimCategory::Fixed,
-            custom: false,
-            label: "Devise".into(),
-        },
-        // Active
-        DimDef {
-            name: "nature".into(),
-            category: DimCategory::Active,
-            custom: false,
-            label: "Nature".into(),
-        },
-        // Analytical
-        DimDef {
-            name: "partner".into(),
-            category: DimCategory::Analytical,
-            custom: false,
-            label: "Partenaire".into(),
-        },
-        DimDef {
-            name: "share".into(),
-            category: DimCategory::Analytical,
-            custom: false,
-            label: "Titre".into(),
-        },
-        DimDef {
-            name: "analysis".into(),
-            category: DimCategory::Analytical,
-            custom: false,
-            label: "Analyse 1".into(),
-        },
-        DimDef {
-            name: "analysis2".into(),
-            category: DimCategory::Analytical,
-            custom: false,
-            label: "Analyse 2".into(),
-        },
+        builtin!("phase",        DimCategory::Fixed,      "Phase"),
+        builtin!("entity",       DimCategory::Active,     "Entité"),
+        builtin!("entry_period", DimCategory::Fixed,      "Exercice"),
+        builtin!("period",       DimCategory::Fixed,      "Période"),
+        builtin!("account",      DimCategory::Active,     "Compte"),
+        builtin!("flow",         DimCategory::Active,     "Flux"),
+        builtin!("currency",     DimCategory::Fixed,      "Devise"),
+        builtin!("nature",       DimCategory::Active,     "Nature"),
+        builtin!("partner",      DimCategory::Analytical, "Partenaire"),
+        builtin!("share",        DimCategory::Analytical, "Titre"),
+        builtin!("analysis",     DimCategory::Analytical, "Analyse 1"),
+        builtin!("analysis2",    DimCategory::Analytical, "Analyse 2"),
     ]
 }
 
@@ -186,13 +134,18 @@ pub fn load_customs(con: &Connection) -> Result<Vec<DimDef>, duckdb::Error> {
     if !exists {
         return Ok(Vec::new());
     }
-    let mut stmt = con.prepare("SELECT name, label FROM dim_custom_dimension ORDER BY name")?;
+    let mut stmt =
+        con.prepare("SELECT name, label, id FROM dim_custom_dimension ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
+        let name: String = row.get(0)?;
+        let id: Option<i64> = row.get(2)?;
+        let col = id.map(|i| format!("x{i}")).unwrap_or_else(|| name.clone());
         Ok(DimDef {
-            name: row.get::<_, String>(0)?,
+            name,
+            col,
             category: DimCategory::Analytical,
             custom: true,
-            label: row.get::<_, String>(1)?,
+            label: row.get(1)?,
         })
     })?;
     let mut out = Vec::new();
@@ -206,40 +159,44 @@ pub fn load_customs(con: &Connection) -> Result<Vec<DimDef>, duckdb::Error> {
 //  Sélecteurs
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Retourne la liste des noms propagés (toutes les dims du registre).
+/// Retourne les colonnes physiques propagées (toutes les dims du registre).
+/// Pour les built-ins : identique au nom. Pour les custom : `x{id}`.
 pub fn propagated_cols(dims: &[DimDef]) -> Vec<&str> {
-    dims.iter().map(|d| d.name.as_str()).collect()
+    dims.iter().map(|d| d.col.as_str()).collect()
 }
 
-/// Retourne la liste des noms pilotables (Active + Analytical).
+/// Retourne les colonnes physiques pilotables (Active + Analytical).
 pub fn pilotable_cols(dims: &[DimDef]) -> Vec<&str> {
     dims.iter()
         .filter(|d| d.pilotable())
-        .map(|d| d.name.as_str())
+        .map(|d| d.col.as_str())
         .collect()
 }
 
-/// Retourne les noms appartenant au grain de reconstruction des clôtures
+/// Retourne les colonnes physiques du grain de reconstruction des clôtures
 /// (Fixed + Active).
 pub fn closure_grain_cols(dims: &[DimDef]) -> Vec<&str> {
     dims.iter()
         .filter(|d| d.in_closure_grain())
-        .map(|d| d.name.as_str())
+        .map(|d| d.col.as_str())
         .collect()
 }
 
-/// Retourne les noms des dimensions analytiques (catégorie `Analytical`).
-///
-/// Ces dimensions portent un *« dont »* (of which) de la ligne de même grain
-/// sans la dimension : une ligne dont une dimension analytique est renseignée
-/// est un détail de la ligne où elle est NULL. Elles ne doivent donc **jamais**
-/// entrer dans un **total** (bilan, compte de résultat) — ces totaux filtrent
-/// `<col> IS NULL` pour ne sommer que les lignes principales. En revanche elles
-/// font partie du grain de clôture (chaque « dont » a sa propre clôture).
+/// Retourne le nom physique (`col`) d'une dimension dans la slice, ou le nom
+/// API si non trouvé (built-in où col == name).
+pub fn col_of<'a>(dims: &'a [DimDef], name: &'a str) -> &'a str {
+    dims.iter()
+        .find(|d| d.name == name)
+        .map(|d| d.col.as_str())
+        .unwrap_or(name)
+}
+
+/// Retourne les colonnes physiques des dimensions analytiques (catégorie
+/// `Analytical`). Utilisé pour les filtres `IS NULL` dans les totaux.
 pub fn analytical_cols(dims: &[DimDef]) -> Vec<&str> {
     dims.iter()
         .filter(|d| d.category == DimCategory::Analytical)
-        .map(|d| d.name.as_str())
+        .map(|d| d.col.as_str())
         .collect()
 }
 
@@ -264,15 +221,15 @@ pub fn is_valid_custom_name(name: &str) -> bool {
         && !matches!(name, "level" | "amount" | "id")
 }
 
-/// Crée une dimension custom :
+/// Crée une dimension custom (B1 étape 10) :
 /// - Valide le nom
 /// - Refuse les doublons (built-in ou déjà présente dans `dim_custom_dimension`)
-/// - `ALTER TABLE fact_entry ADD COLUMN {name} TEXT`
-/// - `ALTER TABLE stg_entry  ADD COLUMN {name} TEXT`
-/// - `INSERT INTO dim_custom_dimension (name, label) VALUES (?, ?)`
+/// - `INSERT INTO dim_custom_dimension` (obtient l'id auto)
+/// - `ALTER TABLE fact_entry ADD COLUMN x{id} TEXT`
+/// - `ALTER TABLE stg_entry  ADD COLUMN x{id} TEXT`
 ///
-/// L'injection SQL via `name` est neutralisée par la validation (alphanum +
-/// underscore uniquement) ; `label` passe par un paramètre lié.
+/// La colonne physique `x{id}` ne dépend pas du code `name` : renommer la
+/// dimension ne nécessite pas d'`ALTER TABLE`.
 pub fn create_custom(con: &Connection, name: &str, label: &str) -> Result<(), duckdb::Error> {
     if !is_valid_custom_name(name) {
         return Err(duckdb::Error::InvalidParameterName(format!(
@@ -295,59 +252,171 @@ pub fn create_custom(con: &Connection, name: &str, label: &str) -> Result<(), du
             "dimension custom déjà existante : {name}"
         )));
     }
-    con.execute(
-        &format!("ALTER TABLE fact_entry ADD COLUMN {name} TEXT"),
-        [],
-    )?;
-    con.execute(&format!("ALTER TABLE stg_entry ADD COLUMN {name} TEXT"), [])?;
+    // INSERT d'abord : la séquence alloue l'id.
     con.execute(
         "INSERT INTO dim_custom_dimension (name, label) VALUES (?, ?)",
         &[&name, &label],
     )?;
+    // Lire l'id obtenu pour nommer la colonne physique.
+    let id: i64 = con.query_row(
+        "SELECT id FROM dim_custom_dimension WHERE name = ?",
+        [name],
+        |r| r.get(0),
+    )?;
+    let col = format!("x{id}");
+    con.execute(&format!("ALTER TABLE fact_entry ADD COLUMN {col} TEXT"), [])?;
+    con.execute(&format!("ALTER TABLE stg_entry ADD COLUMN {col} TEXT"), [])?;
     Ok(())
 }
 
 /// Supprime une dimension custom :
 /// - Vérifie qu'elle existe dans `dim_custom_dimension`
-/// - `ALTER TABLE fact_entry DROP COLUMN {name}`
-/// - `ALTER TABLE stg_entry  DROP COLUMN {name}`
+/// - `ALTER TABLE fact_entry DROP COLUMN x{id}`
+/// - `ALTER TABLE stg_entry  DROP COLUMN x{id}`
 /// - `DELETE FROM dim_custom_dimension WHERE name = ?`
 pub fn delete_custom(con: &Connection, name: &str) -> Result<(), duckdb::Error> {
-    let n: i64 = con.query_row(
-        "SELECT COUNT(*) FROM dim_custom_dimension WHERE name = ?",
-        [name],
-        |r| r.get(0),
-    )?;
-    if n == 0 {
-        return Err(duckdb::Error::InvalidParameterName(format!(
-            "dimension custom inexistante : {name}"
-        )));
-    }
-    con.execute(&format!("ALTER TABLE fact_entry DROP COLUMN {name}"), [])?;
-    con.execute(&format!("ALTER TABLE stg_entry DROP COLUMN {name}"), [])?;
+    let row: Option<(i64, i64)> = con
+        .query_row(
+            "SELECT COUNT(*), id FROM dim_custom_dimension WHERE name = ?",
+            [name],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let id = match row {
+        Some((1, id)) => id,
+        _ => {
+            return Err(duckdb::Error::InvalidParameterName(format!(
+                "dimension custom inexistante : {name}"
+            )))
+        }
+    };
+    let col = format!("x{id}");
+    con.execute(&format!("ALTER TABLE fact_entry DROP COLUMN {col}"), [])?;
+    con.execute(&format!("ALTER TABLE stg_entry DROP COLUMN {col}"), [])?;
     con.execute("DELETE FROM dim_custom_dimension WHERE name = ?", [name])?;
     Ok(())
 }
 
+/// Renomme le code d'une dimension custom.
+///
+/// Sous B1, la colonne physique (`x{id}`) est immunisée au renommage : seul le
+/// champ `name` de `dim_custom_dimension` change. Bloque si la dimension est
+/// référencée dans une règle / un poste / un indicateur (JSON stocke le nom API).
+pub fn rename_custom(
+    con: &Connection,
+    old_name: &str,
+    new_name: &str,
+) -> Result<(), duckdb::Error> {
+    if !is_valid_custom_name(new_name) {
+        return Err(duckdb::Error::InvalidParameterName(format!(
+            "nom de dimension invalide : {new_name:?}"
+        )));
+    }
+    let n: i64 = con.query_row(
+        "SELECT COUNT(*) FROM dim_custom_dimension WHERE name = ?",
+        [old_name],
+        |r| r.get(0),
+    )?;
+    if n == 0 {
+        return Err(duckdb::Error::InvalidParameterName(format!(
+            "dimension custom inexistante : {old_name}"
+        )));
+    }
+    if builtin_dims().iter().any(|d| d.name == new_name) {
+        return Err(duckdb::Error::InvalidParameterName(format!(
+            "nom réservé (built-in) : {new_name}"
+        )));
+    }
+    let taken: bool = con.query_row(
+        "SELECT COUNT(*) > 0 FROM dim_custom_dimension WHERE name = ?",
+        [new_name],
+        |r| r.get(0),
+    )?;
+    if taken {
+        return Err(duckdb::Error::InvalidParameterName(format!(
+            "dimension custom déjà existante : {new_name}"
+        )));
+    }
+    // Garde rôle 3 : la dimension ne doit pas apparaître comme clé de dimension
+    // dans les JSON de règles / postes (dim dans selection ou clé de destination).
+    let blockers = scan_custom_dim_blockers(con, old_name)?;
+    if !blockers.is_empty() {
+        return Err(duckdb::Error::InvalidParameterName(format!(
+            "renommage bloqué — dimension '{old_name}' citée dans : {}",
+            blockers.join(", ")
+        )));
+    }
+    con.execute(
+        "UPDATE dim_custom_dimension SET name = ? WHERE name = ?",
+        &[&new_name, &old_name],
+    )?;
+    Ok(())
+}
+
+/// Scanne les JSON de règles et postes pour détecter si `dim_name` y est
+/// référencé comme dimension (clé de sélection ou destination). Retourne la
+/// liste des codes bloquants.
+fn scan_custom_dim_blockers(
+    con: &Connection,
+    dim_name: &str,
+) -> duckdb::Result<Vec<String>> {
+    // Heuristique rapide : recherche textuelle du nom entre guillemets dans le JSON.
+    // Couvre selection[*].dim et les clés de destination sans faux-positifs sur
+    // des valeurs littérales (qui sont des codes de master data, pas des noms de dim).
+    let quoted = format!("\"{}\"", dim_name);
+    let mut blockers = Vec::new();
+
+    // dim_rule.definition
+    let mut stmt = con.prepare(
+        "SELECT code FROM dim_rule WHERE definition LIKE ?",
+    )?;
+    let like_pat = format!("%{}%", quoted);
+    let codes: Vec<String> = stmt
+        .query_map([&like_pat], |r| r.get(0))?
+        .flatten()
+        .collect();
+    for c in codes {
+        blockers.push(format!("rule:{c}"));
+    }
+
+    // dim_aggregate.definition
+    let mut stmt2 = con.prepare(
+        "SELECT code FROM dim_aggregate WHERE definition LIKE ?",
+    )?;
+    let codes2: Vec<String> = stmt2
+        .query_map([&like_pat], |r| r.get(0))?
+        .flatten()
+        .collect();
+    for c in codes2 {
+        blockers.push(format!("aggregate:{c}"));
+    }
+
+    Ok(blockers)
+}
+
 /// Ré-applique les colonnes custom (après un reset complet) :
-/// pour chaque dim custom, `ALTER TABLE ... ADD COLUMN` + `INSERT` dans le
-/// registre. Idempotent sur l'`ALTER` (la colonne peut déjà exister si la
-/// table a survécu au reset — non utilisé actuellement, mais défensif).
+/// pour chaque dim custom, `ALTER TABLE ... ADD COLUMN x{id} TEXT`.
+///
+/// `dim_custom_dimension` survit au reset (ses lignes persistent avec leurs ids).
+/// L'`INSERT OR IGNORE` est une garde défensive si la table avait été vidée.
+/// Idempotent sur les `ALTER` (silencieux si la colonne existe déjà).
 pub fn apply_custom_columns(con: &Connection, customs: &[DimDef]) -> Result<(), duckdb::Error> {
     for d in customs {
-        // ALTER TABLE fact_entry ADD (silencieux si la colonne existe déjà).
+        // Colonne physique x{id} (B1 étape 10).
         let _ = con.execute(
-            &format!("ALTER TABLE fact_entry ADD COLUMN {} TEXT", d.name),
+            &format!("ALTER TABLE fact_entry ADD COLUMN {} TEXT", d.col),
             [],
         );
         let _ = con.execute(
-            &format!("ALTER TABLE stg_entry ADD COLUMN {} TEXT", d.name),
+            &format!("ALTER TABLE stg_entry ADD COLUMN {} TEXT", d.col),
             [],
         );
-        con.execute(
-            "INSERT INTO dim_custom_dimension (name, label) VALUES (?, ?)",
+        // La ligne dans dim_custom_dimension survit normalement au reset ;
+        // INSERT OR IGNORE est défensif.
+        let _ = con.execute(
+            "INSERT OR IGNORE INTO dim_custom_dimension (name, label) VALUES (?, ?)",
             &[&d.name, &d.label],
-        )?;
+        );
     }
     Ok(())
 }

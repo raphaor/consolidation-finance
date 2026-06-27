@@ -22,6 +22,7 @@ import { MasterDataPage } from './pages/MasterDataPage';
 import { MasterDetailPage } from './pages/MasterDetailPage';
 import { RapportsPage } from './pages/RapportsPage';
 import { JeuxReglesPage, RulesPage } from './pages/RulesPage';
+import { ControlsPage } from './pages/ControlsPage';
 import { SaisiePage } from './pages/SaisiePage';
 import './App.css';
 
@@ -52,6 +53,7 @@ export default function App() {
       )}
       {page === 'regles' && <RulesPage />}
       {page === 'jeux-regles' && <JeuxReglesPage />}
+      {page === 'controles' && <ControlsPage />}
       {page === 'coefficients' && <CoefficientsPage />}
       {page === 'postes' && <PostesPage />}
       {page === 'indicateurs' && <IndicateursPage />}

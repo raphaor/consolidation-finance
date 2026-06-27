@@ -1,19 +1,19 @@
 # Plan d'action — Codes renommables via clés techniques (option B1)
 
-> Statut : **étapes 0–9 terminées** (branche `feat/renommage-codes`) — smoke-test runtime en attente. Restent étapes 10 et 11.
+> Statut : **étapes 0–10 terminées** (branche `feat/renommage-codes`) — smoke-test runtime en attente. Reste étape 11.
 > Décision : **option B1** — chaque objet gagne un `id` technique immuable ;
 > le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
 > in-place en §7.
 
-## 0. Reprise rapide (dernière session : 2026-06-29)
+## 0. Reprise rapide (dernière session : 2026-06-27)
 
 **Point de départ d'une prochaine session.** Donner : « Reprends le chantier
 codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
-### Où on en est (2026-06-29 — état final)
+### Où on en est (2026-06-27 — état final)
 
-**Étapes 0–9 terminées. Smoke-tests runtime étape 5 partiellement validés.**
+**Étapes 0–10 terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
 - **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
   `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
@@ -59,7 +59,13 @@ codes-renommables, branche `feat/renommage-codes`, voir
 - ⏳ `POST /api/reset` → `car_1`/`lst_1` survivent, colonnes de rattachement réappliquées.
 
 **Prochaines étapes planifiées (§8 feuille de route) :**
-- **Étape 10** : colonnes custom `<name>` → `x<id>` sur `fact_entry`/`stg_entry`
+- ✅ **Étape 10** (2026-06-27) : colonnes custom `<name>` → `x<id>` sur `fact_entry`/`stg_entry`.
+  - `DimDef.col` séparé de `DimDef.name` ; `col_of()` helper.
+  - `surrogate.rs` : `migrate_custom_dimension_columns_to_id` (idempotent).
+  - `dimensions.rs` : `create_custom`/`delete_custom` utilisent `x{id}` ; `rename_custom` ne touche pas la col physique.
+  - `rules.rs` : `dest_expr` prend `col` (physique) séparé de `dim` (API) ; `exec_operation` utilise `dim_col_map`.
+  - `indicators.rs` : `build_aggregate_sql` et `compile_indicator` utilisent `col_of` pour les colonnes SQL.
+  - `server.rs` : migration au démarrage, `POST /api/meta/dimensions/{name}/rename`, `schema_version` → `'10'`.
 - **Étape 11** : colonnes références directes `<col>` → `r<id>` sur `dim_<host>`
 
 ### Nouveaux sujets intégrés au plan (2026-06-27)
