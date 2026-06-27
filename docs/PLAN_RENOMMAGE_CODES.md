@@ -5,15 +5,15 @@
 > le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
 > in-place en §7.
 
-## 0. Reprise rapide (dernière session : 2026-06-27)
+## 0. Reprise rapide (dernière session : 2026-06-28)
 
 **Point de départ d'une prochaine session.** Donner : « Reprends le chantier
 codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
-### Où on en est (2026-06-27 — état final)
+### Où on en est (2026-06-28 — état final)
 
-**Étapes 0–7 entièrement terminées en code. Smoke-tests runtime à valider.**
+**Étapes 0–7 + étape 5.1 terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
 - **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
   `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
@@ -52,9 +52,9 @@ Trois sujets identifiés lors des smoke-tests étape 5, repositionnés dans la
 feuille de route (§8) :
 
 **Sujet A — Modifier le libellé d'une caractéristique ou d'une liste de valeurs**
-→ Lacune CRUD basique : aucun endpoint `PUT` n'existe sur `dim_characteristic` /
-`dim_value_list` pour modifier leur libellé (ni leur code). Simple à ajouter.
-**Classé : étape 5.1** (indépendant du reste, peut être fait immédiatement).
+→ ✅ **Livré (2026-06-28)** : `PUT /api/meta/characteristics/{code}` et
+`PUT /api/meta/value-lists/{code}` (libellé). UI inline dans `CaracteristiquesPage`.
+**Classé : étape 5.1** ✅.
 
 **Sujet B — Renommer le code d'une caractéristique ou d'une liste de valeurs**
 → C'est l'objectif même de B1 pour ces objets. L'étape 5 a préparé le terrain
@@ -529,10 +529,9 @@ depuis les données existantes (jamais de reseed).
 5. **Nommer les objets dynamiques par id** (§4.3) → rôle 2 réglé.
    ✅ Scope livré : `car_<id>` / `lst_<id>`. Bug runtime `sql_to_api_dyn` corrigé.
    Scope différé : colonnes `c<id>` / `x<id>` / `r<id>`.
-5.1. **CRUD libellé caractéristique / liste de valeurs** (sujet A) — endpoint
+5.1. ✅ **CRUD libellé caractéristique / liste de valeurs** (sujet A, 2026-06-28) —
    `PUT /api/meta/characteristics/{code}` et `PUT /api/meta/value-lists/{code}`
-   permettant de modifier `libelle` (et à terme `code`, cf. étape 7b). Indépendant
-   du reste ; peut être livré immédiatement.
+   (libellé). UI inline dans `CaracteristiquesPage` (édition inline + Enregistrer/Annuler).
 6. ✅ **Basculer les JSON en ids** → rôle 3 réglé (session 2026-06-27).
    Voir détail complet dans §0. Résumé : `json_migration.rs` (nouveau module),
    moteur dual-mode dans `rules.rs` + `indicators.rs`, migration idempotente
