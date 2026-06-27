@@ -11,9 +11,9 @@
 codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
-### Où on en est (2026-06-28 — état final)
+### Où on en est (2026-06-29 — état final)
 
-**Étapes 0–7 + étape 5.1 + étape 6b + étape 7b terminées. Smoke-tests runtime étape 5 partiellement validés.**
+**Étapes 0–8 terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
 - **Étape 5 terminée (2026-06-27bis)** : tables `car_<code>` → `car_<id>` et
   `lst_<code>` → `lst_<id>`. Scope réduit : renommages de tables uniquement
@@ -564,8 +564,24 @@ depuis les données existantes (jamais de reseed).
    - `api.ts` : `api.characteristics.rename()` + `api.valueLists.rename()`.
    - `CaracteristiquesPage.tsx` : bouton « Renommer le code » inline dans
      `CharacteristicDetail` et dans `ListesTab`. 19 tests rules, 0 échec.
-8. **Retirer les chemins code-based** résiduels + finaliser la migration
-   in-place versionnée (§7).
+8. ✅ **Retirer les chemins code-based résiduels + migrer `pivot_currency`** (livré 2026-06-29) —
+   - `surrogate.rs` : `migrate_pivot_currency_to_id()` — lit `app_config.pivot_currency`
+     (code TEXT), résout l'id dans `dim_currency`, insère `app_config.pivot_currency_id`
+     (INTEGER). Idempotent.
+   - `pipeline/mod.rs` : `ConvertParams::load_params` préfère `pivot_currency_id`
+     (jointure id→code) avec fallback sur `pivot_currency` (legacy). Immunise la devise
+     pivot au renommage de code.
+   - `masterdata.rs` : retrait du bloc `app_config.pivot_currency` dans
+     `scan_json_blockers`. `dim_currency` est désormais **entièrement renommable** (7ᵉ).
+     2 tests mis à jour (bloquant → autorisé).
+   - `references.rs` : **correction bug** — `dynamic_references` omettait de filtrer les
+     patron B déjà couverts par un `ri()` statique. Provoquait un `UPDATE dim_entity SET
+     devise_fonctionnelle = 'EURO'...` sur une colonne INTEGER lors du cascade de rename.
+   - `server.rs` : appel de `migrate_pivot_currency_to_id` au démarrage + upsert
+     `schema_version = 8` (idempotent).
+   - 147 tests, 0 échec.
+   **`dim_currency` est la 7ᵉ dimension renommable.** Chantier B1 terminé sur les
+   dimensions statiques. Reste : smoke-test serveur par l'utilisateur.
 
 ## 9. Annexe — option A (rejetée, pour mémoire)
 Garder le `code` en PK + opération « renommer en cascade » : `UPDATE` de toutes

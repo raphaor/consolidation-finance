@@ -1563,6 +1563,17 @@ async fn main() {
         if let Err(e) = conso_engine::json_migration::migrate_json_to_ids(&con) {
             eprintln!("   ⚠ migrate_json_to_ids (non bloquant) : {e}");
         }
+        // B1 étape 8 : bascule app_config.pivot_currency (code TEXT) →
+        // pivot_currency_id (INTEGER id). Immunise la devise pivot au renommage.
+        if let Err(e) = conso_engine::surrogate::migrate_pivot_currency_to_id(&con) {
+            eprintln!("   ⚠ migrate_pivot_currency_to_id (non bloquant) : {e}");
+        }
+        // Marqueur de version de schéma (idempotent).
+        let _ = con.execute(
+            "INSERT INTO app_config (key, value) VALUES ('schema_version', '8') \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [],
+        );
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");

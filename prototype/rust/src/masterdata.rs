@@ -947,23 +947,22 @@ async fn remove(
 //
 // Les codes peuvent être enfouis dans des champs JSON (`dim_rule.definition`,
 // `dim_aggregate.definition`, `dim_indicator.expression`) ou dans `app_config`.
-// Ces contenus stockent encore des **codes** (pas des ids) tant que l'étape 6
-// (migration JSON → ids) n'est pas terminée. La garde ci-dessous les scanne
-// pour bloquer un renommage qui rendrait des règles/indicateurs incohérents.
+// État B1 étape 8 :
 //
-// Couverture :
-//   • `app_config.pivot_currency`             (codes de `dim_currency`)
-//   • `dim_rule.definition`  scope[*].val     (codes de `dim_method` via colonne sat_perimeter `methode`)
-//   • `dim_rule.definition`  selection[*].val (codes des dims de `fact_entry`)
-//   • `dim_rule.definition`  destination[*].value (mode=override)
-//   • `dim_rule.definition`  operations[*].coefficient (codes de `dim_coefficient`)
-//   • `dim_rule.definition`  selection[*].via (codes de `dim_characteristic`)
-//   • `dim_aggregate.definition` selection[*].val et via
-//   • `dim_indicator.expression` `[code]`     (codes de `dim_aggregate`)
+// La plupart des valeurs JSON ont été migrées en ids entiers (étape 6).
+// Les gardes ci-dessous qui testent des strings via `as_str()` retournent
+// systématiquement false pour ces champs (un integer.as_str() = None) — elles
+// restent en place comme filet de sécurité pour d'éventuelles bases non migrées.
 //
-// Non couverts (sans risque aujourd'hui — dimensions non encore renommables) :
-//   • `ref` dans selections (codes de `dim_custom_reference`) — ref. pas encore renommable.
-//   • `dim_indicator.grain` contient des noms de colonnes, pas des codes de membres.
+// Encore actif (stockage toujours en code TEXT) :
+//   • `dim_rule.definition`  operations[*].coefficient  (dim_coefficient — pas de rename dédié)
+//
+// Retiré en étape 8 :
+//   • `app_config.pivot_currency`  — remplacé par `pivot_currency_id` (INTEGER),
+//     immunisé au renommage. La dim_currency est désormais pleinement renommable.
+//
+// Non couvert (sans risque, dimension non encore renommable) :
+//   • `ref` dans selections (codes de `dim_custom_reference`) — colonne non renommable.
 
 /// Noms de colonnes `fact_entry` / `stg_entry` qui correspondent à `sql_table`.
 /// Utilisés pour repérer `selection.dim` et `destination.<key>` dans les JSON.
@@ -1089,18 +1088,8 @@ fn scan_json_blockers(
 ) -> Result<Vec<String>, AppError> {
     let mut blockers = Vec::new();
 
-    // 1. app_config.pivot_currency — codes de dim_currency.
-    if sql_table == "dim_currency" {
-        let v: duckdb::Result<String> = con.query_row(
-            "SELECT value FROM app_config WHERE key = 'pivot_currency'",
-            [],
-            |r| r.get(0),
-        );
-        match v {
-            Ok(val) if val == old => blockers.push("app_config.pivot_currency".into()),
-            _ => {}
-        }
-    }
+    // `pivot_currency` retiré en B1 étape 8 : stocké en `pivot_currency_id` (INTEGER),
+    // l'id ne change pas lors d'un renommage de code → aucun blocage pour dim_currency.
 
     let json_dims = fact_dims_for(sql_table);
     let scope_col = scope_col_for(sql_table);
@@ -1595,11 +1584,11 @@ mod tests {
         con
     }
 
-    /// Renommage de code (B1, étape 7) : autorisé pour une dimension entièrement
-    /// basculée en clé technique (`variant`), refusé sinon (`currency` a encore
-    /// des FK code-keyed). Vérifie aussi la propagation et les conflits.
+    /// Renommage de code (B1, étapes 7-8) : autorisé pour les dimensions
+    /// entièrement basculées en clé technique (`variant`, `currency` après étape 8).
+    /// Vérifie propagation et conflits.
     #[test]
-    fn rename_code_variant_ok_currency_refuse() {
+    fn rename_code_variant_ok_currency_ok_apres_etape8() {
         let con = setup();
         crate::seed_all(&con).expect("seed_all");
 
@@ -1618,12 +1607,18 @@ mod tests {
             .expect("nouveau code présent");
         assert_eq!(new_id, cons_variant_before, "la FK (id) pointe toujours la même ligne");
 
-        // currency : pivot_currency dans app_config → bloquée par la garde JSON.
-        let err = rename_code(&con, "currencies", "EUR", "EURO").unwrap_err();
+        // currency : B1 étape 8 — pivot_currency_id remplace la clé code dans
+        // app_config ; plus de bloquant JSON. La devise doit être renommable.
+        // (sat_exchange_rate.currency_source et stg_entry.currency sont cascadés.)
+        rename_code(&con, "currencies", "EUR", "EURO").expect("currency renommable après étape 8");
+        // Vérifier que le code a bien changé.
         assert!(
-            err.1.contains("non renommable"),
-            "refus attendu pour currency : {}",
-            err.1
+            resolve::resolve_id(&con, "dim_currency", "EUR").unwrap().is_none(),
+            "ancien code EUR disparu"
+        );
+        assert!(
+            resolve::resolve_id(&con, "dim_currency", "EURO").unwrap().is_some(),
+            "nouveau code EURO présent"
         );
 
         // Conflit : renommer vers un code existant est rejeté.
@@ -2189,18 +2184,19 @@ mod tests {
         );
     }
 
-    /// La devise pivot dans app_config bloque le renommage de la devise.
+    /// B1 étape 8 : la garde JSON ne bloque plus la devise.
+    /// `pivot_currency` est remplacé par `pivot_currency_id` (INTEGER, immunisé
+    /// au renommage) → `scan_json_blockers` retourne une liste vide pour dim_currency.
     #[test]
-    fn role3_currency_bloque_si_pivot() {
+    fn role3_currency_non_bloquee_apres_etape8() {
         let con = setup();
         crate::seed_all(&con).expect("seed_all");
-        // Le seed peuple app_config.pivot_currency = 'EUR'.
-        // dim_currency a encore des FK code-based → garde graphe d'abord,
-        // mais scan_json_blockers doit détecter le blocage app_config.
+        // app_config.pivot_currency = 'EUR' est encore présent (seed),
+        // mais la garde a été retirée en étape 8 → aucun bloquant JSON.
         let blockers = scan_json_blockers(&con, "dim_currency", "EUR").unwrap();
         assert!(
-            blockers.iter().any(|b| b.contains("app_config.pivot_currency")),
-            "doit détecter EUR dans app_config.pivot_currency : {blockers:?}"
+            blockers.is_empty(),
+            "aucun bloquant JSON attendu pour dim_currency après étape 8 : {blockers:?}"
         );
     }
 }

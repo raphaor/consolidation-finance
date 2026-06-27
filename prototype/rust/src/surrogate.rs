@@ -605,6 +605,49 @@ pub fn migrate_fact_entry_to_ids(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
+/// Migration B1 étape 8 : bascule `app_config.pivot_currency` (code TEXT) vers
+/// `app_config.pivot_currency_id` (id INTEGER). Idempotent.
+///
+/// Après cette migration :
+/// - `ConvertParams::load_params` préfère `pivot_currency_id` (résolution id→code) ;
+/// - `scan_json_blockers` n'a plus à bloquer le renommage d'une devise : l'id est
+///   immunisé au renommage du code. La `currency` devient pleinement renommable.
+pub fn migrate_pivot_currency_to_id(con: &Connection) -> duckdb::Result<()> {
+    // Déjà fait ?
+    let done: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM app_config WHERE key = 'pivot_currency_id'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if done {
+        return Ok(());
+    }
+    // Lire le code courant.
+    let code: Option<String> = con
+        .query_row(
+            "SELECT value FROM app_config WHERE key = 'pivot_currency'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    let Some(code) = code else {
+        return Ok(()); // pas de pivot_currency configuré
+    };
+    // Résoudre en id.
+    let id: i64 = con.query_row(
+        "SELECT id FROM dim_currency WHERE code_iso = ?",
+        [&code],
+        |r| r.get(0),
+    )?;
+    con.execute(
+        "INSERT INTO app_config (key, value) VALUES ('pivot_currency_id', ?)",
+        [id.to_string()],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -131,8 +131,17 @@ impl ConvertParams {
             },
         )?;
 
+        // B1 étape 8 : préférer pivot_currency_id (résolution id→code) pour que la
+        // devise pivot reste correcte même si son code est renommé. Fallback sur le
+        // code direct (legacy) si la migration n'a pas encore tourné.
         let pivot_currency: String = con.query_row(
-            "SELECT COALESCE((SELECT value FROM app_config WHERE key = 'pivot_currency'), 'EUR')",
+            "SELECT COALESCE(\
+                (SELECT dc.code_iso FROM app_config ac \
+                 JOIN dim_currency dc ON dc.id = CAST(ac.value AS BIGINT) \
+                 WHERE ac.key = 'pivot_currency_id'),\
+                (SELECT value FROM app_config WHERE key = 'pivot_currency'),\
+                'EUR'\
+             )",
             [],
             |r| r.get::<_, String>(0),
         )?;

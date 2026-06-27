@@ -409,6 +409,19 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
                     if let (Some((ht, _)), Some((tt, tc))) =
                         (dimension_master(&host), dimension_master(&target))
                     {
+                        // Si cette (table, colonne) est déjà déclarée en `ri()` dans
+                        // les REFERENCES statiques (stockage id, contrat code), on
+                        // l'omet : ajouter un doublon à target_display_column=None
+                        // ferait croire à rename_code que c'est une FK code-keyed
+                        // cascadable, alors que la colonne est INTEGER (B1).
+                        let already_ri = REFERENCES.iter().any(|r| {
+                            r.table == ht
+                                && r.column == column
+                                && r.target_display_column.is_some()
+                        });
+                        if already_ri {
+                            continue;
+                        }
                         out.push(OwnedReference {
                             table: ht.to_string(),
                             column,
