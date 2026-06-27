@@ -37,9 +37,14 @@ fn amt(
     account: &str,
     flow: &str,
 ) -> f64 {
+    // Sous B1, `fact_entry.{entity,account,flow}` sont des ids INTEGER : on résout
+    // les codes du test vers leurs ids via sous-requêtes sur la master data.
     con.query_row(
         "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-         WHERE consolidation_id=? AND level=? AND entity=? AND account=? AND flow=?",
+         WHERE consolidation_id=? AND level=? \
+           AND entity=(SELECT id FROM dim_entity WHERE code=?) \
+           AND account=(SELECT id FROM dim_account WHERE code=?) \
+           AND flow=(SELECT id FROM dim_flow WHERE code=?)",
         duckdb::params![consolidation_id, level, entity, account, flow],
         |r| r.get(0),
     )

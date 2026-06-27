@@ -28,26 +28,39 @@ use std::path::PathBuf;
 /// il faudra alors remplacer ces colonnes par des `JOIN dim_x ON x.id = f.x_id`
 /// projetant `x.code`. Le `SELECT` ci-dessous est le **seul** endroit à adapter ;
 /// l'ordre des colonnes et le format des montants doivent rester identiques.
+// B1 étape 4 : fact_entry stocke les 10 dims en INTEGER ids → JOINs pour
+// re-projeter les codes métier. L'ordre et le format restent identiques.
 const BUSINESS_SELECT: &str = "\
 SELECT
-    level,
-    phase,
-    entity,
-    entry_period,
-    period,
-    account,
-    flow,
-    currency,
-    nature,
-    COALESCE(partner, '')   AS partner,
-    COALESCE(share, '')     AS share,
-    COALESCE(analysis, '')  AS analysis,
-    COALESCE(analysis2, '') AS analysis2,
-    CAST(amount AS VARCHAR) AS amount
-FROM fact_entry
+    f.level,
+    ph.code                          AS phase,
+    de.code                          AS entity,
+    ep.code                          AS entry_period,
+    p.code                           AS period,
+    da.code                          AS account,
+    df.code                          AS flow,
+    cu.code_iso                      AS currency,
+    n.code                           AS nature,
+    COALESCE(par.code, '')           AS partner,
+    COALESCE(sh.code, '')            AS share,
+    COALESCE(f.analysis, '')         AS analysis,
+    COALESCE(f.analysis2, '')        AS analysis2,
+    CAST(f.amount AS VARCHAR)        AS amount
+FROM fact_entry f
+JOIN dim_scenario_category ph ON ph.id = f.phase
+JOIN dim_entity de             ON de.id = f.entity
+JOIN dim_period ep             ON ep.id = f.entry_period
+JOIN dim_period p              ON p.id  = f.period
+JOIN dim_account da            ON da.id = f.account
+JOIN dim_flow df               ON df.id = f.flow
+JOIN dim_currency cu           ON cu.id = f.currency
+JOIN dim_nature n              ON n.id  = f.nature
+LEFT JOIN dim_entity par       ON par.id = f.partner
+LEFT JOIN dim_entity sh        ON sh.id  = f.share
 ORDER BY
-    level, phase, entity, entry_period, period, account, flow, currency,
-    nature, partner, share, analysis, analysis2, amount";
+    f.level, ph.code, de.code, ep.code, p.code, da.code, df.code, cu.code_iso,
+    n.code, COALESCE(par.code, ''), COALESCE(sh.code, ''),
+    COALESCE(f.analysis, ''), COALESCE(f.analysis2, ''), CAST(f.amount AS VARCHAR)";
 
 /// Colonnes du snapshot, dans l'ordre du `SELECT` (en-tête TSV).
 const SNAPSHOT_HEADER: &str = "level\tphase\tentity\tentry_period\tperiod\taccount\tflow\t\
@@ -63,7 +76,7 @@ fn setup() -> Connection {
         .query_row(
             "SELECT id FROM dim_consolidation \
              WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
-               AND exercice='2024'",
+               AND exercice = (SELECT id FROM dim_period WHERE code='2024')",
             [],
             |r| r.get(0),
         )

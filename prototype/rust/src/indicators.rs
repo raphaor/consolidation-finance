@@ -31,6 +31,10 @@
 //! dérivée de présentation).
 
 use crate::formula::{self, CoeffJoins, OperandResolver, Resolved};
+use crate::json_migration::{
+    denormalize_aggregate_definition, normalize_aggregate_definition,
+    normalize_indicator_expression,
+};
 use crate::state::{db_err, lock_con, AppError, AppState};
 use crate::{characteristics, custom_references, dimensions, references};
 use axum::{
@@ -250,13 +254,13 @@ fn build_aggregate_sql(
                     s.dim
                 ));
             }
-            let (bt, bk) = references::dimension_master(&base)
+            let (bt, _) = references::dimension_master_id_join(&base)
                 .ok_or_else(|| format!("dimension sans master data : {base}"))?;
             add_join(
                 b,
                 &format!("via_{via}"),
                 format!(
-                    "\nLEFT JOIN {bt} imd_{via} ON imd_{via}.{bk} = e.{base}\
+                    "\nLEFT JOIN {bt} imd_{via} ON imd_{via}.id = e.{base}\
                      \nLEFT JOIN car_{via} icg_{via} ON icg_{via}.code = imd_{via}.\"{via}\""
                 ),
             );
@@ -268,12 +272,12 @@ fn build_aggregate_sql(
             custom_references::target_of(con, &s.dim, rf)
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("référence inconnue : {}.{}", s.dim, rf))?;
-            let (ht, hk) = references::dimension_master(&s.dim)
+            let (ht, _) = references::dimension_master_id_join(&s.dim)
                 .ok_or_else(|| format!("dimension sans master data : {}", s.dim))?;
             add_join(
                 b,
                 &format!("ref_{}_{rf}", s.dim),
-                format!("\nLEFT JOIN {ht} imdr_{rf} ON imdr_{rf}.{hk} = e.{}", s.dim),
+                format!("\nLEFT JOIN {ht} imdr_{rf} ON imdr_{rf}.id = e.{}", s.dim),
             );
             format!("imdr_{rf}.\"{rf}\"")
         } else if let Some(attr) = &s.attr {
@@ -283,18 +287,34 @@ fn build_aggregate_sql(
             if references::native_enum_lookup(&s.dim, attr).is_none() {
                 return Err(format!("enum natif inconnu : {}.{}", s.dim, attr));
             }
-            let (ht, hk) = references::dimension_master(&s.dim)
+            let (ht, _) = references::dimension_master_id_join(&s.dim)
                 .ok_or_else(|| format!("dimension sans master data : {}", s.dim))?;
             add_join(
                 b,
                 &format!("attr_{}_{attr}", s.dim),
                 format!(
-                    "\nLEFT JOIN {ht} imda_{}_{attr} ON imda_{}_{attr}.{hk} = e.{}",
+                    "\nLEFT JOIN {ht} imda_{}_{attr} ON imda_{}_{attr}.id = e.{}",
                     s.dim, s.dim, s.dim
                 ),
             );
             format!("imda_{}_{attr}.{attr}", s.dim)
+        } else if let Some((mt, _)) = references::dimension_master_id_join(&s.dim) {
+            // Dimension à master data : sous B1 `e.{dim}` est un INTEGER id, mais
+            // la sélection cite le **code** (contrat externe). Joindre la master
+            // sur l'id et filtrer sur sa colonne de code.
+            let (_, code_col) = references::dimension_master(&s.dim)
+                .ok_or_else(|| format!("dimension sans master data : {}", s.dim))?;
+            add_join(
+                b,
+                &format!("md_{}", s.dim),
+                format!(
+                    "\nLEFT JOIN {mt} imdd_{} ON imdd_{}.id = e.{}",
+                    s.dim, s.dim, s.dim
+                ),
+            );
+            format!("imdd_{}.{code_col}", s.dim)
         } else {
+            // Dimension libre (analysis, analysis2, custom) : reste en TEXT.
             format!("e.{}", s.dim)
         };
         let cond = push_condition(&operand, &s.op, &s.val, &mut b.params)?;
@@ -317,8 +337,13 @@ struct IndicatorResolver<'a> {
 
 impl<'a> OperandResolver for IndicatorResolver<'a> {
     fn resolve(&self, name: &str) -> Result<Resolved, String> {
-        // 1. Poste (dim_aggregate) ?
-        if let Some(def) = load_aggregate_def(self.con, name).map_err(|e| e.to_string())? {
+        // 1. Poste (dim_aggregate) — par code ou par id entier (post-étape 6 B1).
+        let agg_def = if let Ok(id) = name.parse::<i64>() {
+            load_aggregate_def_by_id(self.con, id).map_err(|e| e.to_string())?
+        } else {
+            load_aggregate_def(self.con, name).map_err(|e| e.to_string())?
+        };
+        if let Some(def) = agg_def {
             let agg = parse_aggregate(&def)?;
             let mut b = self.builder.borrow_mut();
             let sql = build_aggregate_sql(self.con, &mut b, name, &agg)?;
@@ -327,8 +352,13 @@ impl<'a> OperandResolver for IndicatorResolver<'a> {
                 joins: CoeffJoins::default(),
             });
         }
-        // 2. Indicateur (dim_indicator) ? → inline récursif.
-        if let Some(expr) = load_indicator_expr(self.con, name).map_err(|e| e.to_string())? {
+        // 2. Indicateur (dim_indicator) ? → inline récursif. Par code ou par id.
+        let ind_expr = if let Ok(id) = name.parse::<i64>() {
+            load_indicator_expr_by_id(self.con, id).map_err(|e| e.to_string())?
+        } else {
+            load_indicator_expr(self.con, name).map_err(|e| e.to_string())?
+        };
+        if let Some(expr) = ind_expr {
             {
                 let mut b = self.builder.borrow_mut();
                 if b.stack.iter().any(|s| s == name) {
@@ -363,10 +393,36 @@ fn load_aggregate_def(con: &Connection, code: &str) -> duckdb::Result<Option<Str
     })
 }
 
+fn load_aggregate_def_by_id(con: &Connection, id: i64) -> duckdb::Result<Option<String>> {
+    con.query_row(
+        "SELECT definition FROM dim_aggregate WHERE id = ?",
+        params![id],
+        |r| r.get::<_, String>(0),
+    )
+    .map(Some)
+    .or_else(|e| match e {
+        duckdb::Error::QueryReturnedNoRows => Ok(None),
+        other => Err(other),
+    })
+}
+
 fn load_indicator_expr(con: &Connection, code: &str) -> duckdb::Result<Option<String>> {
     con.query_row(
         "SELECT expression FROM dim_indicator WHERE code = ?",
         params![code],
+        |r| r.get::<_, String>(0),
+    )
+    .map(Some)
+    .or_else(|e| match e {
+        duckdb::Error::QueryReturnedNoRows => Ok(None),
+        other => Err(other),
+    })
+}
+
+fn load_indicator_expr_by_id(con: &Connection, id: i64) -> duckdb::Result<Option<String>> {
+    con.query_row(
+        "SELECT expression FROM dim_indicator WHERE id = ?",
+        params![id],
         |r| r.get::<_, String>(0),
     )
     .map(Some)
@@ -560,21 +616,36 @@ async fn list_aggregates(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<AggregateOut>>, AppError> {
     let con = lock_con(&state)?;
+    // Charger les lignes brutes (avec ids en JSON).
     let mut stmt = con
         .prepare("SELECT code, libelle, level, definition FROM dim_aggregate ORDER BY code")
         .map_err(db_err)?;
-    let rows = stmt
+    let raw_rows = stmt
         .query_map([], |r| {
-            Ok(AggregateOut {
-                code: r.get(0)?,
-                libelle: r.get(1)?,
-                level: r.get(2)?,
-                definition: text_to_json(&r.get::<_, String>(3)?),
-            })
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
         })
         .map_err(db_err)?
         .collect::<duckdb::Result<Vec<_>>>()
         .map_err(db_err)?;
+    // Dénormaliser (ids → codes) pour l'exposition API.
+    let rows = raw_rows
+        .into_iter()
+        .map(|(code, libelle, level, def_text)| {
+            let denorm = denormalize_aggregate_definition(&con, &def_text)
+            .unwrap_or(def_text);
+            AggregateOut {
+                code,
+                libelle,
+                level,
+                definition: text_to_json(&denorm),
+            }
+        })
+        .collect::<Vec<_>>();
     Ok(Json(rows))
 }
 
@@ -597,6 +668,8 @@ async fn create_aggregate(
         return Err(AppError::conflict(format!("poste {} existe déjà", body.code)));
     }
     validate_aggregate(&con, &def_with_level).map_err(AppError::bad_request)?;
+    let def_with_level =
+        normalize_aggregate_definition(&con, &def_with_level).map_err(db_err)?;
     con.execute(
         "INSERT INTO dim_aggregate (code, libelle, level, definition) VALUES (?, ?, ?, ?)",
         params![body.code, body.libelle, body.level, def_with_level],
@@ -625,6 +698,8 @@ async fn update_aggregate(
     let def_with_level = inject_level(&def_text, &body.level)?;
     let con = lock_con(&state)?;
     validate_aggregate(&con, &def_with_level).map_err(AppError::bad_request)?;
+    let def_with_level =
+        normalize_aggregate_definition(&con, &def_with_level).map_err(db_err)?;
     let n = con
         .execute(
             "UPDATE dim_aggregate SET libelle = ?, level = ?, definition = ? WHERE code = ?",
@@ -710,10 +785,12 @@ async fn create_indicator(
         )));
     }
     validate_indicator(&con, &body.expression, &body.grain).map_err(AppError::bad_request)?;
+    let expression =
+        normalize_indicator_expression(&con, &body.expression).map_err(db_err)?;
     let grain_json = serde_json::to_string(&body.grain).unwrap_or_else(|_| "[]".into());
     con.execute(
         "INSERT INTO dim_indicator (code, libelle, expression, grain, format) VALUES (?,?,?,?,?)",
-        params![body.code, body.libelle, body.expression, grain_json, body.format],
+        params![body.code, body.libelle, expression, grain_json, body.format],
     )
     .map_err(db_err)?;
     Ok((
@@ -738,11 +815,13 @@ async fn update_indicator(
     }
     let con = lock_con(&state)?;
     validate_indicator(&con, &body.expression, &body.grain).map_err(AppError::bad_request)?;
+    let expression =
+        normalize_indicator_expression(&con, &body.expression).map_err(db_err)?;
     let grain_json = serde_json::to_string(&body.grain).unwrap_or_else(|_| "[]".into());
     let n = con
         .execute(
             "UPDATE dim_indicator SET libelle=?, expression=?, grain=?, format=? WHERE code=?",
-            params![body.libelle, body.expression, grain_json, body.format, code],
+            params![body.libelle, expression, grain_json, body.format, code],
         )
         .map_err(db_err)?;
     if n == 0 {
@@ -889,7 +968,10 @@ mod tests {
         );
         let (sql, _, _) = compile_indicator(&con, "[ca]", &[], 1).unwrap();
         assert!(sql.contains("FILTER (WHERE e.level = 'consolidated'"));
-        assert!(sql.contains("e.account = ?"));
+        // Sous B1 `e.account` est un id : la sélection directe joint la master
+        // et filtre sur le code.
+        assert!(sql.contains("imdd_account.code = ?"));
+        assert!(sql.contains("LEFT JOIN dim_account imdd_account ON imdd_account.id = e.account"));
     }
 
     #[test]

@@ -452,6 +452,74 @@ pub fn migrate_sat_perimeter_methode_to_id(con: &Connection) -> duckdb::Result<(
     Ok(())
 }
 
+/// Migration B1 : bascule `dim_ruleset_item.ruleset_code` du code (TEXT) vers la
+/// clé technique (id, INTEGER) sur une base existante. Idempotent.
+///
+/// `ruleset_code` fait partie de la PK composite → reconstruction de la table
+/// (même patron que `sat_flow_scheme_item`). Rend la dimension `dim_ruleset`
+/// entièrement flippée (renommable).
+pub fn migrate_ruleset_item_fk_to_id(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "dim_ruleset_item")? {
+        return Ok(());
+    }
+    if column_is_int(con, "dim_ruleset_item", "ruleset_code")? {
+        return Ok(()); // déjà migrée
+    }
+    let create_mig = crate::schema::DDL_DIM_RULESET_ITEM
+        .replace("dim_ruleset_item (", "dim_ruleset_item__mig (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         INSERT INTO dim_ruleset_item__mig (ruleset_code, ordre, rule_code)
+         SELECT (SELECT rs.id FROM dim_ruleset rs WHERE rs.code = i.ruleset_code),
+                i.ordre, i.rule_code
+         FROM dim_ruleset_item i;
+         DROP TABLE dim_ruleset_item;
+         ALTER TABLE dim_ruleset_item__mig RENAME TO dim_ruleset_item;",
+    ))?;
+    Ok(())
+}
+
+/// Migration B1 étape 4 : bascule les 10 colonnes dimensionnelles de `fact_entry`
+/// du stockage **code (TEXT)** vers la **clé technique (id, INTEGER)**. Idempotent.
+///
+/// `fact_entry` est une **donnée dérivée** (produite par le pipeline) : on peut la
+/// reconstruire à zéro sans perte métier. La migration **tronque** la table et la
+/// recrée au schéma cible ; l'utilisateur doit relancer le pipeline après cette
+/// migration.
+///
+/// Met également à jour la vue `v_flow_behavior` vers sa définition id-aware
+/// (expose `flux_*_id` en INTEGER à la place des codes TEXT).
+///
+/// À appeler au démarrage serveur **après** [`ensure_ids`] (toutes les dimensions
+/// doivent déjà avoir leur `id`).
+pub fn migrate_fact_entry_to_ids(con: &Connection) -> duckdb::Result<()> {
+    if !table_exists(con, "fact_entry")? {
+        return Ok(());
+    }
+    if column_is_int(con, "fact_entry", "entity")? {
+        return Ok(()); // déjà migrée
+    }
+    // Reconstruction au schéma cible (INTEGER). Les données sont dérivées →
+    // truncate propre, pas de réinjection. L'utilisateur relance le pipeline.
+    let create_mig = crate::schema::DDL_FACT_ENTRY
+        .replace("fact_entry (", "fact_entry__b1 (");
+    con.execute_batch(&format!(
+        "{create_mig}
+         DROP TABLE fact_entry;
+         ALTER TABLE fact_entry__b1 RENAME TO fact_entry;"
+    ))?;
+    // Réapplique les colonnes custom (dimensions analytiques) perdues lors de
+    // la reconstruction (les customs TEXT ne sont pas dans DDL_FACT_ENTRY).
+    let customs = crate::dimensions::load_customs(con).unwrap_or_default();
+    for d in &customs {
+        let _ = con.execute(&format!("ALTER TABLE fact_entry ADD COLUMN {} TEXT", d.name), []);
+    }
+    // Mise à jour de la vue v_flow_behavior → définition id-aware.
+    let _ = con.execute_batch("DROP VIEW IF EXISTS v_flow_behavior");
+    con.execute_batch(crate::schema::DDL_V_FLOW_BEHAVIOR)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

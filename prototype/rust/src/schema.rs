@@ -217,15 +217,21 @@ CREATE TABLE sat_flow_scheme_item (
 pub const DDL_V_FLOW_BEHAVIOR: &str = "\
 CREATE VIEW v_flow_behavior AS
 SELECT
-    a.code           AS account,
-    si.flow          AS flow,
+    a.id                  AS account,
+    df.id                 AS flow,
     si.taux_conversion,
     si.flux_ecart,
+    dfe.id                AS flux_ecart_id,
     si.flux_de_report,
-    si.flux_a_nouveau
+    dfr.id                AS flux_de_report_id,
+    si.flux_a_nouveau,
+    dfan.id               AS flux_a_nouveau_id
 FROM dim_account a
-LEFT JOIN sat_flow_scheme_item si
-  ON si.scheme = a.flow_scheme;";
+LEFT JOIN sat_flow_scheme_item si  ON si.scheme = a.flow_scheme
+LEFT JOIN dim_flow df   ON df.code  = si.flow
+LEFT JOIN dim_flow dfe  ON dfe.code = si.flux_ecart
+LEFT JOIN dim_flow dfr  ON dfr.code = si.flux_de_report
+LEFT JOIN dim_flow dfan ON dfan.code = si.flux_a_nouveau;";
 
 /// 4b. dim_sous_classe : sous-classes de comptes (actif / passif / charges / produits).
 ///
@@ -353,9 +359,10 @@ CREATE TABLE dim_ruleset (
 /// 8d. dim_ruleset_item : items ordonnés d'un jeu (lien vers dim_rule).
 ///
 /// La PK (ruleset_code, ordre) garantit l'unicité de l'ordre dans un jeu.
+/// `ruleset_code` stocke l'`id` technique de `dim_ruleset` (chantier B1).
 pub const DDL_DIM_RULESET_ITEM: &str = "\
 CREATE TABLE dim_ruleset_item (
-    ruleset_code TEXT,
+    ruleset_code INTEGER,
     ordre        INTEGER,
     rule_code    TEXT,
     PRIMARY KEY (ruleset_code, ordre)
@@ -535,16 +542,16 @@ pub const DDL_FACT_ENTRY: &str = "\
 CREATE TABLE fact_entry (
     id               INTEGER DEFAULT nextval('seq_entry'),
     consolidation_id INTEGER,
-    phase            TEXT,
-    entity           TEXT,
-    entry_period     TEXT,
-    period           TEXT,
-    account          TEXT,
-    flow             TEXT,
-    currency         TEXT,
-    nature           TEXT NOT NULL,
-    partner          TEXT,
-    share            TEXT,
+    phase            INTEGER,
+    entity           INTEGER,
+    entry_period     INTEGER,
+    period           INTEGER,
+    account          INTEGER,
+    flow             INTEGER,
+    currency         INTEGER,
+    nature           INTEGER NOT NULL,
+    partner          INTEGER,
+    share            INTEGER,
     analysis         TEXT,
     analysis2        TEXT,
     level            TEXT CHECK (level IN ('corporate', 'converted', 'consolidated')),
@@ -588,7 +595,8 @@ pub const ALL_DDL: &[&str] = &[
     DDL_SAT_PERIMETER,
     DDL_SAT_EXCHANGE_RATE,
     DDL_SAT_FLOW_SCHEME_ITEM,
-    DDL_V_FLOW_BEHAVIOR,
+    // NOTE: DDL_V_FLOW_BEHAVIOR est créée APRÈS ensure_ids dans create_schema
+    // car elle référence les colonnes `id` ajoutées par ensure_ids.
     DDL_DIM_RULE,
     DDL_DIM_RULESET,
     DDL_DIM_RULESET_ITEM,
@@ -688,6 +696,11 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
     // 9. Doter chaque dimension d'un `id` technique (chantier B1, étape 1).
     //    Idempotent ; non-breaking (les `id` ne sont pas encore consommés).
     crate::surrogate::ensure_ids(con)?;
+
+    // 10. Créer la vue v_flow_behavior APRÈS ensure_ids car elle référence les
+    //     colonnes `id` ajoutées par cette étape (dim_account.id, dim_flow.id).
+    //     `ALL_DROP` la supprime ; elle n'est donc pas dans `ALL_DDL`.
+    con.execute_batch(DDL_V_FLOW_BEHAVIOR)?;
 
     Ok(())
 }

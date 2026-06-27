@@ -267,14 +267,20 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
         for (dim, dest) in &op.destination {
             if dest.mode == "override" {
                 if let (Some(v), Some(r)) = (&dest.value, references::entry_dimension_target(dim)) {
-                    if !v.is_empty()
-                        && !references::value_exists(con, r.target_table, r.target_column, v)
-                            .map_err(|e| e.to_string())?
-                    {
-                        return Err(format!(
-                            "destination.{dim} : '{v}' inexistant dans {}.{}",
-                            r.target_table, r.target_column
-                        ));
+                    match v {
+                        JsonValue::String(s) if !s.is_empty() => {
+                            if !references::value_exists(con, r.target_table, r.target_column, s)
+                                .map_err(|e| e.to_string())?
+                            {
+                                return Err(format!(
+                                    "destination.{dim} : '{s}' inexistant dans {}.{}",
+                                    r.target_table, r.target_column
+                                ));
+                            }
+                        }
+                        // Id entier (étape 6 B1) : la normalisation garantit l'existence.
+                        JsonValue::Number(_) => {}
+                        _ => {}
                     }
                 }
             } else if dest.mode == "map" {
@@ -505,7 +511,10 @@ enum Coefficient {
 #[derive(Debug, Clone)]
 struct Destination {
     mode: String, // "inherit" | "override" | "null" | "map" | "map_ref"
-    value: Option<String>,
+    /// Mode `override` : valeur à injecter. Deux formes possibles :
+    /// - `String` : code legacy (l'exécuteur résout code→id via sous-requête).
+    /// - `Number` : id migré (étape 6 B1 — injection directe, pas de sous-requête).
+    value: Option<JsonValue>,
     /// Mode `map` : caractéristique N1 (`via`) traversée et attribut N2 (`attr`)
     /// dont la valeur surcharge la dimension. La valeur est résolue par jointure
     /// sur la dimension de base de la caractéristique (cf. `exec_operation`).
@@ -748,7 +757,15 @@ fn parse_destination(v: &JsonValue) -> RuleResult_<Destination> {
     let mode = expect_str(obj, "mode")?;
     let (value, via, attr, ref_field) = match mode.as_str() {
         "inherit" | "null" => (None, None, None, None),
-        "override" => (Some(expect_str(obj, "value")?), None, None, None),
+        "override" => {
+            // Accepte string (code legacy) ou entier (id migré étape 6 B1).
+            let value = match obj.get("value") {
+                Some(JsonValue::String(s)) => Some(JsonValue::String(s.clone())),
+                Some(JsonValue::Number(n)) => Some(JsonValue::Number(n.clone())),
+                _ => return Err("destination.value doit être une chaîne (code) ou un entier (id)".into()),
+            };
+            (value, None, None, None)
+        }
         // Mode `map` : la valeur provient de l'attribut N2 `attr` de la
         // caractéristique N1 `via` (existence validée à l'enregistrement et à
         // l'exécution — cf. validate_definition / exec_operation).
@@ -919,33 +936,55 @@ fn dest_expr(
     params: &mut Vec<DbValue>,
 ) -> String {
     let found = destinations.iter().find(|(k, _)| k == dim);
+    // Pour les dims id-typées (master data, fact_entry stocke INTEGER après B1 étape 4),
+    // les modes override / map / map_ref doivent produire un id, pas un code TEXT.
+    let id_typed = references::dimension_master(dim);
     match found {
-        None => format!("e.{dim}"), // défaut = hérité
+        None => format!("e.{dim}"),
         Some((_, d)) => match d.mode.as_str() {
             "inherit" => format!("e.{dim}"),
             "null" => "NULL".to_string(),
-            "override" => {
-                params.push(DbValue::Text(d.value.clone().unwrap_or_default()));
-                "?".to_string()
-            }
-            // Mode `map` : valeur tirée de l'attribut N2 via l'alias de jointure
-            // `cg_<via>` (cf. `exec_operation`). `via`/`attr` sont validés
-            // (alphanumériques + existence) avant interpolation.
+            "override" => match &d.value {
+                Some(JsonValue::Number(n)) if n.as_i64().is_some() => {
+                    // Id migré (étape 6 B1) : injection directe, pas de sous-requête.
+                    params.push(DbValue::BigInt(n.as_i64().unwrap()));
+                    "?".to_string()
+                }
+                Some(v) => {
+                    // Code legacy (chaîne) : sous-requête code→id ou liaison directe.
+                    params.push(json_to_dbvalue(v));
+                    if let Some((table, code_col)) = id_typed {
+                        format!("(SELECT id FROM {table} WHERE {code_col} = ?)")
+                    } else {
+                        "?".to_string()
+                    }
+                }
+                None => format!("e.{dim}"),
+            },
             "map" => {
                 let via = d.via.clone().unwrap_or_default();
                 let attr = d.attr.clone().unwrap_or_default();
-                format!("cg_{via}.\"{attr}\"")
+                if let Some((table, code_col)) = id_typed {
+                    format!("(SELECT id FROM {table} WHERE {code_col} = cg_{via}.\"{attr}\")")
+                } else {
+                    format!("cg_{via}.\"{attr}\"")
+                }
             }
-            // Mode `map_ref` : valeur tirée d'une référence directe via l'alias
-            // `mdr_<ref>` (master data de la dimension écrite, cf. exec_operation).
-            // `ref` est validé (alphanumérique + existence) avant interpolation.
-            // FK native ri() : la colonne hôte est un id → on lit le code via la
-            // jointure cible `mdrt_<ref>` (ajoutée dans exec_operation).
             "map_ref" => {
                 let r = d.ref_field.clone().unwrap_or_default();
                 match references::ref_code_contract(dim, &r) {
-                    Some((_, code_col)) => format!("mdrt_{r}.\"{code_col}\""),
-                    None => format!("mdr_{r}.\"{r}\""),
+                    Some(_) => {
+                        // FK native ri() : mdrt_<r>.id est déjà l'id de la cible.
+                        format!("mdrt_{r}.id")
+                    }
+                    None => {
+                        // Patron B (TEXT) : mdr_<r>.{r} est un code → résoudre en id.
+                        if let Some((table, code_col)) = id_typed {
+                            format!("(SELECT id FROM {table} WHERE {code_col} = mdr_{r}.\"{r}\")")
+                        } else {
+                            format!("mdr_{r}.\"{r}\"")
+                        }
+                    }
                 }
             }
             _ => format!("e.{dim}"),
@@ -1121,13 +1160,17 @@ fn exec_operation(
 
     // JOINs sur sat_perimeter.
     let mut joins = String::new();
+    // Bridge commun fact_entry.entry_period (INTEGER) → sat_perimeter.period (TEXT).
+    let period_bridge =
+        "(SELECT pe.code FROM dim_period pe WHERE pe.id = e.entry_period)";
     if need_p_ent {
-        joins.push_str(
-            "\nJOIN sat_perimeter p_ent\n  \
-                ON p_ent.entity = e.entity\n \
+        joins.push_str(&format!(
+            "\nJOIN dim_entity _de_p_ent ON _de_p_ent.id = e.entity\
+             \nJOIN sat_perimeter p_ent\n  \
+                ON p_ent.entity = _de_p_ent.code\n \
                 AND p_ent.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c WHERE c.id = e.consolidation_id)\n \
-                AND p_ent.period = e.entry_period",
-        );
+                AND p_ent.period = {period_bridge}"
+        ));
         for c in scope.iter().filter(|c| c.target == "entity") {
             let operand = format!("p_ent.{}", c.dim);
             let eff_val = scope_effective_val(con, &c.dim, &c.val)?;
@@ -1137,12 +1180,13 @@ fn exec_operation(
         }
     }
     if need_p_part {
-        joins.push_str(
-            "\nJOIN sat_perimeter p_part\n  \
-                ON p_part.entity = e.partner\n \
+        joins.push_str(&format!(
+            "\nJOIN dim_entity _de_p_part ON _de_p_part.id = e.partner\
+             \nJOIN sat_perimeter p_part\n  \
+                ON p_part.entity = _de_p_part.code\n \
                 AND p_part.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c WHERE c.id = e.consolidation_id)\n \
-                AND p_part.period = e.entry_period",
-        );
+                AND p_part.period = {period_bridge}"
+        ));
         for c in scope.iter().filter(|c| c.target == "partner") {
             let operand = format!("p_part.{}", c.dim);
             let eff_val = scope_effective_val(con, &c.dim, &c.val)?;
@@ -1152,12 +1196,13 @@ fn exec_operation(
         }
     }
     if need_p_share {
-        joins.push_str(
-            "\nJOIN sat_perimeter p_share\n  \
-                ON p_share.entity = e.share\n \
+        joins.push_str(&format!(
+            "\nJOIN dim_entity _de_p_share ON _de_p_share.id = e.share\
+             \nJOIN sat_perimeter p_share\n  \
+                ON p_share.entity = _de_p_share.code\n \
                 AND p_share.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c WHERE c.id = e.consolidation_id)\n \
-                AND p_share.period = e.entry_period",
-        );
+                AND p_share.period = {period_bridge}"
+        ));
         for c in scope.iter().filter(|c| c.target == "share") {
             let operand = format!("p_share.{}", c.dim);
             let eff_val = scope_effective_val(con, &c.dim, &c.val)?;
@@ -1189,8 +1234,9 @@ fn exec_operation(
         };
         if needed {
             joins.push_str(&format!(
-                "\nLEFT JOIN sat_perimeter {alias}\n  \
-                    ON {alias}.entity = e.{key_col}\n \
+                "\nLEFT JOIN dim_entity _de_{alias} ON _de_{alias}.id = e.{key_col}\
+                 \nLEFT JOIN sat_perimeter {alias}\n  \
+                    ON {alias}.entity = _de_{alias}.code\n \
                     AND {alias}.perimeter_set = (\
                         SELECT s_an.perimeter_set FROM dim_consolidation s_cur \
                         JOIN dim_consolidation s_an ON s_an.id = s_cur.a_nouveau_consolidation_id \
@@ -1225,14 +1271,14 @@ fn exec_operation(
                 "destination map : caractéristique inconnue : {via}"
             ))
         })?;
-        let (base_table, base_key) = references::dimension_master(&base_dim).ok_or_else(|| {
+        let (base_table, _) = references::dimension_master_id_join(&base_dim).ok_or_else(|| {
             duckdb_synthesis_error(format!(
                 "destination map : dimension de base sans master data : {base_dim}"
             ))
         })?;
         let value_table = format!("car_{via}");
         joins.push_str(&format!(
-            "\nJOIN {base_table} md_{via}\n  ON md_{via}.{base_key} = e.{base_dim}\
+            "\nJOIN {base_table} md_{via}\n  ON md_{via}.id = e.{base_dim}\
              \nJOIN {value_table} cg_{via}\n  ON cg_{via}.code = md_{via}.\"{via}\""
         ));
     }
@@ -1267,18 +1313,13 @@ fn exec_operation(
                     "destination map_ref : dimension hôte introuvable pour ref={r}"
                 ))
             })?;
-        let (host_table, host_key) = references::dimension_master(&host_dim).ok_or_else(|| {
+        let (host_table, _) = references::dimension_master_id_join(&host_dim).ok_or_else(|| {
             duckdb_synthesis_error(format!(
                 "destination map_ref : dimension hôte sans master data : {host_dim}"
             ))
         })?;
-        // La condition `IS NOT NULL` sur la colonne référencée est essentielle :
-        // sans elle, l'INNER JOIN réussirait même pour les membres sans valeur
-        // (la master data existe toujours), écrivant un `NULL` dans fact_entry
-        // (rejeté par la contrainte NOT NULL). Symétrique au comportement `map`
-        // (qui exclut les membres non classés via le double JOIN sur car_<via>).
         // FK native ri() : la colonne hôte stocke un id → on joint la cible sur
-        // l'id (alias mdrt_<ref>) pour lire le code (cf. dest_expr map_ref).
+        // l'id (alias mdrt_<ref>) pour lire l'id via mdrt_<ref>.id dans dest_expr.
         let target_join = match references::ref_code_contract(&host_dim, r) {
             Some((target_table, _)) => {
                 format!("\nJOIN {target_table} mdrt_{r}\n  ON mdrt_{r}.id = mdr_{r}.\"{r}\"")
@@ -1286,7 +1327,7 @@ fn exec_operation(
             None => String::new(),
         };
         joins.push_str(&format!(
-            "\nJOIN {host_table} mdr_{r}\n  ON mdr_{r}.{host_key} = e.{host_dim}\
+            "\nJOIN {host_table} mdr_{r}\n  ON mdr_{r}.id = e.{host_dim}\
              \n  AND mdr_{r}.\"{r}\" IS NOT NULL{target_join}"
         ));
     }
@@ -1377,14 +1418,14 @@ fn exec_operation(
                 "selection via : caractéristique inconnue : {via}"
             ))
         })?;
-        let (base_table, base_key) = references::dimension_master(&base_dim).ok_or_else(|| {
+        let (base_table, _) = references::dimension_master_id_join(&base_dim).ok_or_else(|| {
             duckdb_synthesis_error(format!(
                 "selection via : dimension de base sans master data : {base_dim}"
             ))
         })?;
         let value_table = format!("car_{via}");
         joins.push_str(&format!(
-            "\nJOIN {base_table} smd_{via}\n  ON smd_{via}.{base_key} = e.{base_dim}\
+            "\nJOIN {base_table} smd_{via}\n  ON smd_{via}.id = e.{base_dim}\
              \nJOIN {value_table} scg_{via}\n  ON scg_{via}.code = smd_{via}.\"{via}\""
         ));
     }
@@ -1392,12 +1433,11 @@ fn exec_operation(
     // `IS NOT NULL` sur la colonne référencée pour exclure les membres sans
     // valeur de référence (symétrique au comportement destination `map_ref`).
     for (rf, host_dim) in &sel_refs {
-        let (host_table, host_key) = references::dimension_master(host_dim).ok_or_else(|| {
+        let (host_table, _) = references::dimension_master_id_join(host_dim).ok_or_else(|| {
             duckdb_synthesis_error(format!(
                 "selection ref : dimension hôte sans master data : {host_dim}"
             ))
         })?;
-        // FK native ri() : colonne hôte = id → jointure cible sur id (smdrt_<rf>).
         let target_join = match references::ref_code_contract(host_dim, rf) {
             Some((target_table, _)) => {
                 format!("\nJOIN {target_table} smdrt_{rf}\n  ON smdrt_{rf}.id = smdr_{rf}.\"{rf}\"")
@@ -1405,21 +1445,18 @@ fn exec_operation(
             None => String::new(),
         };
         joins.push_str(&format!(
-            "\nJOIN {host_table} smdr_{rf}\n  ON smdr_{rf}.{host_key} = e.{host_dim}\
+            "\nJOIN {host_table} smdr_{rf}\n  ON smdr_{rf}.id = e.{host_dim}\
              \n  AND smdr_{rf}.\"{rf}\" IS NOT NULL{target_join}"
         ));
     }
-    // JOINs enums natifs de sélection : dim_<host> smda_<host>_<attr>.
-    // Alias suffixé par la dimension pour éviter les collisions si plusieurs
-    // dimensions portent un enum du même nom (ex. classe sur account/sous_classe).
     for (attr, host_dim) in &sel_attrs {
-        let (host_table, host_key) = references::dimension_master(host_dim).ok_or_else(|| {
+        let (host_table, _) = references::dimension_master_id_join(host_dim).ok_or_else(|| {
             duckdb_synthesis_error(format!(
                 "selection attr : dimension hôte sans master data : {host_dim}"
             ))
         })?;
         joins.push_str(&format!(
-            "\nJOIN {host_table} smda_{host_dim}_{attr}\n  ON smda_{host_dim}_{attr}.{host_key} = e.{host_dim}"
+            "\nJOIN {host_table} smda_{host_dim}_{attr}\n  ON smda_{host_dim}_{attr}.id = e.{host_dim}"
         ));
     }
 
@@ -1441,7 +1478,20 @@ fn exec_operation(
             }
         } else if let Some(attr) = &sel.attr {
             format!("smda_{}_{}.{}", sel.dim, attr, attr)
+        } else if let Some((table, code_col)) = references::dimension_master(&sel.dim) {
+            // Dim id-typée (B1) : deux modes selon la forme de val.
+            // • val = entier (id migré étape 6) → `e.<dim>` directement (INTEGER = INTEGER).
+            // • val = chaîne (code legacy)       → remonte id→code pour comparer sur le contrat.
+            let val_is_id = matches!(&sel.val, Some(JsonValue::Number(_)))
+                || matches!(&sel.val, Some(JsonValue::Array(a))
+                    if !a.is_empty() && a.iter().all(|v| v.is_number()));
+            if val_is_id {
+                format!("e.{}", sel.dim)
+            } else {
+                format!("(SELECT {code_col} FROM {table} WHERE id = e.{})", sel.dim)
+            }
         } else {
+            // Dimension libre (analysis, analysis2, custom) : reste en TEXT.
             format!("e.{}", sel.dim)
         };
         let cond = push_condition(&operand, &sel.op, &sel.val, &mut params)
@@ -1509,7 +1559,7 @@ pub fn run_ruleset(
             "SELECT i.rule_code, r.definition \
              FROM dim_ruleset_item i \
              JOIN dim_rule r ON r.code = i.rule_code \
-             WHERE i.ruleset_code = ? \
+             WHERE i.ruleset_code = (SELECT id FROM dim_ruleset WHERE code = ?) \
              ORDER BY i.ordre",
         )?;
         let rows = stmt.query_map([ruleset_code], |row| {
@@ -1617,7 +1667,7 @@ pub fn run_ruleset_at_level(
             "SELECT i.rule_code, r.definition \
              FROM dim_ruleset_item i \
              JOIN dim_rule r ON r.code = i.rule_code \
-             WHERE i.ruleset_code = ? \
+             WHERE i.ruleset_code = (SELECT id FROM dim_ruleset WHERE code = ?) \
              ORDER BY i.ordre",
         )?;
         let rows = stmt.query_map([ruleset_code], |row| {
@@ -1790,7 +1840,7 @@ mod tests {
         // Destination nature override 2ELI, partner inherit.
         let dest_nature = op1.destination.iter().find(|(k, _)| k == "nature");
         assert!(matches!(dest_nature, Some((_, d)) if d.mode == "override"
-                                              && d.value.as_deref() == Some("2ELI")));
+                                              && matches!(&d.value, Some(JsonValue::String(s)) if s == "2ELI")));
     }
 
     #[test]
@@ -2310,7 +2360,7 @@ mod tests {
             "nature".to_string(),
             Destination {
                 mode: "override".into(),
-                value: Some("2ELI".into()),
+                value: Some(JsonValue::String("2ELI".into())),
                 via: None,
                 attr: None,
                 ref_field: None,
@@ -2318,7 +2368,12 @@ mod tests {
         )];
         let mut params: Vec<DbValue> = Vec::new();
         let expr = dest_expr("nature", &dests, &mut params);
-        assert_eq!(expr, "?", "mode override → placeholder");
+        // B1 étape 4 : nature est id-typée → override code génère une sous-requête code→id.
+        assert_eq!(
+            expr,
+            "(SELECT id FROM dim_nature WHERE code = ?)",
+            "mode override code → sous-requête id"
+        );
         assert_eq!(params.len(), 1, "une valeur bindée");
         match &params[0] {
             DbValue::Text(s) => assert_eq!(s, "2ELI"),
@@ -2327,9 +2382,32 @@ mod tests {
     }
 
     #[test]
+    fn dest_expr_override_id_direct_pas_de_sousrequête() {
+        // Étape 6 B1 : override avec un entier (id migré) → liaison directe, pas de sous-requête.
+        let dests = vec![(
+            "nature".to_string(),
+            Destination {
+                mode: "override".into(),
+                value: Some(JsonValue::Number(42.into())),
+                via: None,
+                attr: None,
+                ref_field: None,
+            },
+        )];
+        let mut params: Vec<DbValue> = Vec::new();
+        let expr = dest_expr("nature", &dests, &mut params);
+        assert_eq!(expr, "?", "mode override id → liaison directe");
+        assert_eq!(params.len(), 1);
+        match &params[0] {
+            DbValue::BigInt(42) => {}
+            other => panic!("attendu BigInt(42), eu {other:?}"),
+        }
+    }
+
+    #[test]
     fn dest_expr_map_ref_pointe_vers_alias_mdr() {
-        // map_ref : la valeur est lue depuis la colonne de référence, via l'alias
-        // `mdr_<ref>` (master data de la dimension écrite, joinée à exec_operation).
+        // B1 étape 4 : account est id-typée + compte_parent est patron B (TEXT) →
+        // map_ref génère une sous-requête code→id depuis la colonne du patron B.
         let dests = vec![(
             "account".to_string(),
             Destination {
@@ -2344,8 +2422,8 @@ mod tests {
         let expr = dest_expr("account", &dests, &mut params);
         assert_eq!(
             expr,
-            "mdr_compte_parent.\"compte_parent\"",
-            "mode map_ref → colonne via alias mdr_<ref>"
+            "(SELECT id FROM dim_account WHERE code = mdr_compte_parent.\"compte_parent\")",
+            "mode map_ref patron B sur dim id-typée → sous-requête id"
         );
         assert!(params.is_empty(), "map_ref ne bind rien");
     }

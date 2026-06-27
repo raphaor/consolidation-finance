@@ -176,22 +176,25 @@ pub const REFERENCES: &[Reference] = &[
     rq("stg_entry", "nature", "dim_nature", "code"),
     r("stg_entry", "partner", "dim_entity", "code"),
     r("stg_entry", "share", "dim_entity", "code"),
-    // Écritures — fact_entry (mêmes dimensions propagées que stg_entry, plus la
-    // colonne technique `consolidation_id` qui isole chaque run). `phase` y est
-    // propagée depuis la remontée ; `consolidation_id` référence la conso du run.
-    rq("fact_entry", "phase", "dim_scenario_category", "code"),
-    rq("fact_entry", "entity", "dim_entity", "code"),
-    rq("fact_entry", "entry_period", "dim_period", "code"),
-    rq("fact_entry", "period", "dim_period", "code"),
-    rq("fact_entry", "account", "dim_account", "code"),
-    rq("fact_entry", "flow", "dim_flow", "code"),
-    rq("fact_entry", "currency", "dim_currency", "code_iso"),
-    rq("fact_entry", "nature", "dim_nature", "code"),
-    r("fact_entry", "partner", "dim_entity", "code"),
-    r("fact_entry", "share", "dim_entity", "code"),
+    // Écritures — fact_entry : après étape 4 B1, toutes les dims sont stockées
+    // en id (INTEGER). ri() → target_column = "id" → invisibles à la garde de
+    // renommage (qui filtre target_column == code_col). La résolution code↔id
+    // se fait côté pipeline (aggregate.rs à l'entrée, jointures à la lecture).
+    ri("fact_entry", "phase", "dim_scenario_category", "code", true),
+    ri("fact_entry", "entity", "dim_entity", "code", true),
+    ri("fact_entry", "entry_period", "dim_period", "code", true),
+    ri("fact_entry", "period", "dim_period", "code", true),
+    ri("fact_entry", "account", "dim_account", "code", true),
+    ri("fact_entry", "flow", "dim_flow", "code", true),
+    ri("fact_entry", "currency", "dim_currency", "code_iso", true),
+    ri("fact_entry", "nature", "dim_nature", "code", true),
+    ri("fact_entry", "partner", "dim_entity", "code", false),
+    ri("fact_entry", "share", "dim_entity", "code", false),
     rq("fact_entry", "consolidation_id", "dim_consolidation", "id"),
     // Jeux de règles
-    rq("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code"),
+    // `ruleset_code` migré en clé technique (chantier B1) : stocké en id, contrat
+    // externe = code. Rend la dimension `dim_ruleset` entièrement flippée (renommable).
+    ri("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code", true),
     rq("dim_ruleset_item", "rule_code", "dim_rule", "code"),
 ];
 
@@ -237,6 +240,14 @@ impl OwnedReference {
 /// `None` pour les dimensions sans master data (analysis, analysis2, custom).
 pub fn dimension_master(dim: &str) -> Option<(&'static str, &'static str)> {
     entry_dimension_target(dim).map(|r| (r.target_table, r.target_column))
+}
+
+/// Variante **id-aware** de [`dimension_master`] : retourne `(table, "id")` au
+/// lieu de `(table, code_col)`. À utiliser quand on joint **depuis `fact_entry`**
+/// (qui stocke les ids après l'étape 4 du chantier B1) vers la master data.
+/// `None` pour les dimensions libres (analysis, analysis2, custom).
+pub fn dimension_master_id_join(dim: &str) -> Option<(&'static str, &'static str)> {
+    entry_dimension_target(dim).map(|r| (r.target_table, "id"))
 }
 
 /// Master data **secondaire** : tables référentielles `dim_*` qui ne sont **pas**

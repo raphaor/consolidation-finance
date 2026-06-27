@@ -48,8 +48,8 @@ use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult,
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, coefficients, create_schema, custom_references, dimensions, entries, export,
-    import, indicators, load_all, masterdata, money::Money, run_pipeline, run_pipeline_with_hook,
-    seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
+    import, indicators, load_all, masterdata, money::Money, references, run_pipeline,
+    run_pipeline_with_hook, seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +192,7 @@ fn default_limit() -> i64 {
 /// concaténer après un WHERE existant. Le filtre `consolidation` ne s'applique
 /// qu'aux niveaux `fact_entry` (le niveau `raw` / `stg_entry` filtre sur `phase`,
 /// géré séparément par l'appelant).
+/// Filtres pour `stg_entry` (colonnes TEXT).
 fn build_filters(
     consolidation: &Option<i64>,
     entity: &Option<String>,
@@ -219,6 +220,40 @@ fn build_filters(
     }
     if let Some(n) = nature {
         sql.push_str(" AND nature = ?");
+        params.push(DbValue::Text(n.clone()));
+    }
+    (sql, params)
+}
+
+/// Filtres pour `fact_entry` (colonnes INTEGER après étape 4 B1).
+/// Les codes TEXT sont résolus en ids via sous-requêtes.
+fn build_filters_fe(
+    consolidation: &Option<i64>,
+    entity: &Option<String>,
+    entry_period: &Option<String>,
+    period: &Option<String>,
+    nature: &Option<String>,
+) -> (String, Vec<DbValue>) {
+    let mut sql = String::new();
+    let mut params = Vec::new();
+    if let Some(c) = consolidation {
+        sql.push_str(" AND consolidation_id = ?");
+        params.push(DbValue::BigInt(*c));
+    }
+    if let Some(e) = entity {
+        sql.push_str(" AND entity = (SELECT id FROM dim_entity WHERE code = ?)");
+        params.push(DbValue::Text(e.clone()));
+    }
+    if let Some(ep) = entry_period {
+        sql.push_str(" AND entry_period = (SELECT id FROM dim_period WHERE code = ?)");
+        params.push(DbValue::Text(ep.clone()));
+    }
+    if let Some(p) = period {
+        sql.push_str(" AND period = (SELECT id FROM dim_period WHERE code = ?)");
+        params.push(DbValue::Text(p.clone()));
+    }
+    if let Some(n) = nature {
+        sql.push_str(" AND nature = (SELECT id FROM dim_nature WHERE code = ?)");
         params.push(DbValue::Text(n.clone()));
     }
     (sql, params)
@@ -289,21 +324,26 @@ async fn get_bilan(
             .iter()
             .map(|c| format!(" AND e.{c} IS NULL"))
             .collect();
-        let (fsql, fparams) = build_filters(
+        let (fsql, fparams) = build_filters_fe(
             &q.consolidation,
             &q.entity,
             &q.entry_period,
             &q.period,
             &q.nature,
         );
+        // fact_entry stocke account/flow/nature en INTEGER (étape 4 B1) →
+        // JOINs sur id pour résoudre les codes et filtrer par classe.
         let sql = format!(
-            "SELECT e.account, e.flow, e.nature, COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
+            "SELECT a.code AS account, df.code AS flow, n.code AS nature,
+                    COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
              FROM fact_entry e
-             JOIN dim_account a ON a.code = e.account
+             JOIN dim_account a ON a.id = e.account
+             JOIN dim_flow df ON df.id = e.flow
+             JOIN dim_nature n ON n.id = e.nature
              LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
              WHERE e.level = ? AND a.classe = 'bilan' {fsql}{of_which}
-             GROUP BY e.account, e.flow, e.nature, a.sous_classe, sc.sens
-             ORDER BY e.account, e.flow, e.nature"
+             GROUP BY a.code, df.code, n.code, a.sous_classe, sc.sens
+             ORDER BY a.code, df.code, n.code"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
         params.extend(fparams);
@@ -344,7 +384,7 @@ async fn get_compte_resultat(
             .iter()
             .map(|c| format!(" AND e.{c} IS NULL"))
             .collect();
-        let (fsql, fparams) = build_filters(
+        let (fsql, fparams) = build_filters_fe(
             &q.consolidation,
             &q.entity,
             &q.entry_period,
@@ -352,13 +392,16 @@ async fn get_compte_resultat(
             &q.nature,
         );
         let sql = format!(
-             "SELECT e.account, e.flow, e.nature, COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
+             "SELECT a.code AS account, df.code AS flow, n.code AS nature,
+                     COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
               FROM fact_entry e
-              JOIN dim_account a ON a.code = e.account
+              JOIN dim_account a ON a.id = e.account
+              JOIN dim_flow df ON df.id = e.flow
+              JOIN dim_nature n ON n.id = e.nature
               LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
               WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
-              GROUP BY e.account, e.flow, e.nature, a.sous_classe, sc.sens
-              ORDER BY e.account, e.flow, e.nature"
+              GROUP BY a.code, df.code, n.code, a.sous_classe, sc.sens
+              ORDER BY a.code, df.code, n.code"
         );
         let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
         params.extend(fparams);
@@ -462,18 +505,37 @@ async fn get_entries(
             fparams.push(DbValue::BigInt(q.offset));
             (sql, fparams)
         } else {
-            let (fsql, fparams) = build_filters(
+            let (fsql, fparams) = build_filters_fe(
                 &q.consolidation,
                 &q.entity,
                 &q.entry_period,
                 &q.period,
                 &q.nature,
             );
+            // Résoudre les colonnes INTEGER de fact_entry en codes TEXT pour l'UI.
+            // Chaque dim avec master data → alias JOIN + projection code.
+            // Les dims libres (analysis, analysis2, custom) → e.{dim} directement.
+            let mut fe_joins = String::new();
+            let mut fe_select: Vec<String> = Vec::new();
+            for dim in &dims {
+                let name = &dim.name;
+                if let Some((table, code_col)) = references::dimension_master(name) {
+                    let alias = format!("_fe{name}");
+                    let join_type = if dim.nullable() { "LEFT JOIN" } else { "JOIN" };
+                    fe_joins.push_str(&format!(
+                        "\n{join_type} {table} {alias} ON {alias}.id = e.{name}"
+                    ));
+                    fe_select.push(format!("{alias}.{code_col} AS {name}"));
+                } else {
+                    fe_select.push(format!("e.{name}"));
+                }
+            }
+            let fe_select_list = fe_select.join(", ");
             let sql = format!(
-                "SELECT id, {col_list}, NULL AS source, level, amount
-                 FROM fact_entry
-                 WHERE level = ? {fsql}
-                 ORDER BY id
+                "SELECT e.id, {fe_select_list}, NULL AS source, e.level, e.amount
+                 FROM fact_entry e{fe_joins}
+                 WHERE e.level = ? {fsql}
+                 ORDER BY e.id
                  LIMIT ? OFFSET ?"
             );
             let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
@@ -947,11 +1009,15 @@ async fn list_rules(
 }
 
 /// GET /api/rules/{code} — détail d'une règle (définition parsée en JSON).
+///
+/// Les valeurs JSON sont **dénormalisées** (ids → codes) avant renvoi : le
+/// stockage interne utilise des ids immuables (chantier B1), mais le contrat
+/// API expose des codes pour que l'éditeur de règles reste lisible.
 async fn get_rule(
     Path(code): Path<String>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<RuleDetail>, AppError> {
-    let row = {
+    let (rule_code, libelle, def_text) = {
         let con = lock_con(&state)?;
         let mut stmt = con
             .prepare("SELECT code, libelle, definition FROM dim_rule WHERE code = ?")
@@ -971,14 +1037,18 @@ async fn get_rule(
             .map_err(db_err)?
             .ok_or_else(|| AppError::not_found(format!("règle {code} introuvable")))?
     };
-    let definition = row
-        .2
-        .as_deref()
-        .map(text_to_definition)
-        .unwrap_or(JsonValue::Null);
+    // Dénormaliser : traduire les ids stockés en codes pour l'API.
+    let definition = if let Some(raw) = def_text {
+        let con = lock_con(&state)?;
+        let denorm = conso_engine::json_migration::denormalize_rule_definition(&con, &raw)
+            .map_err(db_err)?;
+        text_to_definition(&denorm)
+    } else {
+        JsonValue::Null
+    };
     Ok(Json(RuleDetail {
-        code: row.0,
-        libelle: row.1,
+        code: rule_code,
+        libelle,
         definition,
     }))
 }
@@ -1005,6 +1075,10 @@ async fn create_rule(
             )));
         }
         validate_definition(&con, &definition_text).map_err(AppError::bad_request)?;
+        let definition_text = conso_engine::json_migration::normalize_rule_definition(
+            &con, &definition_text,
+        )
+        .map_err(db_err)?;
         con.execute(
             "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
             params_from_iter(vec![
@@ -1041,6 +1115,10 @@ async fn update_rule(
     let detail = {
         let con = lock_con(&state)?;
         validate_definition(&con, &definition_text).map_err(AppError::bad_request)?;
+        let definition_text = conso_engine::json_migration::normalize_rule_definition(
+            &con, &definition_text,
+        )
+        .map_err(db_err)?;
         let n = con
             .execute(
                 "UPDATE dim_rule SET libelle = ?, definition = ? WHERE code = ?",
@@ -1081,8 +1159,11 @@ async fn delete_rule(
         let referees: Vec<String> = {
             let mut stmt = con
                 .prepare(
-                    "SELECT DISTINCT ruleset_code FROM dim_ruleset_item WHERE rule_code = ? \
-                     ORDER BY ruleset_code",
+                    "SELECT DISTINCT rs.code \
+                     FROM dim_ruleset_item i \
+                     JOIN dim_ruleset rs ON rs.id = i.ruleset_code \
+                     WHERE i.rule_code = ? \
+                     ORDER BY rs.code",
                 )
                 .map_err(db_err)?;
             let iter = stmt
@@ -1213,7 +1294,7 @@ async fn update_ruleset(
         // Réordonnancement complet : on supprime tous les items puis on
         // ré-insère ceux du body.
         con.execute(
-            "DELETE FROM dim_ruleset_item WHERE ruleset_code = ?",
+            "DELETE FROM dim_ruleset_item WHERE ruleset_code = (SELECT id FROM dim_ruleset WHERE code = ?)",
             [&code],
         )
         .map_err(db_err)?;
@@ -1231,7 +1312,7 @@ async fn delete_ruleset(
     let deleted = {
         let con = lock_con(&state)?;
         con.execute(
-            "DELETE FROM dim_ruleset_item WHERE ruleset_code = ?",
+            "DELETE FROM dim_ruleset_item WHERE ruleset_code = (SELECT id FROM dim_ruleset WHERE code = ?)",
             [&code],
         )
         .map_err(db_err)?;
@@ -1255,7 +1336,8 @@ fn insert_ruleset_items(
 ) -> Result<(), AppError> {
     for item in items {
         con.execute(
-            "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES (?, ?, ?)",
+            "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) \
+             VALUES ((SELECT id FROM dim_ruleset WHERE code = ?), ?, ?)",
             params_from_iter(vec![
                 DbValue::Text(ruleset_code.to_string()),
                 DbValue::BigInt(item.ordre),
@@ -1290,7 +1372,7 @@ fn build_ruleset_detail(con: &Connection, code: &str) -> Result<RulesetDetail, A
             "SELECT i.ordre, i.rule_code, r.libelle \
              FROM dim_ruleset_item i \
              LEFT JOIN dim_rule r ON r.code = i.rule_code \
-             WHERE i.ruleset_code = ? \
+             WHERE i.ruleset_code = (SELECT id FROM dim_ruleset WHERE code = ?) \
              ORDER BY i.ordre",
         )
         .map_err(db_err)?;
@@ -1452,6 +1534,23 @@ async fn main() {
         // du code TEXT vers l'id INTEGER. Rend dim_method entièrement flippée (renommable).
         if let Err(e) = conso_engine::surrogate::migrate_sat_perimeter_methode_to_id(&con) {
             eprintln!("   ⚠ migrate_sat_perimeter_methode_to_id (non bloquant) : {e}");
+        }
+        // B1 : bascule dim_ruleset_item.ruleset_code (PK composite → reconstruction)
+        // du code TEXT vers l'id INTEGER. Rend dim_ruleset entièrement flippée (renommable).
+        if let Err(e) = conso_engine::surrogate::migrate_ruleset_item_fk_to_id(&con) {
+            eprintln!("   ⚠ migrate_ruleset_item_fk_to_id (non bloquant) : {e}");
+        }
+        // B1 étape 4 : bascule les 10 colonnes dimensionnelles de fact_entry
+        // du code TEXT vers l'id INTEGER. Met aussi à jour la vue v_flow_behavior.
+        // fact_entry est une donnée dérivée → troncature + reconstruction ; le
+        // pipeline doit être relancé après cette migration.
+        if let Err(e) = conso_engine::surrogate::migrate_fact_entry_to_ids(&con) {
+            eprintln!("   ⚠ migrate_fact_entry_to_ids (non bloquant) : {e}");
+        }
+        // B1 étape 6 : bascule les valeurs JSON (règles / postes / indicateurs)
+        // de codes strings vers ids entiers. Idempotent.
+        if let Err(e) = conso_engine::json_migration::migrate_json_to_ids(&con) {
+            eprintln!("   ⚠ migrate_json_to_ids (non bloquant) : {e}");
         }
     } else {
         if force_reseed {

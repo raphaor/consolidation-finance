@@ -1053,7 +1053,8 @@ pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
         params!["RS_INTERCO", "Élimination interco (démo)"],
     )?;
     con.execute(
-        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES (?, ?, ?)",
+        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) \
+         VALUES ((SELECT id FROM dim_ruleset WHERE code = ?), ?, ?)",
         params!["RS_INTERCO", 1, "ELI_700"],
     )?;
     Ok(())

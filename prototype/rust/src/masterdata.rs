@@ -155,6 +155,25 @@ const TABLES: &[TableDef] = &[
         pk: &["code"],
         auto_pk: false,
     },
+    // Règles et jeux de règles : exposées uniquement pour le renommage de code
+    // (POST /api/md/{table}/rename). Le CRUD complet passe par /api/rules* et
+    // /api/rulesets* (routes dédiées qui gèrent le JSON de définition).
+    TableDef {
+        api_name: "rules",
+        label: "Règles",
+        sql_name: "dim_rule",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+        auto_pk: false,
+    },
+    TableDef {
+        api_name: "rulesets",
+        label: "Jeux de règles",
+        sql_name: "dim_ruleset",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+        auto_pk: false,
+    },
     // --- Consolidation (ex scenarios) : objet composite, PK technique auto `id`.
     //     Clé naturelle à 5 éléments (phase, exercice, perimeter_set, variant,
     //     presentation_currency) matérialisée par une contrainte UNIQUE.
@@ -1161,17 +1180,12 @@ pub fn rename_code(
         return Ok(()); // no-op
     }
 
-    // Garde de sûreté : aucune référence ne doit encore cibler le **code**.
-    let blockers: Vec<String> = references::all_references(con)
-        .into_iter()
-        .filter(|r| r.target_table == sql_table && r.target_column == code_col)
-        .map(|r| format!("{}.{}", r.table, r.column))
-        .collect();
-    if !blockers.is_empty() {
+    // Garde rôle 3 en premier : codes enfouis dans JSON/expressions → bloquant.
+    let json_blockers = scan_json_blockers(con, sql_table, old)?;
+    if !json_blockers.is_empty() {
         return Err(AppError::conflict(format!(
-            "code non renommable : encore référencé par {} \
-             (FK non migrées en clé technique)",
-            blockers.join(", ")
+            "code non renommable : encore présent dans {}",
+            json_blockers.join(", ")
         )));
     }
 
@@ -1182,13 +1196,27 @@ pub fn rename_code(
         return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
     }
 
-    // Garde rôle 3 : codes enfouis dans les JSON/expressions.
-    let json_blockers = scan_json_blockers(con, sql_table, old)?;
-    if !json_blockers.is_empty() {
-        return Err(AppError::conflict(format!(
-            "code non renommable : encore présent dans {}",
-            json_blockers.join(", ")
-        )));
+    // Tables code-keyed qui référencent encore ce code (stg_entry, car_*, patron B).
+    // Les FK migrées en ri() ont target_column = "id" → exclues : l'id ne change pas.
+    // On cascade le rename plutôt que de bloquer : ces tables sont des zones de données
+    // (staging brut, attributs de caractéristiques, hiérarchies), pas des configs.
+    let cascade_refs: Vec<_> = references::all_references(con)
+        .into_iter()
+        .filter(|r| {
+            r.target_table == sql_table
+                && r.target_column == code_col
+                && r.target_display_column.is_none()
+        })
+        .collect();
+    for r in &cascade_refs {
+        con.execute(
+            &format!(
+                "UPDATE {} SET \"{}\" = ? WHERE \"{}\" = ?",
+                r.table, r.column, r.column
+            ),
+            [new, old],
+        )
+        .map_err(db_err)?;
     }
 
     con.execute(
@@ -1563,7 +1591,7 @@ mod tests {
             .expect("nouveau code présent");
         assert_eq!(new_id, cons_variant_before, "la FK (id) pointe toujours la même ligne");
 
-        // currency : encore référencée par des FK code-keyed → refus explicite.
+        // currency : pivot_currency dans app_config → bloquée par la garde JSON.
         let err = rename_code(&con, "currencies", "EUR", "EURO").unwrap_err();
         assert!(
             err.1.contains("non renommable"),

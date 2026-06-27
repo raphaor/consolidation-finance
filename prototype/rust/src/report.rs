@@ -80,13 +80,15 @@ fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, 
     let dims = dimensions::load_all(con)?;
     let of_which: String = dimensions::analytical_cols(&dims)
         .iter()
-        .map(|c| format!(" AND {c} IS NULL"))
+        .map(|c| format!(" AND f.{c} IS NULL"))
         .collect();
     let mut stmt = con.prepare(&format!(
-        "SELECT account, flow, SUM(amount) AS amount
-         FROM fact_entry
-         WHERE level = ?{of_which}
-         GROUP BY account, flow"
+        "SELECT da.code AS account, df.code AS flow, SUM(f.amount) AS amount
+         FROM fact_entry f
+         JOIN dim_account da ON da.id = f.account
+         JOIN dim_flow df ON df.id = f.flow
+         WHERE f.level = ?{of_which}
+         GROUP BY da.code, df.code"
     ))?;
     let rows = stmt.query_map([level], |row| {
         let m: Money = row.get(2)?;
@@ -182,14 +184,16 @@ pub fn compare_levels(con: &Connection, account: &str) -> duckdb::Result<()> {
     let dims = dimensions::load_all(con)?;
     let of_which: String = dimensions::analytical_cols(&dims)
         .iter()
-        .map(|c| format!(" AND {c} IS NULL"))
+        .map(|c| format!(" AND f.{c} IS NULL"))
         .collect();
     for lvl in levels {
         let mut stmt = con.prepare(&format!(
-            "SELECT flow, SUM(amount) AS amount
-             FROM fact_entry
-             WHERE level = ? AND account = ?{of_which}
-             GROUP BY flow"
+            "SELECT df.code AS flow, SUM(f.amount) AS amount
+             FROM fact_entry f
+             JOIN dim_account da ON da.id = f.account
+             JOIN dim_flow df ON df.id = f.flow
+             WHERE f.level = ? AND da.code = ?{of_which}
+             GROUP BY df.code"
         ))?;
         let account_str = account.to_string();
         let rows = stmt.query_map([&lvl, account_str.as_str()], |row| {

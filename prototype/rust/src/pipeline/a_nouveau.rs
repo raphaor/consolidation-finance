@@ -39,19 +39,20 @@ use super::ConvertParams;
 use crate::dimensions;
 use duckdb::{params, Connection};
 
-/// Couples `(source, target)` d'à-nouveau lus dans `dim_flow` : le flux `source`
-/// (clôture, ex. F99) reporte son solde sur le flux `target` (ouverture, ex.
-/// F00) à l'exercice suivant. Générique — aucun littéral F00/F99.
-fn pairs(con: &Connection) -> duckdb::Result<Vec<(String, String)>> {
-    // Couples (source, target) déclarés par les schémas de flux. DISTINCT car un
-    // même couple (ex. F99 → F00) peut être défini dans plusieurs schémas ; le
-    // **garde par compte** ci-dessous (carry) restreint l'application aux comptes
-    // dont le schéma définit effectivement le report (ex. bilan oui, résultat non).
+/// Couples `(source_id, target_id, target_code)` d'à-nouveau :
+/// - `source_id` : id du flux de clôture (ex. id de F99) — pour filtrer fact_entry.flow
+/// - `target_id` : id du flux d'ouverture cible (ex. id de F00) — pour INSERT dans fact_entry.flow
+/// - `target_code` : code TEXT du flux cible — pour le garde EXISTS `b.flux_a_nouveau = ?`
+fn pairs(con: &Connection) -> duckdb::Result<Vec<(i64, i64, String)>> {
     let mut stmt = con.prepare(
-        "SELECT DISTINCT flow, flux_a_nouveau FROM sat_flow_scheme_item \
-         WHERE flux_a_nouveau IS NOT NULL ORDER BY flow",
+        "SELECT DISTINCT flow AS source_id, flux_a_nouveau_id AS target_id, \
+                         flux_a_nouveau AS target_code \
+         FROM v_flow_behavior \
+         WHERE flux_a_nouveau_id IS NOT NULL ORDER BY flow",
     )?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
+    })?;
     let mut v = Vec::new();
     for r in rows {
         v.push(r?);
@@ -81,24 +82,24 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
 
     // Entités éligibles au carry = consolidées dans le snapshot N-1 (clôture
     // `source` au niveau consolidated) ET présentes dans le scope du run courant
-    // (`sat_perimeter`). L'intersection isole les entités **continues/sortantes**
-    // (les nouvelles entrées ne sont pas dans le snapshot → pas de carry).
-    // Fragment SQL réutilisé en DELETE et INSERT ; ses `?` : snap, source,
-    // perimeter_set (run courant), perimeter_period (run courant).
-    let eligible = format!(
+    // (`sat_perimeter`). fact_entry.entity est INTEGER, sat_perimeter.entity est TEXT
+    // → bridge via dim_entity pour la comparaison périmètre.
+    // `?` : snap(i64), source_id(i64), perimeter_set(i64), perimeter_period(TEXT).
+    let eligible =
         "entity IN ( \
              SELECT DISTINCT entity FROM fact_entry \
              WHERE consolidation_id = ? AND level = 'consolidated' AND flow = ? \
          ) \
          AND entity IN ( \
-             SELECT entity FROM sat_perimeter \
-             WHERE perimeter_set = ? \
-               AND period = ? \
-         )"
-    );
+             SELECT de.id FROM dim_entity de \
+             WHERE de.code IN ( \
+                 SELECT entity FROM sat_perimeter \
+                 WHERE perimeter_set = ? AND period = ? \
+             ) \
+         )";
 
-    for (source, target) in pairs(con)? {
-        // 1) Écrase le flux d'ouverture `target` du run courant à ce niveau.
+    for (source_id, target_id, target_code) in pairs(con)? {
+        // 1) Écrase le flux d'ouverture `target_id` du run courant à ce niveau.
         con.execute(
             &format!(
                 "DELETE FROM fact_entry \
@@ -110,30 +111,26 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
             ),
             params![
                 params.consolidation_id,
-                target,
-                // fragment `eligible`
+                target_id,
                 snap,
-                source,
+                source_id,
                 params.perimeter_set,
                 params.perimeter_period,
-                // garde par compte : le schéma du compte définit source -> target
-                source,
-                target,
+                source_id,
+                target_code,
             ],
         )?;
 
-        // 2) Colle le solde de clôture `source` du snapshot (même niveau),
-        //    relabellisé `target`, repointé sur la phase/période du run et tagué
-        //    `consolidation_id` du run courant. Les `?` du SELECT apparaissent
-        //    dans l'ordre des colonnes propagées : phase, entry_period, period,
-        //    flow (cf. dimensions built-in). `consolidation_id` est technique
-        //    (hors colonnes propagées) → ajouté explicitement après `sel`.
+        // 2) Colle le solde de clôture `source_id` du snapshot (même niveau),
+        //    relabellisé `target_id`, repointé sur la phase/période du run.
+        //    phase, entry_period, period : résolution code→id (params TEXT → id INTEGER).
+        //    flow : target_id direct (i64).
         let sel = cols
             .iter()
             .map(|c| match *c {
-                "phase" => "?".to_string(),
-                "entry_period" => "?".to_string(),
-                "period" => "?".to_string(),
+                "phase" => "(SELECT id FROM dim_scenario_category WHERE code = ?)".to_string(),
+                "entry_period" => "(SELECT id FROM dim_period WHERE code = ?)".to_string(),
+                "period" => "(SELECT id FROM dim_period WHERE code = ?)".to_string(),
                 "flow" => "?".to_string(),
                 _ => format!("snap.{c}"),
             })
@@ -153,24 +150,19 @@ pub fn carry(con: &Connection, params: &ConvertParams, level: &str) -> duckdb::R
                    )"
             ),
             params![
-                // overrides du SELECT (ordre des colonnes propagées)
-                params.phase,
-                params.exercice, // entry_period
-                params.exercice, // period
-                target,
-                // consolidation_id du run courant (colonne technique)
+                params.phase,       // phase subquery
+                params.exercice,    // entry_period subquery
+                params.exercice,    // period subquery
+                target_id,          // flow = target_id (i64)
                 params.consolidation_id,
-                // WHERE snap.*
                 snap,
-                source,
-                // fragment `eligible` (snap.entity IN …)
+                source_id,
                 snap,
-                source,
+                source_id,
                 params.perimeter_set,
                 params.perimeter_period,
-                // garde par compte : le schéma du compte définit source -> target
-                source,
-                target,
+                source_id,
+                target_code,
             ],
         )?;
     }

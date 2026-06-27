@@ -37,7 +37,7 @@ fn reel_id(con: &Connection) -> i64 {
     con.query_row(
         "SELECT id FROM dim_consolidation \
          WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
-           AND exercice='2024'",
+           AND exercice = (SELECT id FROM dim_period WHERE code='2024')",
         [],
         |r| r.get(0),
     )
@@ -70,9 +70,11 @@ fn level_count(con: &Connection, level: &str) -> i64 {
 fn flow_sum(con: &Connection, level: &str, account: &str, flows: &[&str]) -> f64 {
     // Liste de placeholders (?, ?, …) pour la clause IN.
     let placeholders: Vec<&str> = flows.iter().map(|_| "?").collect();
+    // Sous B1, `account`/`flow` de fact_entry sont des ids : on résout les codes.
     let sql = format!(
         "SELECT COALESCE(SUM(amount), 0) FROM fact_entry \
-         WHERE level = ? AND account = ? AND flow IN ({})",
+         WHERE level = ? AND account = (SELECT id FROM dim_account WHERE code = ?) \
+           AND flow IN (SELECT id FROM dim_flow WHERE code IN ({}))",
         placeholders.join(", ")
     );
     let mut stmt = con.prepare(&sql).expect("prepare flow_sum");
@@ -107,7 +109,9 @@ fn flow_rows(con: &Connection, level: &str, flows: &[&str], entities: Option<&[&
             (
                 format!(
                     "SELECT COUNT(*) FROM fact_entry \
-                     WHERE level = ? AND flow IN ({}) AND entity IN ({})",
+                     WHERE level = ? \
+                       AND flow IN (SELECT id FROM dim_flow WHERE code IN ({})) \
+                       AND entity IN (SELECT id FROM dim_entity WHERE code IN ({}))",
                     placeholders.join(", "),
                     e_ph.join(", ")
                 ),
@@ -116,7 +120,8 @@ fn flow_rows(con: &Connection, level: &str, flows: &[&str], entities: Option<&[&
         }
         _ => (
             format!(
-                "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND flow IN ({})",
+                "SELECT COUNT(*) FROM fact_entry \
+                 WHERE level = ? AND flow IN (SELECT id FROM dim_flow WHERE code IN ({}))",
                 placeholders.join(", ")
             ),
             false,
@@ -185,7 +190,8 @@ fn f99_present_au_niveau_converted_et_identite_tient() {
     // puis reconstruites autoritairement par materialize(converted)).
     let n: i64 = con
         .query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' AND flow='F99'",
+            "SELECT COUNT(*) FROM fact_entry WHERE level='converted' \
+             AND flow=(SELECT id FROM dim_flow WHERE code='F99')",
             [],
             |r| r.get(0),
         )
@@ -246,7 +252,8 @@ fn comptes_attendus_presents_au_niveau_consolidated() {
     for acc in &["100", "200", "300", "400"] {
         let n: i64 = con
             .query_row(
-                "SELECT COUNT(*) FROM fact_entry WHERE level='consolidated' AND account=?",
+                "SELECT COUNT(*) FROM fact_entry WHERE level='consolidated' \
+                 AND account=(SELECT id FROM dim_account WHERE code=?)",
                 [acc],
                 |row| row.get(0),
             )
@@ -355,7 +362,9 @@ fn schema_resultat_convertit_au_taux_moyen_sans_ecart() {
     let sum_flow = |account: &str, entity: &str, flow: &str| -> f64 {
         con.query_row(
             "SELECT COALESCE(SUM(amount), 0) FROM fact_entry \
-             WHERE level='converted' AND account=? AND entity=? AND flow=?",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code=?) \
+               AND entity=(SELECT id FROM dim_entity WHERE code=?) \
+               AND flow=(SELECT id FROM dim_flow WHERE code=?)",
             [account, entity, flow],
             |r| r.get::<_, f64>(0),
         )
@@ -364,7 +373,9 @@ fn schema_resultat_convertit_au_taux_moyen_sans_ecart() {
     let count_flow = |account: &str, entity: &str, flow: &str| -> i64 {
         con.query_row(
             "SELECT COUNT(*) FROM fact_entry \
-             WHERE level='converted' AND account=? AND entity=? AND flow=?",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code=?) \
+               AND entity=(SELECT id FROM dim_entity WHERE code=?) \
+               AND flow=(SELECT id FROM dim_flow WHERE code=?)",
             [account, entity, flow],
             |r| r.get::<_, i64>(0),
         )
@@ -421,7 +432,9 @@ fn conversion_reconstitue_montant_au_taux_close_n() {
     let f00_func: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='corporate' AND account='100' AND flow='F00' AND entity='A'",
+             WHERE level='corporate' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F00') \
+               AND entity=(SELECT id FROM dim_entity WHERE code='A')",
             [],
             |row| row.get(0),
         )
@@ -456,7 +469,7 @@ fn ecart_de_conversion_suit_le_taux_du_flux_de_report() {
     // au taux moyen au lieu du taux de clôture.
     con.execute_batch(
         "UPDATE sat_flow_scheme_item SET taux_conversion = 'avg' \
-         WHERE scheme = 'BILAN' AND flow = 'F99';",
+         WHERE scheme = (SELECT id FROM dim_flow_scheme WHERE code = 'BILAN') AND flow = 'F99';",
     )
     .expect("bascule taux du flux de report");
 
@@ -468,7 +481,9 @@ fn ecart_de_conversion_suit_le_taux_du_flux_de_report() {
     let f00_func: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='corporate' AND account='100' AND flow='F00' AND entity='A'",
+             WHERE level='corporate' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F00') \
+               AND entity=(SELECT id FROM dim_entity WHERE code='A')",
             [],
             |r| r.get(0),
         )
@@ -578,15 +593,15 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
          INSERT INTO dim_flow_scheme (code, libelle) VALUES ('TEST','Schéma de test');
          INSERT INTO sat_flow_scheme_item
             (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) VALUES
-            ('TEST','F20','avg',NULL,'F99',NULL),
-            ('TEST','F99','close_n',NULL,'F99',NULL),
-            ('TEST','F10','avg',NULL,'F88',NULL),
-            ('TEST','F88','close_n',NULL,'F88',NULL);
+            ((SELECT id FROM dim_flow_scheme WHERE code='TEST'),'F20','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='TEST'),'F99','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='TEST'),'F10','avg',NULL,'F88',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='TEST'),'F88','close_n',NULL,'F88',NULL);
 
          -- Comptes 100 et 200 rattachés au schéma TEST (résolution par v_flow_behavior).
          INSERT INTO dim_account (code, libelle, classe, sous_classe, flow_scheme) VALUES
-            ('100','Compte 100','bilan',NULL,'TEST'),
-            ('200','Compte 200','bilan',NULL,'TEST');",
+            ('100','Compte 100','bilan',NULL,(SELECT id FROM dim_flow_scheme WHERE code='TEST')),
+            ('200','Compte 200','bilan',NULL,(SELECT id FROM dim_flow_scheme WHERE code='TEST'));",
     )
     .expect("seed dim_flow + schéma TEST");
 
@@ -603,9 +618,17 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     con.execute_batch(
         "INSERT INTO fact_entry
             (phase, entity, entry_period, period, account, flow, currency, nature, level, amount)
-         VALUES
-            ('REEL','M','2024','2024','100','F20','EUR','0LIASS','converted',50.00),
-            ('REEL','M','2024','2024','100','F10','EUR','0LIASS','converted',30.00);",
+         SELECT
+            (SELECT id FROM dim_scenario_category WHERE code='REEL'),
+            (SELECT id FROM dim_entity WHERE code='M'),
+            (SELECT id FROM dim_period WHERE code='2024'),
+            (SELECT id FROM dim_period WHERE code='2024'),
+            (SELECT id FROM dim_account WHERE code=v.account),
+            (SELECT id FROM dim_flow WHERE code=v.flow),
+            (SELECT id FROM dim_currency WHERE code_iso='EUR'),
+            (SELECT id FROM dim_nature WHERE code='0LIASS'),
+            'converted', v.amount
+         FROM (VALUES ('100','F20',50.00),('100','F10',30.00)) AS v(account, flow, amount);",
     )
     .expect("seed composantes");
 
@@ -615,7 +638,8 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let f99: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='converted' AND account='100' AND flow='F99'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99')",
             [],
             |r| r.get(0),
         )
@@ -623,7 +647,8 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let f88: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='converted' AND account='100' AND flow='F88'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F88')",
             [],
             |r| r.get(0),
         )
@@ -644,9 +669,17 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     con.execute_batch(
         "INSERT INTO fact_entry
             (phase, entity, entry_period, period, account, flow, currency, nature, level, amount)
-         VALUES
-            ('REEL','M','2024','2024','100','F99','EUR','0LIASS','converted',999.00),
-            ('REEL','M','2024','2024','200','F99','EUR','0LIASS','converted',777.00);",
+         SELECT
+            (SELECT id FROM dim_scenario_category WHERE code='REEL'),
+            (SELECT id FROM dim_entity WHERE code='M'),
+            (SELECT id FROM dim_period WHERE code='2024'),
+            (SELECT id FROM dim_period WHERE code='2024'),
+            (SELECT id FROM dim_account WHERE code=v.account),
+            (SELECT id FROM dim_flow WHERE code='F99'),
+            (SELECT id FROM dim_currency WHERE code_iso='EUR'),
+            (SELECT id FROM dim_nature WHERE code='0LIASS'),
+            'converted', v.amount
+         FROM (VALUES ('100',999.00),('200',777.00)) AS v(account, amount);",
     )
     .expect("seed résiduel");
 
@@ -656,7 +689,8 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let f99_100: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='converted' AND account='100' AND flow='F99'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99')",
             [],
             |r| r.get(0),
         )
@@ -664,7 +698,8 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     assert_eq!(
         con.query_row::<i64, _, _>(
             "SELECT COUNT(*) FROM fact_entry \
-             WHERE level='converted' AND account='100' AND flow='F99'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99')",
             [],
             |r| r.get(0),
         )
@@ -681,7 +716,8 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let f99_200: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='converted' AND account='200' AND flow='F99'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='200') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99')",
             [],
             |r| r.get(0),
         )
@@ -698,8 +734,16 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     con.execute_batch(
         "INSERT INTO fact_entry
             (phase, entity, entry_period, period, account, flow, currency, nature, level, amount)
-         VALUES
-            ('REEL','M','2024','2024','100','F99','EUR','1AJUST','converted',555.00);",
+         SELECT
+            (SELECT id FROM dim_scenario_category WHERE code='REEL'),
+            (SELECT id FROM dim_entity WHERE code='M'),
+            (SELECT id FROM dim_period WHERE code='2024'),
+            (SELECT id FROM dim_period WHERE code='2024'),
+            (SELECT id FROM dim_account WHERE code='100'),
+            (SELECT id FROM dim_flow WHERE code='F99'),
+            (SELECT id FROM dim_currency WHERE code_iso='EUR'),
+            (SELECT id FROM dim_nature WHERE code='1AJUST'),
+            'converted', 555.00;",
     )
     .expect("seed résiduel autre nature");
 
@@ -708,8 +752,9 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let f99_ajust: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='converted' AND account='100' AND flow='F99' \
-               AND nature='1AJUST'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99') \
+               AND nature=(SELECT id FROM dim_nature WHERE code='1AJUST')",
             [],
             |r| r.get(0),
         )
@@ -722,8 +767,9 @@ fn materialize_closures_reconstruit_plusieurs_clotures_et_ecrase_au_grain() {
     let f99_liasse_apres: f64 = con
         .query_row(
             "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-             WHERE level='converted' AND account='100' AND flow='F99' \
-               AND nature='0LIASS'",
+             WHERE level='converted' AND account=(SELECT id FROM dim_account WHERE code='100') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99') \
+               AND nature=(SELECT id FROM dim_nature WHERE code='0LIASS')",
             [],
             |r| r.get(0),
         )
@@ -800,7 +846,9 @@ fn check_natures_detecte_nature_manquante_et_inconnue() {
 fn amount_for(con: &Connection, level: &str, entity: &str, account: &str, flow: &str) -> f64 {
     con.query_row(
         "SELECT COALESCE(SUM(amount),0) FROM fact_entry \
-         WHERE level=? AND entity=? AND account=? AND flow=?",
+         WHERE level=? AND entity=(SELECT id FROM dim_entity WHERE code=?) \
+           AND account=(SELECT id FROM dim_account WHERE code=?) \
+           AND flow=(SELECT id FROM dim_flow WHERE code=?)",
         [level, entity, account, flow],
         |r| r.get(0),
     )
@@ -861,7 +909,8 @@ fn sortie_perimetre_donne_f99_zero_et_f98_negatif() {
     let n_nonzero: i64 = con
         .query_row(
             "SELECT COUNT(*) FROM fact_entry \
-             WHERE level='consolidated' AND entity='B' AND flow='F99' \
+             WHERE level='consolidated' AND entity=(SELECT id FROM dim_entity WHERE code='B') \
+               AND flow=(SELECT id FROM dim_flow WHERE code='F99') \
                AND ABS(amount) >= 0.01",
             [],
             |r| r.get(0),
@@ -916,7 +965,8 @@ fn staging_route_les_prefixes_vers_le_bon_niveau() {
 
     let count = |level: &str, nature: &str| -> i64 {
         con.query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level=? AND nature=?",
+            "SELECT COUNT(*) FROM fact_entry \
+             WHERE level=? AND nature=(SELECT id FROM dim_nature WHERE code=?)",
             [level, nature],
             |r| r.get(0),
         )

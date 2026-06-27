@@ -42,17 +42,19 @@ const TABLES: &[&str] = &[
     "dim_variant",
     "dim_rate_set",
     "dim_perimeter_set",
+    // B1 : dim_period + dim_currency avant dim_consolidation (exercice / perimeter_period
+    // / rate_period / presentation_currency sont FK vers leurs id).
+    "dim_period",
+    "dim_currency",
     "dim_rule",
     "dim_ruleset",
     "dim_ruleset_item",
     "dim_consolidation",
     "dim_entity",
-    "dim_period",
     "dim_sous_classe",
     "dim_account",
     "dim_flow",
     "dim_flow_scheme",
-    "dim_currency",
     "dim_nature",
     "dim_method",
     "sat_perimeter",
@@ -262,7 +264,9 @@ mod tests {
             "INSERT INTO dim_scenario_category (code, libelle) VALUES ('REEL','Réel');
              INSERT INTO dim_variant (code, libelle) VALUES ('BASE','Base');
              INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PS','P');
-             INSERT INTO dim_rate_set (code, libelle) VALUES ('RT','R');",
+             INSERT INTO dim_rate_set (code, libelle) VALUES ('RT','R');
+             INSERT INTO dim_period (code, libelle) VALUES ('2024','Exercice 2024');
+             INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES ('EUR','Euro',2);",
         )
         .unwrap();
 
@@ -276,18 +280,23 @@ mod tests {
         let n = insert_table(&con, "dim_consolidation", Some(&json!([row]))).unwrap();
         assert_eq!(n, 1);
 
-        // Les FK sont stockées en id ; relues via les cibles.
-        let (phase_ok, variant_ok): (bool, bool) = con
+        // Toutes les FK stockées en id ; relues via les cibles.
+        let (phase_ok, variant_ok, exercice_ok, pres_ok): (bool, bool, bool, bool) = con
             .query_row(
                 "SELECT
+                   phase    = (SELECT id FROM dim_scenario_category WHERE code='REEL'),
                    variant  = (SELECT id FROM dim_variant WHERE code='BASE'),
-                   phase    = (SELECT id FROM dim_scenario_category WHERE code='REEL')
+                   exercice = (SELECT id FROM dim_period WHERE code='2024'),
+                   presentation_currency = (SELECT id FROM dim_currency WHERE code_iso='EUR')
                  FROM dim_consolidation WHERE id = 1",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .unwrap();
-        assert!(phase_ok && variant_ok, "FK résolues en id à l'import");
+        assert!(
+            phase_ok && variant_ok && exercice_ok && pres_ok,
+            "FK résolues en id à l'import"
+        );
 
         // Code inexistant : rejeté proprement.
         let bad = json!({ "id": 2, "variant": "NOPE" });

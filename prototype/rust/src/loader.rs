@@ -109,11 +109,36 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 5. dim_consolidation (ex dim_scenario) : PK technique auto `id`, omise du
-    //    mapping (laissée au DEFAULT nextval). Colonnes hors-id : phase, exercice,
-    //    perimeter_set, variant, presentation_currency, perimeter_period, rate_set,
-    //    rate_period, ruleset_code (nullable), a_nouveau_consolidation_id (nullable),
-    //    statut.
+    // 5a. dim_period : périodes (type, bornes, statut).
+    //     Doit précéder dim_consolidation : exercice / perimeter_period / rate_period
+    //     sont désormais des FK dim_period.id (B1).
+    CsvMapping {
+        file: "periods.csv",
+        table: "dim_period",
+        columns: &[
+            "code",
+            "libelle",
+            "type",
+            "date_debut",
+            "date_fin",
+            "statut",
+        ],
+        casts: &[],
+        use_explicit_schema: false,
+    },
+    // 5b. dim_currency : déplacée avant dim_consolidation (B1) — presentation_currency
+    //     est désormais une FK dim_currency.id. Supprimée de sa position originale.
+    CsvMapping {
+        file: "currencies.csv",
+        table: "dim_currency",
+        columns: &["code_iso", "libelle", "decimales"],
+        casts: &[("decimales", "INTEGER")],
+        use_explicit_schema: false,
+    },
+    // 5c. dim_consolidation (ex dim_scenario) : PK technique auto `id`, omise du
+    //     mapping (laissée au DEFAULT nextval). B1 : exercice / presentation_currency /
+    //     perimeter_period / rate_period / ruleset_code stockés en id — résolus par
+    //     build_insert_sql via les ri() du graphe references.rs.
     CsvMapping {
         file: "consolidations.csv",
         table: "dim_consolidation",
@@ -148,21 +173,6 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 7. dim_period : périodes (type, bornes, statut).
-    CsvMapping {
-        file: "periods.csv",
-        table: "dim_period",
-        columns: &[
-            "code",
-            "libelle",
-            "type",
-            "date_debut",
-            "date_fin",
-            "statut",
-        ],
-        casts: &[],
-        use_explicit_schema: false,
-    },
     // 8. dim_sous_classe : sous-classes de compte (réf. de dim_account).
     //    `sens` (Q44) est optionnel (C/D) — absent du CSV ⇒ NULL.
     CsvMapping {
@@ -174,8 +184,9 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
     },
     // 9. dim_account : plan de compte. Schéma explicite + null_padding car le
     //    fichier peut contenir des lignes incomplètes (sous_classe vide). La 5e
-    //    colonne `flow_scheme` est aujourd'hui peuplée explicitement par compte
-    //    (BILAN / RESULTAT dérivé de la classe) — cf. v_flow_behavior.
+    //    colonne `flow_scheme` est 100 % user-driven (Q45 : plus de défaut dérivé
+    //    de la classe) — cf. v_flow_behavior. Nullable (option b : compte sans
+    //    schéma toléré mais exclu de la conversion/clôture).
     CsvMapping {
         file: "accounts.csv",
         table: "dim_account",
@@ -200,14 +211,7 @@ static CSV_MAPPINGS: &[CsvMapping] = &[
         casts: &[],
         use_explicit_schema: false,
     },
-    // 11. dim_currency : devises. CAST decimales AS INTEGER (sinon VARCHAR/SMALLINT).
-    CsvMapping {
-        file: "currencies.csv",
-        table: "dim_currency",
-        columns: &["code_iso", "libelle", "decimales"],
-        casts: &[("decimales", "INTEGER")],
-        use_explicit_schema: false,
-    },
+    // 11. (dim_currency déplacée en 5b — avant dim_consolidation, B1).
     // 12. dim_nature : natures de traitement (code, libelle, rules JSON).
     CsvMapping {
         file: "natures.csv",

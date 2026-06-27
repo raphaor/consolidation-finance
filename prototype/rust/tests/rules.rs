@@ -33,6 +33,50 @@ fn engine() -> Connection {
     seed_all(&con).expect("seed_all");
     con.execute("DELETE FROM fact_entry", [])
         .expect("clear fact_entry");
+    // Natures synthétiques utilisées comme cibles d'`override` par les règles de
+    // test. Sous B1, `fact_entry.nature` est une FK id (NOT NULL) : une valeur
+    // d'override doit donc exister dans `dim_nature` (avant, nature était du TEXT
+    // libre). On les seede ici (les natures « réelles » 0LIASS/1AJUST viennent du
+    // seed).
+    con.execute_batch(
+        "INSERT INTO dim_nature (code, libelle, rules) VALUES
+            ('TST','Test',NULL),('DONT','Dont',NULL),('MAIN','Main',NULL),
+            ('2A','Test 2A',NULL),('2B','Test 2B',NULL),('2CPY','Test copie',NULL),
+            ('MAPRF','Test map_ref',NULL),('SELN1','Test sélection N1',NULL),
+            ('SELRF','Test sélection ref',NULL),('SCACTIF','Test sous-classe actif',NULL),
+            ('FSBILAN','Test flow_scheme bilan',NULL);",
+    )
+    .expect("seed natures de test");
+    // Sous B1, les colonnes dimensionnelles de `fact_entry` sont des ids INTEGER.
+    // Cette vue rétablit les **codes** pour les assertions des tests (`ssum`/
+    // `scount` la ciblent) : les dims à master data sont jointes sur l'id et
+    // projetées en code ; `level`/`amount`/`analysis*` restent tels quels.
+    con.execute_batch(
+        "CREATE VIEW vfe AS
+         SELECT f.consolidation_id, f.level, f.amount, f.analysis, f.analysis2,
+                de.code  AS entity,
+                da.code  AS account,
+                dfl.code AS flow,
+                dn.code  AS nature,
+                dpa.code AS partner,
+                dsh.code AS share,
+                dc.code_iso AS currency,
+                dph.code AS phase,
+                dep.code AS entry_period,
+                dpe.code AS period
+         FROM fact_entry f
+         LEFT JOIN dim_entity            de  ON de.id  = f.entity
+         LEFT JOIN dim_account           da  ON da.id  = f.account
+         LEFT JOIN dim_flow              dfl ON dfl.id = f.flow
+         LEFT JOIN dim_nature            dn  ON dn.id  = f.nature
+         LEFT JOIN dim_entity            dpa ON dpa.id = f.partner
+         LEFT JOIN dim_entity            dsh ON dsh.id = f.share
+         LEFT JOIN dim_currency          dc  ON dc.id  = f.currency
+         LEFT JOIN dim_scenario_category dph ON dph.id = f.phase
+         LEFT JOIN dim_period            dep ON dep.id = f.entry_period
+         LEFT JOIN dim_period            dpe ON dpe.id = f.period;",
+    )
+    .expect("create view vfe");
     con
 }
 
@@ -71,7 +115,16 @@ fn put(
          SELECT (SELECT id FROM dim_consolidation \
                  WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
                    AND exercice = (SELECT id FROM dim_period WHERE code='2024')), \
-                'REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?",
+                (SELECT id FROM dim_scenario_category WHERE code='REEL'), \
+                (SELECT id FROM dim_entity WHERE code=?), \
+                (SELECT id FROM dim_period WHERE code='2024'), \
+                (SELECT id FROM dim_period WHERE code='2024'), \
+                (SELECT id FROM dim_account WHERE code=?), \
+                (SELECT id FROM dim_flow WHERE code=?), \
+                (SELECT id FROM dim_currency WHERE code_iso='EUR'), \
+                (SELECT id FROM dim_nature WHERE code=?), \
+                (SELECT id FROM dim_entity WHERE code=?), \
+                NULL, NULL, NULL, ?, ?",
         duckdb::params![entity, account, flow, nature, partner, level, amount],
     )
     .unwrap_or_else(|e| panic!("put({entity},{account},{flow}): {e}"));
@@ -94,7 +147,8 @@ fn run_one(con: &Connection, rule_code: &str) -> usize {
     )
     .expect("create ruleset");
     con.execute(
-        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES ('RS', 1, ?)",
+        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) \
+         VALUES ((SELECT id FROM dim_ruleset WHERE code = 'RS'), 1, ?)",
         duckdb::params![rule_code],
     )
     .expect("create ruleset item");
@@ -103,14 +157,16 @@ fn run_one(con: &Connection, rule_code: &str) -> usize {
 
 /// SUM(amount) sur `fact_entry` filtré par une clause SQL libre.
 fn ssum(con: &Connection, filter: &str) -> f64 {
-    let sql = format!("SELECT COALESCE(SUM(amount), 0) FROM fact_entry WHERE {filter}");
+    // `vfe` = vue code-aware sur `fact_entry` (cf. `engine`) : les filtres des
+    // tests citent les codes des dimensions, pas les ids de stockage.
+    let sql = format!("SELECT COALESCE(SUM(amount), 0) FROM vfe WHERE {filter}");
     con.query_row(&sql, [], |r| r.get::<_, f64>(0))
         .unwrap_or_else(|e| panic!("ssum({filter}): {e}"))
 }
 
-/// COUNT(*) sur `fact_entry` filtré.
+/// COUNT(*) sur `fact_entry` (via la vue `vfe`) filtré.
 fn scount(con: &Connection, filter: &str) -> i64 {
-    let sql = format!("SELECT COUNT(*) FROM fact_entry WHERE {filter}");
+    let sql = format!("SELECT COUNT(*) FROM vfe WHERE {filter}");
     con.query_row(&sql, [], |r| r.get::<_, i64>(0))
         .unwrap_or_else(|e| panic!("scount({filter}): {e}"))
 }

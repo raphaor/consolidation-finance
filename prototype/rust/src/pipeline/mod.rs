@@ -99,17 +99,22 @@ impl ConvertParams {
             rate_period,
             a_nouveau_consolidation_id,
         ): (String, String, String, i64, String, String, String, Option<i64>) = con.query_row(
-            // phase / rate_set sont stockés en clé technique (id, chantier B1)
-            // et résolus id→code par JOIN (leurs consommateurs restent code-based).
-            // perimeter_set est aussi un id mais **non résolu** : sat_perimeter est
-            // désormais id-keyed → on passe l'id directement aux jointures pipeline.
-            "SELECT sc.code, c.exercice, c.presentation_currency,
-                    c.perimeter_set, c.perimeter_period,
-                    rs.code, c.rate_period,
+            // Toutes les FK de dim_consolidation sont en clé technique (id, B1) :
+            // phase / rate_set / exercice / presentation_currency / perimeter_period /
+            // rate_period sont résolus id→code par JOIN (consommateurs code-based).
+            // perimeter_set est un id non résolu : sat_perimeter est id-keyed,
+            // on passe l'id directement aux jointures pipeline.
+            "SELECT sc.code, p_ex.code, cur.code_iso,
+                    c.perimeter_set, p_pp.code,
+                    rs.code, p_rp.code,
                     c.a_nouveau_consolidation_id
              FROM dim_consolidation c
              LEFT JOIN dim_scenario_category sc ON sc.id = c.phase
+             LEFT JOIN dim_period p_ex ON p_ex.id = c.exercice
+             LEFT JOIN dim_currency cur ON cur.id = c.presentation_currency
+             LEFT JOIN dim_period p_pp ON p_pp.id = c.perimeter_period
              LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
+             LEFT JOIN dim_period p_rp ON p_rp.id = c.rate_period
              WHERE c.id = ?",
             [consolidation_id],
             |r| {
