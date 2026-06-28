@@ -1609,9 +1609,13 @@ async fn main() {
         if let Err(e) = conso_engine::surrogate::migrate_custom_reference_columns_to_id(&con) {
             eprintln!("   ⚠ migrate_custom_reference_columns_to_id (non bloquant) : {e}");
         }
+        // B1 étape 13 : PK id réelle sur les dimensions (reconstruction tables).
+        if let Err(e) = conso_engine::surrogate::migrate_dims_pk_to_id(&con) {
+            eprintln!("   ⚠ migrate_dims_pk_to_id (non bloquant) : {e}");
+        }
         // Marqueur de version de schéma (idempotent).
         let _ = con.execute(
-            "INSERT INTO app_config (key, value) VALUES ('schema_version', '11') \
+            "INSERT INTO app_config (key, value) VALUES ('schema_version', '12') \
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             [],
         );

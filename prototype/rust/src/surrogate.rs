@@ -53,6 +53,8 @@ pub const SURROGATE_DIMS: &[(&str, &str, &str)] = &[
     ("dim_value_list", "code", "seq_dim_value_list"),
     ("dim_characteristic", "code", "seq_dim_characteristic"),
     ("dim_custom_dimension", "name", "seq_dim_custom_dimension"),
+    ("dim_control", "code", "seq_dim_control"),
+    ("dim_control_set", "code", "seq_dim_control_set"),
 ];
 
 /// `true` si la table `table` possède une colonne `column`.
@@ -803,6 +805,112 @@ pub fn migrate_custom_reference_columns_to_id(con: &Connection) -> duckdb::Resul
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Étape 13 : PK `id` réelle sur les dimensions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Retourne le nom de la colonne « code » pour une table donnée.
+fn code_col_for(table: &str) -> &str {
+    for &(t, c, _) in SURROGATE_DIMS {
+        if t == table {
+            return c;
+        }
+    }
+    "code"
+}
+
+/// Reconstruit chaque dimension de [`SURROGATE_DIMS`] avec `id … PRIMARY KEY`
+/// et `code … UNIQUE NOT NULL`. **Idempotent** : saute les tables déjà migrées
+/// (celles où `id` est déjà la PK).
+///
+/// Patron : CREATE TABLE __mig (id PK, code UNIQUE, …) → INSERT … SELECT →
+/// DROP old → RENAME __mig → SET DEFAULT nextval → CHECKPOINT.
+///
+/// Appelée au démarrage du serveur, après `ensure_ids`.
+pub fn migrate_dims_pk_to_id(con: &duckdb::Connection) -> duckdb::Result<()> {
+    for &(table, _code_col, seq) in SURROGATE_DIMS {
+        if !table_exists(con, table)? {
+            continue;
+        }
+        // Idempotence : si id est déjà la PK, rien à faire.
+        if id_is_pk(con, table)? {
+            continue;
+        }
+        // Collecter les colonnes actuelles, en excluant `id` (ajouté par ensure_ids).
+        let all_cols = table_columns(con, table)?;
+        let cols: Vec<String> = all_cols.into_iter().filter(|c| c != "id").collect();
+        if cols.is_empty() {
+            continue;
+        }
+        let col_list = cols.join(", ");
+        let mig = format!("{table}__mig");
+
+        // Construire le CREATE avec id PK + code UNIQUE + les autres colonnes.
+        let code_col = code_col_for(table);
+        let mut create_cols = format!("id INTEGER PRIMARY KEY");
+        for c in &cols {
+            if c == code_col {
+                create_cols.push_str(&format!(", {c} TEXT UNIQUE NOT NULL"));
+            } else {
+                let dtype = column_type(con, table, c).unwrap_or_default();
+                create_cols.push_str(&format!(", {c} {dtype}"));
+            }
+        }
+
+        // Séquence : créer si absente (idempotent).
+        con.execute(&format!("CREATE SEQUENCE IF NOT EXISTS {seq} START 1"), [])?;
+
+        // Exécuter la reconstruction en une seule transaction.
+        con.execute_batch(&format!(
+            "CREATE TABLE {mig} ({create_cols});
+             INSERT INTO {mig} (id, {col_list}) SELECT id, {col_list} FROM {table};
+             DROP TABLE {table};
+             ALTER TABLE {mig} RENAME TO {table};
+             ALTER TABLE {table} ALTER COLUMN id SET DEFAULT nextval('{seq}');"
+        ))?;
+    }
+    con.execute("CHECKPOINT", [])?;
+    Ok(())
+}
+
+/// Vérifie si la colonne `id` est la PRIMARY KEY de la table.
+fn id_is_pk(con: &duckdb::Connection, table: &str) -> duckdb::Result<bool> {
+    // DuckDB : pragma_table_info retourne pk=true/false par colonne.
+    let is_pk: bool = con.query_row(
+        &format!(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') \
+             WHERE name = 'id' AND pk"
+        ),
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(is_pk)
+}
+
+/// Liste les colonnes d'une table (ordre ordinal).
+fn table_columns(con: &duckdb::Connection, table: &str) -> duckdb::Result<Vec<String>> {
+    let mut stmt = con.prepare(
+        "SELECT column_name FROM information_schema.columns \
+         WHERE table_schema = 'main' AND table_name = ? \
+         ORDER BY ordinal_position",
+    )?;
+    let cols: Vec<String> = stmt
+        .query_map(duckdb::params![table], |r| r.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(cols)
+}
+
+/// Retourne le type SQL d'une colonne.
+fn column_type(con: &duckdb::Connection, table: &str, col: &str) -> duckdb::Result<String> {
+    con.query_row(
+        "SELECT data_type FROM information_schema.columns \
+         WHERE table_schema = 'main' AND table_name = ? AND column_name = ?",
+        duckdb::params![table, col],
+        |r| r.get(0),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1403,5 +1511,35 @@ mod tests {
         assert_eq!(total, 2);
         assert_eq!(distincts, 2, "ids distincts après backfill");
         assert_eq!(non_nuls, 2, "aucun id NULL après backfill");
+    }
+
+    #[test]
+    fn migrate_dims_pk_to_id_reconstruit_avec_id_pk() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // Avant migration : code est PK (ensure_ids a ajouté id mais sans PK).
+        assert!(!id_is_pk(&con, "dim_account").unwrap(),
+            "avant étape 13, id ne doit pas être PK");
+
+        migrate_dims_pk_to_id(&con).expect("migrate_dims_pk_to_id");
+
+        // Après migration : id est PK sur toutes les dimensions.
+        for &(table, _, _) in SURROGATE_DIMS {
+            if !table_exists(&con, table).unwrap() {
+                continue;
+            }
+            assert!(id_is_pk(&con, table).unwrap(),
+                "{table} doit avoir id comme PK après étape 13");
+        }
+
+        // Les données sont préservées.
+        let n: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_account", [], |r| r.get(0))
+            .unwrap();
+        assert!(n > 0, "les comptes doivent être préservés après reconstruction");
+
+        // Idempotent : re-appel ne fait rien.
+        migrate_dims_pk_to_id(&con).expect("migrate_dims_pk_to_id idempotent");
     }
 }

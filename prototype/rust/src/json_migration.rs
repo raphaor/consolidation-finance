@@ -13,13 +13,13 @@
 //! | `scope[*].val`                        | code de colonne ri() sat_perimeter (ex. méthode) |
 //! | `operations[*].selection[*].val`      | code de membre d'une dim fact_entry |
 //! | `operations[*].destination.<dim>.value` (mode override) | idem |
+//! | `operations[*].coefficient.type`      | code de dim_coefficient |
 //! | Idem pour `dim_aggregate.definition.selection[*].val`   | idem |
 //! | `dim_indicator.expression` `[code]`   | code d'agrégat / indicateur |
 //! | `app_config.pivot_currency`           | code de devise (cascade) |
 //!
 //! ## Ce qui n'est pas encore migré (hors scope)
 //!
-//! - `coefficient.type` (format `{"type": "code"}`) — priorité moindre.
 //! - `selection[*].val` quand `via` est présent : cite une valeur N1 (`car_<id>.code`),
 //!   pas un membre de dimension — hors scope (sujet C, B1+ futur).
 //! - `ref` (codes de références directes) — pas encore renommable.
@@ -72,6 +72,73 @@ fn translate_via_to_code(con: &Connection, via: &JsonValue) -> duckdb::Result<Op
     );
     match code {
         Ok(code) => Ok(Some(JsonValue::String(code))),
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Primitives `coefficient` (code de dim_coefficient ↔ id technique)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Traduit un code de coefficient → son id technique dans `dim_coefficient`.
+/// Retourne `None` si le type est déjà un entier (idempotence), `"constant"`
+/// (littéral inline), ou un code inconnu.
+fn translate_coefficient_type_to_id(
+    con: &Connection,
+    coeff: &JsonValue,
+) -> duckdb::Result<Option<JsonValue>> {
+    let Some(obj) = coeff.as_object() else {
+        return Ok(None);
+    };
+    let Some(t) = obj.get("type").and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    if t == "constant" {
+        return Ok(None); // littéral inline, pas de migration
+    }
+    if t.parse::<i64>().is_ok() {
+        return Ok(None); // déjà un id
+    }
+    let id: duckdb::Result<i64> = con.query_row(
+        "SELECT id FROM dim_coefficient WHERE code = ?",
+        params![t],
+        |r| r.get(0),
+    );
+    match id {
+        Ok(id) => {
+            let mut new_obj = obj.clone();
+            new_obj.insert("type".to_string(), JsonValue::Number(id.into()));
+            Ok(Some(JsonValue::Object(new_obj)))
+        }
+        Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Traduit un id de coefficient → son code dans `dim_coefficient`.
+/// Retourne `None` si le type n'est pas un entier (déjà un code) ou inconnu.
+fn translate_coefficient_type_to_code(
+    con: &Connection,
+    coeff: &JsonValue,
+) -> duckdb::Result<Option<JsonValue>> {
+    let Some(obj) = coeff.as_object() else {
+        return Ok(None);
+    };
+    let Some(id) = obj.get("type").and_then(|v| v.as_i64()) else {
+        return Ok(None); // déjà un code string ou "constant"
+    };
+    let code: duckdb::Result<String> = con.query_row(
+        "SELECT code FROM dim_coefficient WHERE id = ?",
+        params![id],
+        |r| r.get(0),
+    );
+    match code {
+        Ok(code) => {
+            let mut new_obj = obj.clone();
+            new_obj.insert("type".to_string(), JsonValue::String(code));
+            Ok(Some(JsonValue::Object(new_obj)))
+        }
         Err(duckdb::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e),
     }
@@ -364,6 +431,7 @@ pub fn denormalize_rule_definition(con: &Connection, json: &str) -> duckdb::Resu
     }
 
     // 2. operations[*].selection[*].val + destination.<dim>.value
+    // 3. operations[*].coefficient.type (id → code de dim_coefficient)
     if let Some(ops) = v.get_mut("operations").and_then(|o| o.as_array_mut()) {
         for op in ops.iter_mut() {
             if let Some(sel) = op.get_mut("selection") {
@@ -371,6 +439,12 @@ pub fn denormalize_rule_definition(con: &Connection, json: &str) -> duckdb::Resu
             }
             if let Some(dest) = op.get_mut("destination") {
                 changed |= denormalize_destinations(con, dest)?;
+            }
+            if let Some(coeff) = op.get("coefficient").cloned() {
+                if let Some(new_coeff) = translate_coefficient_type_to_code(con, &coeff)? {
+                    op["coefficient"] = new_coeff;
+                    changed = true;
+                }
             }
         }
     }
@@ -518,6 +592,7 @@ pub fn normalize_rule_definition(con: &Connection, json: &str) -> duckdb::Result
     }
 
     // 2. operations[*].selection[*].val + destination.<dim>.value
+    // 3. operations[*].coefficient.type (code de dim_coefficient → id)
     if let Some(ops) = v.get_mut("operations").and_then(|o| o.as_array_mut()) {
         for op in ops.iter_mut() {
             if let Some(sel) = op.get_mut("selection") {
@@ -525,6 +600,12 @@ pub fn normalize_rule_definition(con: &Connection, json: &str) -> duckdb::Result
             }
             if let Some(dest) = op.get_mut("destination") {
                 changed |= normalize_destinations(con, dest)?;
+            }
+            if let Some(coeff) = op.get("coefficient").cloned() {
+                if let Some(new_coeff) = translate_coefficient_type_to_id(con, &coeff)? {
+                    op["coefficient"] = new_coeff;
+                    changed = true;
+                }
             }
         }
     }
@@ -764,5 +845,57 @@ mod tests {
         let norm = normalize_rule_definition(&con, &json).unwrap();
         // Aucun changement attendu.
         assert_eq!(norm, json, "aucune modification si via est déjà un id");
+    }
+
+    #[test]
+    fn normalise_coefficient_type_code_vers_id() {
+        let con = setup();
+        // create_schema seede déjà les builtins (dont pct_integration).
+        let id: i64 = con
+            .query_row("SELECT id FROM dim_coefficient WHERE code='pct_integration'", [], |r| r.get(0))
+            .unwrap();
+
+        let json = r#"{"scope":[],"operations":[{"seq":1,"level":"corporate","coefficient":{"type":"pct_integration"},"selection":[]}]}"#;
+        let norm = normalize_rule_definition(&con, json).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&norm).unwrap();
+        let coeff_type = &v["operations"][0]["coefficient"]["type"];
+        assert_eq!(
+            coeff_type.as_i64(),
+            Some(id),
+            "coefficient.type doit être l'id après normalisation"
+        );
+
+        // Dénormalisation : retour au code.
+        let denorm = denormalize_rule_definition(&con, &norm).unwrap();
+        let v2: serde_json::Value = serde_json::from_str(&denorm).unwrap();
+        assert_eq!(
+            v2["operations"][0]["coefficient"]["type"].as_str(),
+            Some("pct_integration"),
+            "coefficient.type doit être le code après dénormalisation"
+        );
+    }
+
+    #[test]
+    fn normalise_coefficient_type_constant_inchange() {
+        let con = setup();
+        let json = r#"{"scope":[],"operations":[{"seq":1,"level":"corporate","coefficient":{"type":"constant","value":0.5},"selection":[]}]}"#;
+        let norm = normalize_rule_definition(&con, json).unwrap();
+        assert_eq!(norm, json, "coefficient constant ne doit pas être migré");
+    }
+
+    #[test]
+    fn normalise_coefficient_type_deja_id_idempotent() {
+        let con = setup();
+        // create_schema seede déjà les builtins — récupérer un id existant.
+        let id: i64 = con
+            .query_row("SELECT id FROM dim_coefficient WHERE code='pct_integration'", [], |r| r.get(0))
+            .unwrap();
+
+        // JSON déjà avec un id dans coefficient.type.
+        let json = format!(
+            r#"{{"scope":[],"operations":[{{"seq":1,"level":"corporate","coefficient":{{"type":{id}}},"selection":[]}}]}}"#
+        );
+        let norm = normalize_rule_definition(&con, &json).unwrap();
+        assert_eq!(norm, json, "aucune modification si coefficient.type est déjà un id");
     }
 }

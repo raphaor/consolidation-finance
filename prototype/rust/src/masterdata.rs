@@ -174,6 +174,17 @@ const TABLES: &[TableDef] = &[
         pk: &["code"],
         auto_pk: false,
     },
+    // Coefficients : exposés uniquement pour le renommage de code
+    // (POST /api/md/coefficients/rename). Le CRUD complet passe par
+    // /api/coefficients (route dédiée qui gère l'expression et le kind).
+    TableDef {
+        api_name: "coefficients",
+        label: "Coefficients",
+        sql_name: "dim_coefficient",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+        auto_pk: false,
+    },
     // --- Consolidation (ex scenarios) : objet composite, PK technique auto `id`.
     //     Clé naturelle à 5 éléments (phase, exercice, perimeter_set, variant,
     //     presentation_currency) matérialisée par une contrainte UNIQUE.
@@ -1029,8 +1040,8 @@ async fn remove(
 // systématiquement false pour ces champs (un integer.as_str() = None) — elles
 // restent en place comme filet de sécurité pour d'éventuelles bases non migrées.
 //
-// Encore actif (stockage toujours en code TEXT) :
-//   • `dim_rule.definition`  operations[*].coefficient  (dim_coefficient — pas de rename dédié)
+// Encore actif (garde rôle 3 — scan JSON pour codes non migrés) :
+//   • `dim_rule.definition`  operations[*].coefficient.type  (dim_coefficient — étape 12)
 //
 // Retiré en étape 8 :
 //   • `app_config.pivot_currency`  — remplacé par `pivot_currency_id` (INTEGER),
@@ -1125,13 +1136,17 @@ fn destination_has_override(json: &JsonValue, dim_name: &str, old: &str) -> bool
         })
 }
 
-/// `true` si l'une des opérations a `coefficient = old` (code de dim_coefficient).
+/// `true` si l'une des opérations a `coefficient.type = old` (code de dim_coefficient).
+/// Le JSON stocke `{"type": "<code>"}` (Named) ou `{"type": "constant", "value": …}`.
 fn operations_have_coeff(json: &JsonValue, old: &str) -> bool {
     json.get("operations")
         .and_then(|v| v.as_array())
         .map_or(false, |ops| {
             ops.iter().any(|op| {
-                op.get("coefficient").and_then(|x| x.as_str()) == Some(old)
+                op.get("coefficient")
+                    .and_then(|c| c.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some(old)
             })
         })
 }
@@ -2274,6 +2289,36 @@ mod tests {
         assert!(
             blockers.is_empty(),
             "aucun bloquant JSON attendu pour dim_currency après étape 8 : {blockers:?}"
+        );
+    }
+
+    /// B1 étape 12 : un coefficient utilisé dans une règle bloque le renommage.
+    /// `operations_have_coeff` inspecte `op["coefficient"]["type"]`.
+    #[test]
+    fn role3_coefficient_bloque_si_dans_rule() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        seed_rule(
+            &con,
+            "TEST_COEFF",
+            r#"{"scope":[],"operations":[{"seq":1,"level":"corporate","coefficient":{"type":"pct_integration"},"selection":[]}]}"#,
+        );
+        let blockers = scan_json_blockers(&con, "dim_coefficient", "pct_integration").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("TEST_COEFF") && b.contains("coefficient")),
+            "doit détecter pct_integration dans coefficient de TEST_COEFF : {blockers:?}"
+        );
+    }
+
+    /// B1 étape 12 : un coefficient non utilisé dans les règles ne bloque pas.
+    #[test]
+    fn role3_coefficient_ok_si_absent_des_regles() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        let blockers = scan_json_blockers(&con, "dim_coefficient", "non_existent_coeff").unwrap();
+        assert!(
+            blockers.is_empty(),
+            "aucun bloquant JSON pour un coefficient non référencé : {blockers:?}"
         );
     }
 }

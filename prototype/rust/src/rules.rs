@@ -190,8 +190,19 @@ pub fn validate_definition(con: &Connection, definition_json: &str) -> Result<()
 
     for op in &def.operations {
         // Coefficient nommé : doit exister dans la bibliothèque et compiler.
-        if let Coefficient::Named(code) = &op.coefficient {
-            crate::coefficients::resolve_expr(con, code)?;
+        match &op.coefficient {
+            Coefficient::Named(code) => {
+                crate::coefficients::resolve_expr(con, code)?;
+            }
+            Coefficient::NamedById(id) => {
+                let code: String = con.query_row(
+                    "SELECT code FROM dim_coefficient WHERE id = ?",
+                    duckdb::params![id],
+                    |r| r.get(0),
+                ).map_err(|e| format!("coefficient id {id} introuvable : {e}"))?;
+                crate::coefficients::resolve_expr(con, &code)?;
+            }
+            Coefficient::Constant(_) => {}
         }
         for s in &op.selection {
             // Cible référentielle pour valider `val` : par défaut c'est la master
@@ -521,6 +532,9 @@ enum Coefficient {
     /// Référence à un coefficient de la bibliothèque (`{"type": "<code>"}`),
     /// natif ou utilisateur. Résolu/compilé à l'exécution.
     Named(String),
+    /// Référence par id technique (`{"type": <id>}`) — étape 12 B1.
+    /// Résolu en code via `dim_coefficient` avant `resolve_expr`.
+    NamedById(i64),
 }
 
 /// Destination d'une dimension pilotable.
@@ -750,19 +764,27 @@ fn parse_selection_cond(v: &JsonValue, ctx: &RuleContext) -> RuleResult_<Selecti
 
 fn parse_coefficient(v: &JsonValue) -> RuleResult_<Coefficient> {
     let obj = v.as_object().ok_or("coefficient doit être un objet")?;
-    let t = expect_str(obj, "type")?;
-    // `constant` = littéral inline ; tout autre `type` est un **code** de la
-    // bibliothèque `dim_coefficient` (natif ou utilisateur), résolu à
-    // l'exécution / la validation. L'existence du code est vérifiée par
-    // `validate_definition` (POST/PUT) et à l'exécution (`resolve_coefficient`).
-    if t == "constant" {
-        let value = obj
-            .get("value")
-            .and_then(|x| x.as_f64())
-            .ok_or("coefficient.value doit être un nombre")?;
-        Ok(Coefficient::Constant(value))
-    } else {
-        Ok(Coefficient::Named(t))
+    let t = obj
+        .get("type")
+        .ok_or("coefficient.type manquant")?;
+    match t {
+        JsonValue::String(s) if s == "constant" => {
+            let value = obj
+                .get("value")
+                .and_then(|x| x.as_f64())
+                .ok_or("coefficient.value doit être un nombre")?;
+            Ok(Coefficient::Constant(value))
+        }
+        JsonValue::String(s) => {
+            // Code legacy (non migré) — résolu à l'exécution.
+            Ok(Coefficient::Named(s.clone()))
+        }
+        JsonValue::Number(n) => {
+            // Id migré (étape 12 B1) — résolu via dim_coefficient à l'exécution.
+            let id = n.as_i64().ok_or("coefficient.type id doit être un entier")?;
+            Ok(Coefficient::NamedById(id))
+        }
+        _ => Err("coefficient.type doit être une chaîne ou un entier".into()),
     }
 }
 
@@ -1039,6 +1061,15 @@ fn resolve_coefficient(
         Coefficient::Constant(v) => Ok((format_float(*v), CoeffJoins::default())),
         Coefficient::Named(code) => {
             crate::coefficients::resolve_expr(con, code).map_err(duckdb_synthesis_error)
+        }
+        Coefficient::NamedById(id) => {
+            // Résoudre id → code, puis déléguer à resolve_expr.
+            let code: String = con.query_row(
+                "SELECT code FROM dim_coefficient WHERE id = ?",
+                duckdb::params![id],
+                |r| r.get(0),
+            )?;
+            crate::coefficients::resolve_expr(con, &code).map_err(duckdb_synthesis_error)
         }
     }
 }
@@ -2288,6 +2319,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_coefficient_named_par_code() {
+        let v = serde_json::json!({"type":"pct_integration"});
+        let c = parse_coefficient(&v).expect("coefficient named valide");
+        assert!(matches!(c, Coefficient::Named(ref s) if s == "pct_integration"));
+    }
+
+    #[test]
+    fn parse_coefficient_named_par_id() {
+        let v = serde_json::json!({"type":42});
+        let c = parse_coefficient(&v).expect("coefficient named-by-id valide");
+        assert!(matches!(c, Coefficient::NamedById(42)));
+    }
+
+    #[test]
     fn parse_multiplicateur_absent_donne_1() {
         // Absence de la clé → défaut implicite = 1.0 (documenté).
         let ctx = ctx_fixture();
@@ -2320,6 +2365,30 @@ mod tests {
         assert!(
             joins.p_ent,
             "pct_integration doit déclencher le JOIN sat_perimeter (p_ent)"
+        );
+        assert!(
+            expr.contains("pct_integration"),
+            "expression doit lire pct_integration : {expr}"
+        );
+    }
+
+    #[test]
+    fn resolve_coefficient_named_by_id_resout_correctement() {
+        let con = duckdb::Connection::open_in_memory().expect("open in-memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        // Récupérer l'id du coefficient seedé pct_integration.
+        let id: i64 = con
+            .query_row(
+                "SELECT id FROM dim_coefficient WHERE code = 'pct_integration'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let (expr, joins) =
+            resolve_coefficient(&con, &Coefficient::NamedById(id)).unwrap();
+        assert!(
+            joins.p_ent,
+            "NamedById doit résoudre comme Named — JOIN sat_perimeter attendu"
         );
         assert!(
             expr.contains("pct_integration"),

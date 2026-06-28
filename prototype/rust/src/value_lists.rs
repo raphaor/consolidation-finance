@@ -345,6 +345,54 @@ pub fn delete_value(
     Ok(())
 }
 
+/// Renomme le code d'une valeur dans `lst_<id>`.
+///
+/// Contrairement aux caractéristiques, les listes de valeurs n'ont pas de
+/// colonne assignée sur une master data — la cascade se limite à la table
+/// physique `lst_<id>` elle-même.
+pub fn rename_value_code(
+    con: &duckdb::Connection,
+    list_code: &str,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    if new_value.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new_value == old_value {
+        return Ok(());
+    }
+    require_list(con, list_code)?;
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
+
+    let exists: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [old_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!("valeur inexistante : {old_value}")));
+    }
+    let taken: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [new_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if taken {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new_value}")));
+    }
+    con.execute(
+        &format!("UPDATE {vtable} SET code = ? WHERE code = ?"),
+        [new_value, old_value],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 /// Met à jour le libellé d'une liste de valeurs.
 pub fn update_list(
     con: &duckdb::Connection,
@@ -549,6 +597,23 @@ async fn values_delete(
     Ok(Json(json!({ "deleted": value })))
 }
 
+#[derive(Deserialize)]
+struct RenameValueBody {
+    new_code: String,
+}
+
+/// POST /api/meta/value-lists/{code}/values/{value}/rename — renomme une valeur.
+async fn values_rename(
+    State(state): State<Arc<AppState>>,
+    Path((code, value)): Path<(String, String)>,
+    Json(body): Json<RenameValueBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_value_code(&con, &code, &value, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": value, "new": body.new_code } })))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/value-lists", get(list).post(create))
@@ -561,6 +626,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/api/meta/value-lists/{code}/values/{value}",
             put(values_update).delete(values_delete),
+        )
+        .route(
+            "/api/meta/value-lists/{code}/values/{value}/rename",
+            post(values_rename),
         )
 }
 
@@ -736,5 +805,24 @@ mod tests {
             1,
             "valeurs préservées"
         );
+    }
+
+    #[test]
+    fn rename_value_code_ok() {
+        let con = setup();
+        create_list(&con, "incoterm", "Incoterms").unwrap();
+        let mut v = Map::new();
+        v.insert("code".into(), json!("FOB"));
+        create_value(&con, "incoterm", &v).unwrap();
+        rename_value_code(&con, "incoterm", "FOB", "FOB_2024").unwrap();
+        let lid = id_of(&con, "incoterm").unwrap();
+        let code: String = con
+            .query_row(
+                &format!("SELECT code FROM {} WHERE code = 'FOB_2024'", value_table(lid)),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(code, "FOB_2024");
     }
 }

@@ -25,10 +25,12 @@ use std::sync::Arc;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ALLOWED_LEVELS: &[&str] = &["raw", "corporate", "converted", "consolidated"];
+#[allow(dead_code)]
 const PIPELINE_LEVELS: &[&str] = &["corporate", "converted", "consolidated"];
 const ALLOWED_OPS: &[&str] = &[
     "=", "!=", ">", "<", ">=", "<=", "IN", "IS NULL", "IS NOT NULL",
 ];
+#[allow(dead_code)]
 const ALLOWED_ASSERTION_TYPES: &[&str] = &["range", "nonzero", "existence", "equals"];
 const ALLOWED_METRICS: &[&str] = &["variation_abs", "variation_pct", "variation"];
 
@@ -335,6 +337,7 @@ fn selection_dims(con: &Connection) -> Vec<String> {
     dims
 }
 
+#[allow(dead_code)]
 fn grain_columns(con: &Connection) -> Vec<String> {
     // Colonnes de fact_entry correspondant aux dimensions propagées (INTEGER ids).
     // Pour le grain on utilise les noms de colonnes de fact_entry (= noms de dimensions).
@@ -1384,6 +1387,131 @@ async fn operands_catalog(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Renommage de code (étape 12 B1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenameBody {
+    new: String,
+}
+
+/// Renomme le code d'un contrôle + cascade sur `dim_control_set_item.control_code`.
+fn rename_control(con: &Connection, old: &str, new: &str) -> Result<(), AppError> {
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(());
+    }
+    // Vérifier existence.
+    let exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_control WHERE code = ?",
+            params![old],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!("contrôle introuvable : {old}")));
+    }
+    // Vérifier unicité du nouveau code.
+    let taken: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_control WHERE code = ?",
+            params![new],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if taken {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+    // Cascade sur les items de jeux de contrôles.
+    con.execute(
+        "UPDATE dim_control_set_item SET control_code = ? WHERE control_code = ?",
+        params![new, old],
+    )
+    .map_err(db_err)?;
+    // Renommer le contrôle lui-même.
+    con.execute(
+        "UPDATE dim_control SET code = ? WHERE code = ?",
+        params![new, old],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Renomme le code d'un jeu de contrôles + cascade sur `dim_control_set_item.set_code`.
+fn rename_control_set(con: &Connection, old: &str, new: &str) -> Result<(), AppError> {
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(());
+    }
+    let exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_control_set WHERE code = ?",
+            params![old],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!("jeu de contrôles introuvable : {old}")));
+    }
+    let taken: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_control_set WHERE code = ?",
+            params![new],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if taken {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+    // Cascade sur les items.
+    con.execute(
+        "UPDATE dim_control_set_item SET set_code = ? WHERE set_code = ?",
+        params![new, old],
+    )
+    .map_err(db_err)?;
+    // Renommer le jeu lui-même.
+    con.execute(
+        "UPDATE dim_control_set SET code = ? WHERE code = ?",
+        params![new, old],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// POST /api/controls/{code}/rename — renomme le code d'un contrôle.
+async fn rename_control_handler(
+    Path(old): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    {
+        let con = lock_con(&state)?;
+        rename_control(&con, &old, &body.new)?;
+        let _ = con.execute("CHECKPOINT", []);
+    }
+    Ok(Json(serde_json::json!({ "renamed": { "old": old, "new": body.new } })))
+}
+
+/// POST /api/control-sets/{code}/rename — renomme le code d'un jeu de contrôles.
+async fn rename_control_set_handler(
+    Path(old): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    {
+        let con = lock_con(&state)?;
+        rename_control_set(&con, &old, &body.new)?;
+        let _ = con.execute("CHECKPOINT", []);
+    }
+    Ok(Json(serde_json::json!({ "renamed": { "old": old, "new": body.new } })))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Router
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1397,6 +1525,7 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_control),
         )
         .route("/api/controls/{code}/run", post(run_single_handler))
+        .route("/api/controls/{code}/rename", post(rename_control_handler))
         .route("/api/controls/operands", get(operands_catalog))
         .route(
             "/api/control-sets",
@@ -1409,6 +1538,7 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_control_set),
         )
         .route("/api/control-sets/{code}/run", post(run_set_handler))
+        .route("/api/control-sets/{code}/rename", post(rename_control_set_handler))
         .route(
             "/api/control-sets/{code}/results",
             get(get_results_handler),
@@ -1447,6 +1577,7 @@ mod tests {
         con
     }
 
+    #[allow(dead_code)]
     fn mk_control(con: &Connection, code: &str, def: &str) {
         con.execute(
             "INSERT INTO dim_control (code, libelle, definition) VALUES (?, ?, ?)",
@@ -1631,5 +1762,116 @@ mod tests {
         };
         let assertions = vec![Assertion::Existence];
         assert_eq!(evaluate_assertions(&assertions, &row), Status::NoData);
+    }
+
+    // ── Renommage (étape 12 B1) ────────────────────────────────────────
+
+    #[test]
+    fn rename_control_ok() {
+        let con = db();
+        mk_control(&con, "CTRL_A", r#"{"levels":["consolidated"],"grain":[],"selection":[],"assertions":[{"type":"nonzero"}]}"#);
+        rename_control(&con, "CTRL_A", "CTRL_B").unwrap();
+        // Vérifier que le nouveau code existe.
+        let code: String = con
+            .query_row("SELECT code FROM dim_control WHERE code = 'CTRL_B'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(code, "CTRL_B");
+        // Vérifier que l'ancien n'existe plus.
+        let count: i64 = con
+            .query_row("SELECT COUNT(*) FROM dim_control WHERE code = 'CTRL_A'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn rename_control_cascade_sur_set_items() {
+        let con = db();
+        mk_control(&con, "CTRL_X", r#"{"levels":["consolidated"],"grain":[],"selection":[],"assertions":[{"type":"nonzero"}]}"#);
+        // Créer un jeu de contrôles qui référence CTRL_X.
+        con.execute(
+            "INSERT INTO dim_control_set (code, libelle) VALUES ('SET_1', 'Test set')",
+            [],
+        )
+        .unwrap();
+        con.execute(
+            "INSERT INTO dim_control_set_item (set_code, control_code, ord) VALUES ('SET_1', 'CTRL_X', 1)",
+            [],
+        )
+        .unwrap();
+        // Renommer le contrôle.
+        rename_control(&con, "CTRL_X", "CTRL_Y").unwrap();
+        // Vérifier que le lien a été mis à jour.
+        let cc: String = con
+            .query_row(
+                "SELECT control_code FROM dim_control_set_item WHERE set_code = 'SET_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cc, "CTRL_Y", "control_code doit être mis à jour dans les items");
+    }
+
+    #[test]
+    fn rename_control_set_ok() {
+        let con = db();
+        con.execute(
+            "INSERT INTO dim_control_set (code, libelle) VALUES ('OLD_SET', 'Old')",
+            [],
+        )
+        .unwrap();
+        rename_control_set(&con, "OLD_SET", "NEW_SET").unwrap();
+        let code: String = con
+            .query_row("SELECT code FROM dim_control_set WHERE code = 'NEW_SET'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(code, "NEW_SET");
+    }
+
+    #[test]
+    fn rename_control_set_cascade_sur_items() {
+        let con = db();
+        mk_control(&con, "C1", r#"{"levels":["consolidated"],"grain":[],"selection":[],"assertions":[{"type":"nonzero"}]}"#);
+        con.execute(
+            "INSERT INTO dim_control_set (code, libelle) VALUES ('S1', 'Set 1')",
+            [],
+        )
+        .unwrap();
+        con.execute(
+            "INSERT INTO dim_control_set_item (set_code, control_code, ord) VALUES ('S1', 'C1', 1)",
+            [],
+        )
+        .unwrap();
+        rename_control_set(&con, "S1", "S2").unwrap();
+        let sc: String = con
+            .query_row(
+                "SELECT set_code FROM dim_control_set_item WHERE control_code = 'C1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(sc, "S2", "set_code doit être mis à jour dans les items");
+    }
+
+    #[test]
+    fn rename_control_inconnu_erreur() {
+        let con = db();
+        let err = rename_control(&con, "INEXISTANT", "NEW").unwrap_err();
+        assert!(err.1.contains("introuvable"));
+    }
+
+    #[test]
+    fn rename_control_deja_utilise_erreur() {
+        let con = db();
+        mk_control(&con, "A", r#"{"levels":["consolidated"],"grain":[],"selection":[],"assertions":[{"type":"nonzero"}]}"#);
+        mk_control(&con, "B", r#"{"levels":["consolidated"],"grain":[],"selection":[],"assertions":[{"type":"nonzero"}]}"#);
+        let err = rename_control(&con, "A", "B").unwrap_err();
+        assert!(err.1.contains("déjà utilisé"));
+    }
+
+    #[test]
+    fn rename_control_noop_si_meme_code() {
+        let con = db();
+        mk_control(&con, "SAME", r#"{"levels":["consolidated"],"grain":[],"selection":[],"assertions":[{"type":"nonzero"}]}"#);
+        // Ne doit pas échouer.
+        rename_control(&con, "SAME", "SAME").unwrap();
     }
 }

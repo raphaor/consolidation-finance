@@ -638,6 +638,181 @@ pub fn delete_value(
     Ok(())
 }
 
+/// Renomme le code d'une valeur N1 dans `car_<id>` + cascade.
+///
+/// Cascade :
+/// 1. `car_<id>.code` (PK) — mise à jour directe.
+/// 2. Colonne de la caractéristique sur la master data de la dimension de base
+///    (ex. `dim_account."comportement"`) — toutes les lignes assignées.
+/// 3. JSON de règles/agrégats : `selection[].val` quand `via` pointe vers cette
+///    caractéristique (via déjà migré en id).
+pub fn rename_value_code(
+    con: &duckdb::Connection,
+    char_code: &str,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    if new_value.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new_value == old_value {
+        return Ok(());
+    }
+    // Vérifier que la caractéristique existe.
+    require_characteristic(con, char_code)?;
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
+
+    // Vérifier existence de l'ancien code.
+    let exists: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [old_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!("valeur inexistante : {old_value}")));
+    }
+    // Vérifier unicité du nouveau code.
+    let taken: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [new_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if taken {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new_value}")));
+    }
+
+    // 1. Renommer dans car_<id>.
+    con.execute(
+        &format!("UPDATE {vtable} SET code = ? WHERE code = ?"),
+        [new_value, old_value],
+    )
+    .map_err(db_err)?;
+
+    // 2. Cascade sur la colonne de la dimension de base.
+    let base_dim: String = con
+        .query_row(
+            "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+            [char_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if let Some((base_table, _)) = references::dimension_master(&base_dim) {
+        con.execute(
+            &format!(
+                "UPDATE {base_table} SET \"{char_code}\" = ? WHERE \"{char_code}\" = ?"
+            ),
+            [new_value, old_value],
+        )
+        .map_err(db_err)?;
+    }
+
+    // 3. Cascade dans les JSON de règles et agrégats (selection[].val quand via
+    //    pointe vers cette caractéristique).
+    if let Some(char_id) = id_of(con, char_code) {
+        cascade_value_in_rules(con, char_id, old_value, new_value)?;
+        cascade_value_in_aggregates(con, char_id, old_value, new_value)?;
+    }
+
+    Ok(())
+}
+
+/// Remplace `val = old_value` par `new_value` dans les règles où `via` pointe
+/// vers la caractéristique `char_id`.
+fn cascade_value_in_rules(
+    con: &duckdb::Connection,
+    char_id: i64,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    let rules: Vec<(String, String)> = {
+        let mut stmt = con
+            .prepare("SELECT code, definition FROM dim_rule WHERE definition IS NOT NULL")
+            .map_err(db_err)?;
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(db_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    for (rule_code, def) in &rules {
+        let Ok(mut json) = serde_json::from_str::<JsonValue>(def) else {
+            continue;
+        };
+        let mut changed = false;
+        if let Some(ops) = json.get_mut("operations").and_then(|o| o.as_array_mut()) {
+            for op in ops {
+                if let Some(sel) = op.get_mut("selection").and_then(|s| s.as_array_mut()) {
+                    for cond in sel.iter_mut() {
+                        // via est un id (migré étape 6b). Vérifier si c'est notre caractéristique.
+                        let via_id = cond.get("via").and_then(|v| v.as_i64());
+                        if via_id == Some(char_id) {
+                            if cond.get("val").and_then(|v| v.as_str()) == Some(old_value) {
+                                cond["val"] = JsonValue::String(new_value.to_string());
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if changed {
+            con.execute(
+                "UPDATE dim_rule SET definition = ? WHERE code = ?",
+                [json.to_string().as_str(), rule_code],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    Ok(())
+}
+
+/// Remplace `val = old_value` par `new_value` dans les agrégats où `via` pointe
+/// vers la caractéristique `char_id`.
+fn cascade_value_in_aggregates(
+    con: &duckdb::Connection,
+    char_id: i64,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    let aggs: Vec<(String, String)> = {
+        let mut stmt = con
+            .prepare("SELECT code, definition FROM dim_aggregate WHERE definition IS NOT NULL")
+            .map_err(db_err)?;
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(db_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    for (agg_code, def) in &aggs {
+        let Ok(mut json) = serde_json::from_str::<JsonValue>(def) else {
+            continue;
+        };
+        let mut changed = false;
+        if let Some(sel) = json.get_mut("selection").and_then(|s| s.as_array_mut()) {
+            for cond in sel.iter_mut() {
+                let via_id = cond.get("via").and_then(|v| v.as_i64());
+                if via_id == Some(char_id) {
+                    if cond.get("val").and_then(|v| v.as_str()) == Some(old_value) {
+                        cond["val"] = JsonValue::String(new_value.to_string());
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            con.execute(
+                "UPDATE dim_aggregate SET definition = ? WHERE code = ?",
+                [json.to_string().as_str(), agg_code],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    Ok(())
+}
+
 /// Affecte (ou retire, si `value` est `None`/vide) une valeur N1 à un membre de
 /// la dimension de base (ex. classer le compte `700` en `VENTES_IC`).
 pub fn assign(
@@ -942,6 +1117,23 @@ async fn rename_char_handler(
     Ok(Json(json!({ "renamed": { "old": code, "new": body.new_code } })))
 }
 
+#[derive(Deserialize)]
+struct RenameValueBody {
+    new_code: String,
+}
+
+/// POST /api/meta/characteristics/{code}/values/{value}/rename — renomme une valeur N1.
+async fn values_rename(
+    State(state): State<Arc<AppState>>,
+    Path((code, value)): Path<(String, String)>,
+    Json(body): Json<RenameValueBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_value_code(&con, &code, &value, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": value, "new": body.new_code } })))
+}
+
 /// PUT /api/meta/characteristics/{code}/assign — classe (ou déclasse) un membre.
 async fn assign_handler(
     State(state): State<Arc<AppState>>,
@@ -972,6 +1164,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/api/meta/characteristics/{code}/values/{value}",
             put(values_update).delete(values_delete),
+        )
+        .route(
+            "/api/meta/characteristics/{code}/values/{value}/rename",
+            post(values_rename),
         )
         .route(
             "/api/meta/characteristics/{code}/assign",
@@ -1220,5 +1416,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 0, "attributs N2 supprimés avec la N1");
+    }
+
+    // ── Renommage de valeur (§12) ─────────────────────────────────────
+
+    #[test]
+    fn rename_value_code_ok() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "VENTES", "libelle": "Ventes"}).as_object().unwrap(),
+        )
+        .unwrap();
+        rename_value_code(&con, "comportement", "VENTES", "VENTES_IC").unwrap();
+        // Vérifier que le nouveau code existe.
+        let code: String = con
+            .query_row(
+                &format!(
+                    "SELECT code FROM car_{} WHERE code = 'VENTES_IC'",
+                    id_of(&con, "comportement").unwrap()
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(code, "VENTES_IC");
+    }
+
+    #[test]
+    fn rename_value_code_cascade_master_data() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "VENTES", "libelle": "Ventes"}).as_object().unwrap(),
+        )
+        .unwrap();
+        // Insérer un compte de test.
+        con.execute(
+            "INSERT INTO dim_account (code, libelle) VALUES ('700', 'Test')",
+            [],
+        )
+        .unwrap();
+        // Assigner la valeur à un compte.
+        assign(&con, "comportement", "700", Some("VENTES")).unwrap();
+        // Renommer la valeur.
+        rename_value_code(&con, "comportement", "VENTES", "VENTES_IC").unwrap();
+        // Vérifier que la master data a été mise à jour.
+        let val: Option<String> = con
+            .query_row(
+                "SELECT \"comportement\" FROM dim_account WHERE code = '700'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val.as_deref(), Some("VENTES_IC"), "master data cascade");
+    }
+
+    #[test]
+    fn rename_value_code_inexistant_erreur() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        let err = rename_value_code(&con, "comportement", "NOPE", "NEW").unwrap_err();
+        assert!(err.1.contains("inexistante"));
+    }
+
+    #[test]
+    fn rename_value_code_deja_utilise_erreur() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "A", "libelle": "A"}).as_object().unwrap(),
+        )
+        .unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "B", "libelle": "B"}).as_object().unwrap(),
+        )
+        .unwrap();
+        let err = rename_value_code(&con, "comportement", "A", "B").unwrap_err();
+        assert!(err.1.contains("déjà utilisé"));
     }
 }

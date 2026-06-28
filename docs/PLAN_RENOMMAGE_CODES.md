@@ -1,9 +1,50 @@
 # Plan d'action — Codes renommables via clés techniques (option B1)
 
-> Statut : **étapes 0–11 terminées** (branche `feat/renommage-codes`) — chantier B1 complet. Smoke-test runtime à valider.
+> Statut : **étapes 0–13 livrées** (branche `feat/renommage-codes`).
 > Décision : **option B1** — chaque objet gagne un `id` technique immuable ;
 > le `code` devient un libellé mutable. Argumentaire A vs B en §2 ; migration
 > in-place en §7.
+
+## Objectif (le « pourquoi » de toute la refonte)
+
+Un `code` métier doit être **librement renommable** (il porte une logique métier
+qui évolue), **sans jamais casser** une référence ni imposer une migration
+lourde. Pour cela : chaque objet repose sur une **clé technique `id` immuable**
+qui est la **seule** chose jamais encodée dans le physique (FK, colonnes de
+faits, noms d'objets SQL, JSON de règles/formules). Le `code` n'existe alors
+qu'en colonne `code` de sa propre dimension + à l'affichage (résolu par
+jointure). Renommer = `UPDATE dim_x SET code=? WHERE id=?`, sans effet de bord.
+
+**Critère de réussite** : (a) la base **repose** sur des PK `id` (pas sur les
+codes) ; (b) **tous** les codes sont renommables — dimensions métier,
+objets du moteur de formules (coefficients, postes, indicateurs), contrôles de
+données, et à terme les valeurs internes (sujet C, §12).
+
+## Synthèse post-audit (2026-06-27)
+
+**Ce qui est acquis (étapes 0–13)** — les **trois rôles d'un code** (§3) sont
+couverts : valeur FK/faits en `id`, objets dynamiques nommés par `id`
+(`car_<id>`/`lst_<id>`/`c<id>`/`x<id>`/`r<id>`), JSON migrés en `id` (dont
+`coefficient.type`). Le renommage (`masterdata::rename_code`) bloque sur les
+codes encore présents en JSON (rôle 3) puis **cascade** les colonnes encore
+code-keyed résiduelles (staging, satellites non flippés, `dim_ruleset_item.rule_code`,
+tables dynamiques). Coefficients et contrôles sont renommables via endpoints
+dédiés. Filet **golden** iso-résultat en place. Suite de tests **verte**.
+
+**Écart 1 — résolu (étape 13).** `migrate_dims_pk_to_id` reconstruit chaque
+dimension avec `id … PRIMARY KEY` + `code … UNIQUE NOT NULL`. La base repose
+désormais sur des PK `id` réelles, pas seulement sur des séquences.
+
+**Écart 2 — résolu (étape 12).** Coefficients et contrôles sont désormais
+renommables. `coefficient.type` migré en id dans les JSON de règles.
+`dim_control`/`dim_control_set` ajoutés dans `SURROGATE_DIMS` avec cascade sur
+`dim_control_set_item`. Seul sujet C (valeurs internes de caractéristiques/listes)
+reste gelé (§12).
+
+**Nuance assumée** : `entity`/`period`/`flow` sont renommables par **cascade**
+(option A) sur `stg_entry` + satellites non flippés, pas en pur B1. `stg_entry` en
+codes est un choix du plan (§4.2) ; la cascade est un UPDATE ensembliste (correct,
+pas ligne à ligne) mais lourd à grande échelle. Acceptable en l'état.
 
 ## 0. Reprise rapide (dernière session : 2026-06-27)
 
@@ -11,7 +52,7 @@
 codes-renommables, branche `feat/renommage-codes`, voir
 `docs/PLAN_RENOMMAGE_CODES.md` §0 ».
 
-### Où on en est (2026-06-27 — chantier B1 terminé)
+### Où on en est (2026-06-27 — étapes 0–11 livrées ; voir Synthèse post-audit ci-dessus pour les étapes 12–13 restantes)
 
 **Étapes 0–10 terminées. Smoke-tests runtime étape 5 partiellement validés.**
 
@@ -144,37 +185,10 @@ B1 significative.
 
 ### Dimensions renommables aujourd'hui
 `variant`, `rate_set`, `perimeter_set`, `sous_classe`, `flow_scheme`, `method`,
-**`rules` (dim_rule)**, **`rulesets` (dim_ruleset)** — sous réserve que les
-JSON soient migrés (étape 6 garantit la migration au démarrage).
-
-### ⚠️ Étape 4 — diagnostic réel (le « stale build » était une fausse piste)
-
-L'hypothèse « artefact périmé » de la session précédente était **fausse** : le
-binaire était bien à jour. Deux vrais bugs (2026-06-26) :
-
-1. **`pipeline/staging.rs`** (`inject_by_prefix`) — `GROUP BY {col_list}` portait
-   sur des noms nus ; DuckDB liait `phase` à la colonne brute `stg_entry.phase`
-   (code) plutôt qu'à l'alias `_dphase.id AS phase`, laissant l'`id` ni groupé ni
-   agrégé → `Binder Error: column "id" must appear in the GROUP BY`. Le panic
-   pointait `indicators.rs:926` (le `unwrap` de `run_pipeline`), pas la vraie
-   source. **Même risque latent dans `aggregate.rs`** (`step_a`).
-   **Fix (les deux)** : isoler la résolution code→id dans une **sous-requête**,
-   puis `GROUP BY {col_list}` sur des noms propres et non-ambigus de la
-   sous-requête. (Ni le GROUP BY positionnel `1,2,3` — rejeté par DuckDB en
-   INSERT…SELECT — ni le GROUP BY sur alias — ambigu — ne marchaient.)
-2. **`indicators.rs`** (`build_aggregate_sql`, branche sélection directe) —
-   comparait le code (`'700'`) à `fact_entry.account`, désormais un id INTEGER
-   (B1). **Fix** : pour une dim à master data, joindre la master
-   (`LEFT JOIN dim_x imdd_x ON imdd_x.id = e.x`) et filtrer sur sa colonne code
-   (`imdd_x.code = ?`), comme les branches `via`/`ref`/`attr`. Test
-   `poste_direct_compile_et_filter` mis à jour (assertion `imdd_account.code`).
-3. **`rules.rs`** (`exec_operation`, branche sélection **directe**) — même classe :
-   l'opérande `e.<dim>` comparait un code à une colonne id. **Fix** : pour une dim
-   id-typée, remonter l'id → code via sous-requête
-   `(SELECT <code_col> FROM <table> WHERE id = e.<dim>)` (couvre `=`/`IN`/`IS NULL`).
-   `dest_expr` (override/map/map_ref) était déjà id-aware. NB : sous B1 une valeur
-   d'`override` doit exister dans la master data (FK NOT NULL) — les natures
-   synthétiques des tests sont désormais seedées.
+**`rules` (dim_rule)**, **`rulesets` (dim_ruleset)**, **`currency` (7ᵉ)**,
+**`coefficients` (dim_coefficient)**, **`controls` (dim_control)**,
+**`control_sets` (dim_control_set)** — sous réserve que les JSON soient migrés
+(étapes 6+12 garantissent la migration au démarrage).
 
 ### ⚠️ Étape 4 — diagnostic réel (le « stale build » était une fausse piste)
 
@@ -353,6 +367,13 @@ L'option A est conservée pour mémoire en **annexe §9**.
 Chaque dimension : `id` (séquence dédiée) PK, `code` mutable `UNIQUE NOT NULL`,
 FK en `_id`.
 
+> ⚠️ **État réel (audit 2026-06-27)** : ce schéma cible n'est **pas encore
+> réalisé** pour les dimensions de base. Le DDL déclare toujours `code … PRIMARY
+> KEY` et `ensure_ids` ajoute l'`id` comme colonne **sans PK ni UNIQUE** (unicité
+> portée par la seule séquence). Seule `dim_consolidation` a un vrai `id PRIMARY
+> KEY` natif. Poser `id PRIMARY KEY` + `code UNIQUE` sur toutes les dimensions est
+> l'objet de l'**étape 13**.
+
 ```sql
 CREATE SEQUENCE seq_dim_entity START 1;
 CREATE TABLE dim_entity (
@@ -395,6 +416,12 @@ Sous B1, le moteur ne référence plus les master data par code mais par id rés
 → `RESULTAT`/`BILAN`, `F99`, coefficients natifs, devise pivot **redeviennent
 renommables**. Restent immuables seulement les **enums** non-master-data
 (`classe ∈ {bilan,resultat,flux}`, `taux_conversion`).
+
+> ⚠️ **Nuance (audit 2026-06-27)** : les **codes natifs de coefficients** ne sont
+> en pratique pas encore renommables — `dim_coefficient` n'a pas d'endpoint de
+> rename et `coefficient.type` (dans les JSON de règles) n'est pas migré en id, si
+> bien que `scan_json_blockers` bloque le renommage d'un coefficient utilisé.
+> Levé par l'**étape 12**.
 
 ## 5. Couche de résolution code↔id (module central à écrire)
 
@@ -639,6 +666,50 @@ depuis les données existantes (jamais de reseed).
     - Migrer in-place les bases existantes.
     - Mettre à jour tous les sites qui utilisent le nom de colonne (règles, `dynamic_references`, `reapply`).
     - Exposer un endpoint de renommage de référence directe.
+
+12. ✅ **Rendre renommables coefficients + contrôles** (écart 2 de l'audit).
+    Deux familles d'objets ont un `code` aujourd'hui **non renommable** ; les
+    aligner sur le mécanisme B1.
+    - ✅ **Coefficients** (`dim_coefficient`) :
+      - `coefficient.type` des JSON de règles migré en `id` (`json_migration.rs` :
+        `translate_coefficient_type_to_id`/`_to_code`, étendu `normalize_rule_definition`
+        et `denormalize_rule_definition`). Migration idempotente au démarrage.
+      - `parse_coefficient` accepte Number (id) + String (code) + "constant".
+      - `resolve_coefficient` résout id→code via `dim_coefficient` puis `resolve_expr`.
+      - `operations_have_coeff` corrigé : inspecte `op["coefficient"]["type"]` (check
+        précédent était mort — `as_str()` sur un objet).
+      - `dim_coefficient` ajouté dans `TABLES` (masterdata.rs) → endpoint
+        `POST /api/md/coefficients/rename` opérationnel.
+      - 8 tests ajoutés (json_migration + rules + masterdata).
+    - ✅ **Contrôles de données** (`dim_control`, `dim_control_set`) :
+      - Ajoutés à `SURROGATE_DIMS` (colonne `id` + séquence via `ensure_ids`).
+      - Cascade directe au rename sur `dim_control_set_item` (`control_code` et
+        `set_code`) — pas de flip FK (tables isolées, pas dans le graphe de
+        références ni dans les JSON de règles).
+      - Pas de garde `scan_json_blockers` nécessaire (aucun code de contrôle
+        enfoui dans les définitions de règles/postes/indicateurs).
+      - Endpoints dédiés : `POST /api/controls/{code}/rename` et
+        `POST /api/control-sets/{code}/rename` (dans `controls.rs`).
+      - Frontend : `api.controls.rename()` + `api.controlSets.rename()`.
+      - 6 tests ajoutés (rename ok, cascade items, erreurs, noop).
+
+13. ✅ **Asseoir réellement la base sur des PK `id`** (écart 1 de l'audit).
+    - `migrate_dims_pk_to_id` dans `surrogate.rs` : reconstruit chaque table de
+      `SURROGATE_DIMS` avec `id … PRIMARY KEY` + `code … UNIQUE NOT NULL`.
+      Patron : CREATE __mig → INSERT … SELECT → DROP → RENAME → SET DEFAULT.
+    - Idempotent : `id_is_pk` (via `pragma_table_info`) détecte si déjà migré.
+    - Colonnes `id` exclues de la source (déjà ajoutées par `ensure_ids`).
+    - Séquence recréée + DEFAULT réappliqué après reconstruction.
+    - Appelé au démarrage (`server.rs`) après les migrations existantes.
+      `schema_version` → `'12'`.
+    - 1 test ajouté (reconstruction + idempotence + préservation données).
+    - Golden iso-résultat en filet.
+
+> **Robustesse migration (transverse, à traiter avec 12/13)** : les appels de
+> migration au démarrage (`server.rs`) sont « non bloquants » (erreur seulement
+> affichée) et `schema_version` est tamponné **quoi qu'il arrive** — une migration
+> B1 partiellement échouée passerait inaperçue. Envisager d'échouer dur (ou de ne
+> pas marquer la version) si une migration lève.
 
 ## 9. Annexe — option A (rejetée, pour mémoire)
 Garder le `code` en PK + opération « renommer en cascade » : `UPDATE` de toutes

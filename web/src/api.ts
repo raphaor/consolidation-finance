@@ -292,6 +292,11 @@ export const api = {
     update: (code: string, body: { libelle?: string; definition: ControlDefinition }) =>
       putJson<Control>(`/controls/${code}`, { code, ...body }),
     remove: (code: string) => deleteJson<{ deleted: string }>(`/controls/${code}`),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/controls/${code}/rename`,
+        { new: newCode },
+      ),
     run: (code: string, params: { consolidation_id?: number; phase?: string; entry_period?: string }) =>
       postJsonRaw<ControlReport>(`/controls/${code}/run`, params),
     operands: () => getJson<ControlOperand[]>('/controls/operands'),
@@ -304,6 +309,11 @@ export const api = {
     update: (code: string, body: { libelle?: string; controls: { code: string; ord?: number }[] }) =>
       putJson<ControlSet>(`/control-sets/${code}`, { code, ...body }),
     remove: (code: string) => deleteJson<{ deleted: string }>(`/control-sets/${code}`),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/control-sets/${code}/rename`,
+        { new: newCode },
+      ),
     run: (code: string, params: { consolidation_id?: number; phase?: string; entry_period?: string }) =>
       postJsonRaw<ControlSetReport>(`/control-sets/${code}/run`, params),
     results: (code: string) => getJson<ControlSetReport>(`/control-sets/${code}/results`),
@@ -347,6 +357,11 @@ export const api = {
       putJson<unknown>(`/meta/characteristics/${code}/values/${value}`, row),
     removeValue: (code: string, value: string) =>
       deleteJson<unknown>(`/meta/characteristics/${code}/values/${value}`),
+    renameValue: (code: string, value: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/characteristics/${code}/values/${value}/rename`,
+        { new_code: newCode },
+      ),
     assign: (code: string, body: { member: string; value: string | null }) =>
       putJson<unknown>(`/meta/characteristics/${code}/assign`, body),
     rename: (code: string, newCode: string) =>
@@ -374,6 +389,11 @@ export const api = {
       putJson<unknown>(`/meta/value-lists/${code}/values/${value}`, row),
     removeValue: (code: string, value: string) =>
       deleteJson<unknown>(`/meta/value-lists/${code}/values/${value}`),
+    renameValue: (code: string, value: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/value-lists/${code}/values/${value}/rename`,
+        { new_code: newCode },
+      ),
     rename: (code: string, newCode: string) =>
       postJsonRaw<{ renamed: { old: string; new: string } }>(
         `/meta/value-lists/${code}/rename`,
