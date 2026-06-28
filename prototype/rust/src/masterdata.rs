@@ -2202,7 +2202,7 @@ mod tests {
     fn role3_method_bloque_si_dans_scope_rule() {
         let con = setup();
         crate::seed_all(&con).expect("seed_all");
-        // seed_all ne peuple pas dim_rule (c'est seed_demo_rules) — on l'insère ici.
+        // seed_all ne peuple pas dim_rule — on l'insère ici pour le test.
         seed_rule(
             &con,
             "ELIM_IC",

@@ -10,20 +10,12 @@ name = "conso_engine"
 path = "src/lib.rs"
 
 [[bin]]
-name = "conso-engine"
-path = "src/main.rs"
-
-[[bin]]
 name = "conso-server"
 path = "src/bin/server.rs"
 
 [[bin]]
 name = "conso-bench"
 path = "src/bin/bench.rs"
-
-[[bin]]
-name = "conso-gen-seed"
-path = "src/bin/gen_seed.rs"
 
 [dependencies]
 # DuckDB embarqué — feature "bundled" pour compiler DuckDB en C++ depuis les

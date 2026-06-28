@@ -50,7 +50,6 @@ pub mod json_migration;
 pub mod dimensions;
 pub mod export;
 pub mod import;
-pub mod loader;
 pub mod masterdata;
 pub mod money;
 pub mod pipeline;
@@ -66,9 +65,8 @@ pub mod validate;
 pub mod value_lists;
 
 // Ré-exports pour faciliter l'usage depuis le binaire.
-pub use loader::load_all;
 pub use pipeline::{run_pipeline, run_pipeline_with_hook, ConvertParams};
 pub use rules::run_ruleset;
 pub use schema::create_schema;
-pub use seed::{seed_all, seed_demo_attributes, seed_demo_controls, seed_demo_rules};
+pub use seed::{seed_all, seed_demo_controls};
 pub use state::AppState;

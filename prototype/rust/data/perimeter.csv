@@ -1,4 +1,0 @@
-perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie
-PERIM_REEL,M,2024,globale,1.00,1.00,false,false
-PERIM_REEL,A,2024,globale,1.00,1.00,true,false
-PERIM_REEL,B,2024,proportionnelle,0.50,0.50,false,false

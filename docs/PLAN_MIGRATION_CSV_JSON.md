@@ -1,6 +1,7 @@
 # Plan d'action — Migration du seed CSV vers JSON
 
-> Statut : **T1 livrée** (branche `refactor/migration-csv-json`).
+> Statut : **T1–T5 livrées** (branche `refactor/migration-csv-json`). Aucun CSV
+> vivant dans le repo ; le boot/reset transitent par `CONSO_SEED_JSON`.
 > Décision : remplacer le seed initial par CSV (`prototype/rust/data/*.csv`)
 > par le mécanisme d'import/export JSON existant (`/api/export` +
 > `/api/import/all`), supprimer tous les CSV vivants du repo, et neutraliser la
@@ -275,17 +276,40 @@ automatique `server.rs:1650-1658` n'aurait rien à consolider).
 | Tâche | Statut | Commit | Date |
 |---|---|---|---|
 | T1 — `rerun-if-changed` dans `build.rs` | LIVRÉE | `d56790d` | 2026-06-28 |
-| T2 — Étendre export JSON | à faire | — | — |
-| T3 — Mode boot/reset JSON | à faire | — | — |
-| T4 — Migration tests vers JSON | à faire | — | — |
-| T5 — Suppression CSV + doc | à faire | — | — |
+| T2 — Étendre export JSON | LIVRÉE | `8644201` | 2026-06-28 |
+| T3 — Mode boot/reset JSON | LIVRÉE | `f157f02` | 2026-06-28 |
+| T4 — Migration tests vers JSON | LIVRÉE | `13ce05f` | 2026-06-28 |
+| T5 — Suppression CSV + doc | LIVRÉE | (ce commit) | 2026-06-28 |
 
-## 0. Reprise rapide (point de départ d'une prochaine session)
+## Bilan post-chantier
 
-Donner : « Reprends le chantier migration CSV→JSON, branche
-`refactor/migration-csv-json`, voir `docs/PLAN_MIGRATION_CSV_JSON.md` §0 ».
+**Couverture JSON** : 30 tables statiques + tables dynamiques `car_<id>` /
+`lst_<id>` préfixées `_car:` / `_lst:` dans le paquet (format
+`conso-export-v3`). Inclut désormais `dim_custom_reference`,
+`dim_characteristic(_attribute)`, `dim_value_list`, `dim_control*`,
+`dim_aggregate`, `dim_indicator` — auparavant perdus au cycle reset.
 
-T1 est livré. Prochaine étape : **T2** (étendre `export.rs`). Vérifier avant de
-démarrer :
-- `cargo build` est propre.
-- `git log --oneline -5` montre le commit T1.
+**Mécanisme de boot/reset** : `CONSO_SEED_JSON=<chemin>` au démarrage serveur
+ou `POST /api/reset` importe le paquet via `export::import_bundle`. Sans cette
+variable, la base est laissée vide (schéma seul) — l'utilisateur enchaîne avec
+`POST /api/import/all`. Les `seed_demo_rules` / `seed_demo_attributes` (qui
+lisaient `account_parents.csv`) ont été supprimés ; `seed_demo_controls` est
+conservé (backfill idempotent des contrôles natifs sur base existante).
+
+**Suppression effective** :
+- `prototype/rust/data/` (19 CSV + `account_parents.csv` + orphelins
+  `accounts_backup.csv` / `accounts_new.csv`).
+- `prototype/rust/data_golden/` (golden master obsolète, déjà désaligné du
+  loader).
+- `prototype/rust/data/smoke/` (smoke tests, déjà cassés).
+- `prototype/rust/dump_pipeline.csv` (sortie d'outil de debug).
+- Scripts Python `golden_test.py`, `rules_test.py`, `smoke_test.py` (dépendaient
+  des CSV supprimés).
+- Binaires `conso-engine` (CLI one-shot) et `conso-gen-seed` (utilitaire de
+  génération du paquet JSON — `tests/fixtures/seed.json` vit désormais dans le
+  repo comme source de vérité).
+- Module `src/loader.rs` (chargeur CSV).
+
+**Workflow de regen du seed** : si le schéma ou les seed_demo_* évoluent,
+régénérer `tests/fixtures/seed.json` depuis une base de référence via
+`GET /api/export` puis commit.

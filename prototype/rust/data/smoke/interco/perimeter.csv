@@ -1,3 +1,0 @@
-perimeter_set,entity,period,methode,pct_interet,pct_integration,entree,sortie
-SMOKE_PERIM_IC,A,2025,proportionnelle,1.00,0.85,true,false
-SMOKE_PERIM_IC,B,2025,proportionnelle,1.00,0.75,true,false

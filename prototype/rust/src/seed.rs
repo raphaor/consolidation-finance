@@ -121,7 +121,8 @@ const SOUS_CLASSES: &[(&str, &str, &str, &str)] = &[
 /// reporté au passif, pas un compte de P&L. Les comptes 6xx/7xx sont les
 /// véritables comptes de produits et charges (classe `resultat`). Le regroupement
 /// par nature (ex. `capitaux_propres` sur `100`) et la hiérarchie de compte
-/// parent ne sont plus des colonnes en dur : ils se posent via [`seed_demo_attributes`].
+/// parent ne sont plus des colonnes en dur : ils transitent par le paquet JSON
+/// de seed (`tests/fixtures/seed.json`) via les registres pilotables.
 const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
     ("100", "Capital", "bilan", "passif"),
     ("200", "Immobilisations", "bilan", "actif"),
@@ -995,73 +996,9 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
-/// Seede la **démo d'élimination interco** : la règle `ELI_700` + le jeu
-/// `RS_INTERCO`. Elle est absente des CSV car la `definition` est du JSON, mal
-/// adapté au format CSV ; on la pose donc en code (même esprit que [`seed_all`]).
-///
-/// Reproduit la fixture canonique de `tests/rules.rs::elim_700_json` : élimine
-/// l'interco du compte 700 entre entités en méthode `globale` (op 1 extourne
-/// partner hérité, op 2 pose la contrepartie partner vidé, le tout en nature
-/// `2ELI`). La consolidation `REEL` référence `RS_INTERCO` (cf.
-/// `consolidations.csv`), et `entries.csv` contient la ligne interco M→A sur 700
-/// que la règle matche.
-///
-/// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
-/// `POST /api/reset`), pas par [`seed_all`] (les tests créent leurs propres
-/// règles). À exécuter sur un schéma fraîchement créé → INSERT simples.
-pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
-    const ELI_700: &str = r#"{
-        "scope": [
-            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
-            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
-        ],
-        "operations": [
-            {
-                "seq": 1, "level": "consolidated",
-                "selection": [
-                    {"dim": "account", "op": "=", "val": "700"},
-                    {"dim": "partner", "op": "IS NOT NULL"}
-                ],
-                "coefficient": {"type": "pct_integration"},
-                "multiplicateur": -1,
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2ELI"},
-                    "partner": {"mode": "inherit"}
-                }
-            },
-            {
-                "seq": 2, "level": "consolidated",
-                "selection": [
-                    {"dim": "account", "op": "=", "val": "700"},
-                    {"dim": "partner", "op": "IS NOT NULL"}
-                ],
-                "coefficient": {"type": "pct_integration"},
-                "multiplicateur": 1,
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2ELI"},
-                    "partner": {"mode": "null"}
-                }
-            }
-        ]
-    }"#;
-    con.execute(
-        "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
-        params!["ELI_700", "Élimination interco 700", ELI_700],
-    )?;
-    con.execute(
-        "INSERT INTO dim_ruleset (code, libelle) VALUES (?, ?)",
-        params!["RS_INTERCO", "Élimination interco (démo)"],
-    )?;
-    con.execute(
-        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) \
-         VALUES ((SELECT id FROM dim_ruleset WHERE code = ?), ?, ?)",
-        params!["RS_INTERCO", 1, "ELI_700"],
-    )?;
-    Ok(())
-}
-
 /// Contrôles de données de démonstration — exemples intégrés pour guider
-/// l'utilisateur. Appelée comme [`seed_demo_rules`] après l'import CSV.
+/// l'utilisateur. Appelée au démarrage serveur sur base existante pour
+/// backfiller les contrôles natifs (idempotent : INSERT OR IGNORE).
 pub fn seed_demo_controls(con: &Connection) -> duckdb::Result<()> {
     // ── CTRL_ACTIF_PASSIF : équilibre bilan (actif = passif) ──
     let def_actif_passif = r#"{
@@ -1122,140 +1059,4 @@ pub fn seed_demo_controls(con: &Connection) -> duckdb::Result<()> {
         params!["CS_BILAN", "CTRL_SOLDE_IC", 2],
     )?;
     Ok(())
-}
-/// mécanismes pilotables, ce qui était auparavant codé en dur sur `dim_account`.
-///
-/// - **Caractéristique** `groupement` (N1 sur `account`) avec la valeur
-///   `capitaux_propres`, affectée au compte `10` (Capital et réserves) ;
-/// - **Référence directe** `compte_parent` (patron B) sur `account → account`
-///   puis **chargement de la hiérarchie** depuis `account_parents.csv` (`code,
-///   compte_parent`) si le fichier est présent dans `data_dir`.
-///
-/// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
-/// `POST /api/reset`), comme [`seed_demo_rules`]. Renvoie [`AppError`] car elle
-/// s'appuie sur les fonctions de haut niveau (validation incluse).
-///
-/// **Idempotente** : les registres de caractéristiques / références directes
-/// survivent au reset (hors `ALL_DROP`) ; on ne recrée donc la caractéristique
-/// et la référence que si elles sont absentes, et la hiérarchie est rejouée à
-/// chaque appel (UPDATE depuis le CSV).
-pub fn seed_demo_attributes(
-    con: &Connection,
-    data_dir: &std::path::Path,
-) -> Result<(), crate::state::AppError> {
-    use crate::{characteristics, custom_references};
-    use serde_json::{json, Map};
-
-    // La caractéristique « groupement » et la référence « compte_parent » vivent
-    // dans des registres qui survivent au reset : ne (re)créer que si absentes.
-    let groupement_present: bool = con
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM dim_characteristic WHERE code = 'groupement'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(crate::state::db_err)?;
-    if !groupement_present {
-        // Caractéristique « groupement » + valeur « capitaux_propres » sur le compte 10.
-        characteristics::create_characteristic(
-            con,
-            "groupement",
-            "Groupement technique",
-            "account",
-        )?;
-        let mut val = Map::new();
-        val.insert("code".into(), json!("capitaux_propres"));
-        val.insert("libelle".into(), json!("Capitaux propres"));
-        characteristics::create_value(con, "groupement", &val)?;
-        characteristics::assign(con, "groupement", "10", Some("capitaux_propres"))?;
-    }
-
-    let compte_parent_present: bool = con
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM dim_custom_reference \
-             WHERE host_dimension = 'account' AND column_name = 'compte_parent'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(crate::state::db_err)?;
-    if !compte_parent_present {
-        // Référence directe « compte_parent » : account → account (hiérarchie).
-        custom_references::create(con, "account", "compte_parent", "account")?;
-    }
-
-    // Chargement de la hiérarchie depuis `account_parents.csv` (si présent).
-    // UPDATE en masse plutôt que 800+ appels `assign` : les valeurs viennent du
-    // plan de comptes (CSV de confiance) et la colonne existe (réf. ci-dessus).
-    let parents_csv = data_dir.join("account_parents.csv");
-    if parents_csv.exists() {
-        let path = parents_csv.display().to_string();
-        // B1 étape 11 : col physique r{id} ; résoudre avant d'écrire le SQL.
-        let phys_col = crate::custom_references::col_of_ref(con, "account", "compte_parent")
-            .map_err(crate::state::db_err)?;
-        con.execute(
-            &format!(
-                "UPDATE dim_account AS a SET \"{phys_col}\" = src.compte_parent \
-                 FROM read_csv('{path}', auto_detect=false, \
-                     columns={{'code':'VARCHAR','compte_parent':'VARCHAR'}}, \
-                     header=true, delim=',') AS src \
-                 WHERE a.code = src.code"
-            ),
-            [],
-        )
-        .map_err(crate::state::db_err)?;
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn parent_of(con: &Connection, code: &str) -> Option<String> {
-        // B1 étape 11 : la col physique est r{id} — résoudre dynamiquement.
-        let phys = crate::custom_references::col_of_ref(con, "account", "compte_parent")
-            .unwrap_or_else(|_| "compte_parent".to_string());
-        con.query_row(
-            &format!("SELECT \"{phys}\" FROM dim_account WHERE code = ?"),
-            [code],
-            |r| r.get(0),
-        )
-        .unwrap()
-    }
-
-    /// `seed_demo_attributes` charge la hiérarchie `compte_parent` depuis
-    /// `account_parents.csv` (via `UPDATE ... FROM read_csv`) et reste idempotente
-    /// (registres caractéristique / référence directe survivant au reset).
-    #[test]
-    fn charge_la_hierarchie_compte_parent_et_reste_idempotente() {
-        let con = Connection::open_in_memory().expect("open in-memory");
-        crate::schema::create_schema(&con).expect("create_schema");
-        con.execute_batch(
-            "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES \
-                ('10','Capital et réserves','bilan',NULL), \
-                ('101','Capital','bilan',NULL), \
-                ('1011','Capital souscrit','bilan',NULL);",
-        )
-        .expect("seed accounts");
-
-        // CSV de hiérarchie dans un répertoire temporaire unique.
-        let dir = std::env::temp_dir().join(format!("conso_seed_test_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut f = std::fs::File::create(dir.join("account_parents.csv")).unwrap();
-        writeln!(f, "code,compte_parent\n101,10\n1011,101").unwrap();
-        drop(f);
-
-        seed_demo_attributes(&con, &dir).expect("seed_demo_attributes");
-        assert_eq!(parent_of(&con, "10"), None, "racine sans parent");
-        assert_eq!(parent_of(&con, "101").as_deref(), Some("10"));
-        assert_eq!(parent_of(&con, "1011").as_deref(), Some("101"));
-
-        // Deuxième appel (simule POST /api/reset) : pas de conflit de registre.
-        seed_demo_attributes(&con, &dir).expect("second seed_demo_attributes idempotent");
-        assert_eq!(parent_of(&con, "1011").as_deref(), Some("101"));
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
 }

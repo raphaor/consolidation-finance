@@ -64,7 +64,7 @@ Le tool bash attend la fin de la commande **et la fermeture des pipes stdout/std
 
 Snippet de référence (PowerShell) :
 ```powershell
-$env:CONSO_CSV_DIR = "data"
+$env:CONSO_SEED_JSON = "tests/fixtures/seed.json"
 $srv = Start-Process -FilePath ".\target\release\conso-server.exe" -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\opencode\conso-server.log"
 $srv.Id | Set-Content "$env:TEMP\opencode\conso-server.pid"
 for ($i=0; $i -lt 30; $i++) { Start-Sleep -Milliseconds 500; try { Invoke-RestMethod "http://localhost:3000/api/health" -ErrorAction Stop | Out-Null; break } catch {} }
