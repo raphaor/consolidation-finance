@@ -48,6 +48,7 @@ export function DimensionsPage() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newLabel, setNewLabel] = useState('');
+  const [newTarget, setNewTarget] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,10 +80,17 @@ export function DimensionsPage() {
       e.preventDefault();
       setCreating(true);
       try {
-        await api.dimensions.create({ name: newName, label: newLabel });
-        setNotice({ kind: 'success', text: `Dimension « ${newName} » créée.` });
+        const body: { name: string; label: string; target_dimension?: string } = {
+          name: newName,
+          label: newLabel,
+        };
+        if (newTarget) body.target_dimension = newTarget;
+        await api.dimensions.create(body);
+        const kind = newTarget ? ` empruntant « ${newTarget} »` : '';
+        setNotice({ kind: 'success', text: `Dimension « ${newName} »${kind} créée.` });
         setNewName('');
         setNewLabel('');
+        setNewTarget('');
         await load();
       } catch (err) {
         setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
@@ -90,7 +98,7 @@ export function DimensionsPage() {
         setCreating(false);
       }
     },
-    [newName, newLabel, load],
+    [newName, newLabel, newTarget, load],
   );
 
   const handleDelete = useCallback(
@@ -241,9 +249,8 @@ export function DimensionsPage() {
       <div className="rule-section" style={{ marginTop: 24 }}>
         <h3 className="rule-section__title">Ajouter une dimension</h3>
         <p className="rule-section__hint">
-          Crée une dimension <strong>libre</strong> (colonne texte, catégorie Analytical). Lui faire
-          emprunter une autre dimension, lui donner sa propre table de valeurs ou des attributs sera
-          proposé dans une prochaine évolution.
+          Crée une dimension <strong>libre</strong> (colonne texte) ou une dimension
+          qui <strong>emprunte</strong> ses valeurs à une autre dimension.
         </p>
         <form className="form-grid" onSubmit={handleCreate}>
           <label className="field">
@@ -267,6 +274,22 @@ export function DimensionsPage() {
               placeholder="ex : Segment produit"
               required
             />
+          </label>
+          <label className="field">
+            <span>Emprunter à</span>
+            <select
+              value={newTarget}
+              onChange={(e) => setNewTarget(e.target.value)}
+            >
+              <option value="">— libre (texte) —</option>
+              {dims
+                .filter((d) => d.name !== 'analysis' && d.name !== 'analysis2')
+                .map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.label} ({d.name})
+                  </option>
+                ))}
+            </select>
           </label>
           <div className="form-actions">
             <button type="submit" className="btn btn--primary" disabled={creating}>

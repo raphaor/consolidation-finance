@@ -328,7 +328,7 @@ export const api = {
   dataHealth: () => getJson<DataHealthReport>('/meta/health'),
   dimensions: {
     list: () => getJson<DimensionInfo[]>('/meta/dimensions'),
-    create: (body: { name: string; label: string }) =>
+    create: (body: { name: string; label: string; target_dimension?: string }) =>
       postJsonRaw<DimensionInfo>('/meta/dimensions', body),
     remove: (name: string) =>
       deleteJson<{ deleted: number }>(`/meta/dimensions/${name}`),
