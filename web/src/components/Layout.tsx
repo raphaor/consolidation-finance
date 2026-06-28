@@ -122,9 +122,9 @@ export function Layout({ active, onNavigate, health, children }: Props) {
     <div className="app">
       <header className="app__topbar">
         <div className="app__brand">
-          <img className="app__logo" src="/magellan.png" alt="Magellan" />
+          <img className="app__logo" src="/orbis.png" alt="Orbis" />
           <div>
-            <div className="app__title">Magellan</div>
+            <div className="app__title">Orbis</div>
             <div className="app__subtitle">Consolidation par les flux</div>
           </div>
         </div>
