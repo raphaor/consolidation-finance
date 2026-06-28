@@ -21,6 +21,10 @@ path = "src/bin/server.rs"
 name = "conso-bench"
 path = "src/bin/bench.rs"
 
+[[bin]]
+name = "conso-gen-seed"
+path = "src/bin/gen_seed.rs"
+
 [dependencies]
 # DuckDB embarqué — feature "bundled" pour compiler DuckDB en C++ depuis les
 # sources (pas de dépendance système). La compilation est lourde (compile tout

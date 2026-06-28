@@ -22,6 +22,11 @@ use std::sync::Mutex;
 pub struct AppState {
     pub con: Mutex<Connection>,
     pub csv_dir: String,
+    /// Chemin optionnel d'un paquet JSON servant de seed au boot sur base vierge
+    /// et au `POST /api/reset` (T3 — `CONSO_SEED_JSON`). Quand `None`, le reset
+    /// laisse la base vide (schéma seul) ; l'utilisateur enchaîne avec
+    /// `POST /api/import/all`.
+    pub seed_json: Option<String>,
 }
 
 /// Erreur applicative sérialisée en JSON `{ "error": "<message>" }` avec un

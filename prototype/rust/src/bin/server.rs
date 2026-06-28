@@ -48,8 +48,8 @@ use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult,
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, coefficients, controls, create_schema, custom_references, dimensions, entries,
-    export, import, indicators, load_all, masterdata, money::Money, references, run_pipeline,
-    run_pipeline_with_hook, seed_demo_attributes, seed_demo_controls, seed_demo_rules,
+    export, import, indicators, masterdata, money::Money, references, run_pipeline,
+    run_pipeline_with_hook, seed_demo_controls,
     value_lists, ConvertParams,
 };
 
@@ -775,15 +775,26 @@ async fn run_pipeline_handler(
     Ok(Json(result))
 }
 
-/// POST /api/reset — reset complet : DROP + CREATE schéma + rechargement CSV.
+/// POST /api/reset — reset complet : DROP + CREATE du schéma, puis import JSON
+/// si `CONSO_SEED_JSON` est défini (sinon base vide). Ne lance pas le pipeline.
 async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetResult>, AppError> {
     let entries = {
         let con = lock_con(&state)?;
         create_schema(&con).map_err(db_err)?; // DROP + CREATE (idempotent)
-        load_all(&con, std::path::Path::new(&state.csv_dir)).map_err(db_err)?;
-        seed_demo_rules(&con).map_err(db_err)?; // règle + jeu interco (hors CSV)
-        seed_demo_controls(&con).map_err(db_err)?; // contrôles de données exemples
-        seed_demo_attributes(&con, std::path::Path::new(&state.csv_dir))?; // caractéristique + hiérarchie compte_parent
+        if let Some(json_path) = &state.seed_json {
+            let raw = std::fs::read_to_string(json_path).map_err(|e| {
+                db_err(format!(
+                    "CONSO_SEED_JSON illisible ({json_path}) : {e}"
+                ))
+            })?;
+            let bundle: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+                AppError::bad_request(format!(
+                    "CONSO_SEED_JSON ({json_path}) n'est pas un JSON valide : {e}"
+                ))
+            })?;
+            let excluded = std::collections::HashSet::<&str>::new();
+            export::import_bundle(&con, &bundle, &excluded)?;
+        }
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
             .map_err(db_err)?;
@@ -1454,6 +1465,7 @@ async fn main() {
         .unwrap_or(3000);
     let db_path = std::env::var("CONSO_DB_PATH").unwrap_or_else(|_| "conso.duckdb".to_string());
     let csv_dir = std::env::var("CONSO_CSV_DIR").unwrap_or_else(|_| "data".to_string());
+    let seed_json = std::env::var("CONSO_SEED_JSON").ok().filter(|s| !s.is_empty());
     let web_dir = std::env::var("CONSO_WEB_DIR").unwrap_or_else(|_| "../../web/dist".to_string());
 
     println!("▶ Ouverture de DuckDB ({db_path})…");
@@ -1634,14 +1646,38 @@ async fn main() {
         }
     } else {
         if force_reseed {
-            println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");
+            println!("   CONSO_FORCE_RESEED=1 — réinitialisation complète demandée.");
         }
-        println!("   Initialisation : création du schéma + import CSV…");
+        // Boot sur base vierge (ou CONSO_FORCE_RESEED=1) : on construit le
+        // schéma, puis — si CONSO_SEED_JSON est défini — on y importe le paquet
+        // JSON. Sinon, base vide : l'utilisateur enchaîne avec
+        // POST /api/import/all. Le pipeline initial n'est lancé que si le JSON
+        // a peuplé au moins une consolidation 'ouvert'.
+        //
+        // Les seed_demo_* (règles/contrôles/caractéristiques démo) ne sont plus
+        // appelés au boot : le JSON fait foi (T3, choix « JSON-only »). Si le
+        // JSON ne contient pas ces tables, elles restent vides — c'est attendu.
         create_schema(&con).expect("✗ create_schema");
-        load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
-        seed_demo_rules(&con).expect("✗ seed_demo_rules"); // règle + jeu interco (hors CSV)
-        seed_demo_controls(&con).expect("✗ seed_demo_controls"); // contrôles exemples
-        seed_demo_attributes(&con, std::path::Path::new(&csv_dir)).expect("✗ seed_demo_attributes"); // caractéristique + hiérarchie compte_parent
+        if let Some(json_path) = &seed_json {
+            println!("   CONSO_SEED_JSON={json_path} — import du paquet…");
+            let raw = std::fs::read_to_string(json_path).unwrap_or_else(|e| {
+                panic!("✗ Impossible de lire CONSO_SEED_JSON ({json_path}) : {e}")
+            });
+            let bundle: serde_json::Value = serde_json::from_str(&raw).unwrap_or_else(|e| {
+                panic!("✗ CONSO_SEED_JSON ({json_path}) n'est pas un JSON valide : {e}")
+            });
+            let excluded = std::collections::HashSet::<&str>::new();
+            let counts = export::import_bundle(&con, &bundle, &excluded)
+                .expect("✗ import_bundle (CONSO_SEED_JSON)");
+            let total: usize = counts
+                .values()
+                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                .sum();
+            println!("   Import JSON : {total} lignes restaurées sur {} tables.", counts.len());
+        } else {
+            println!("   CONSO_SEED_JSON non défini — schéma seul (base vide).");
+            println!("   (Pour bootstrapper : POST /api/import/all avec un paquet JSON)");
+        }
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
         // En cas d'échec, on continue : l'utilisateur peut POST /api/run.
@@ -1696,6 +1732,7 @@ async fn main() {
     let state = Arc::new(AppState {
         con: Mutex::new(con),
         csv_dir,
+        seed_json,
     });
 
     // CORS permissif pour le prototype : autorise le frontend React (Vite,
@@ -1780,9 +1817,11 @@ fn print_help() {
     println!(
         "conso-server — Serveur HTTP exposant le moteur de consolidation via une API REST.
 
-Sert aussi le frontend React buildé (SPA) si CONSO_WEB_DIR existe. Au démarrage,
-les CSV ne sont réimportés que si la base est vierge — sinon la base DuckDB
-existante est conservée (éditions UI préservées).
+Sert aussi le frontend React buildé (SPA) si CONSO_WEB_DIR existe.
+
+Au démarrage : si la base est déjà initialisée, elle est conservée telle quelle
+(éditions UI préservées). Sinon, schéma seul (base vide), puis — si
+CONSO_SEED_JSON est défini — import du paquet JSON.
 
 USAGE
     conso-server [--help]
@@ -1790,12 +1829,16 @@ USAGE
 VARIABLES D'ENVIRONNEMENT
     CONSO_PORT          Port d'écoute (défaut : 3000)
     CONSO_DB_PATH       Fichier DuckDB (défaut : conso.duckdb)
-    CONSO_CSV_DIR       Répertoire des CSV à importer (défaut : data)
+    CONSO_SEED_JSON     Paquet JSON à importer au boot sur base vierge / au reset
+                        (défaut : non défini → base vide)
+    CONSO_CSV_DIR       Répertoire des CSV — legacy, utilisé par conso-engine CLI
+                        (défaut : data)
     CONSO_WEB_DIR       Répertoire du frontend buildé (défaut : ../../web/dist)
-    CONSO_FORCE_RESEED  1 = forcer le rechargement CSV au démarrage (DROP + import + pipeline)
+    CONSO_FORCE_RESEED  1 = forcer la réinitialisation au démarrage (DROP +
+                        import JSON si CONSO_SEED_JSON, sinon base vide)
 
 EXEMPLE
-    CONSO_PORT=8080 CONSO_CSV_DIR=data conso-server"
+    CONSO_SEED_JSON=tests/fixtures/seed.json conso-server"
     );
 }
 
