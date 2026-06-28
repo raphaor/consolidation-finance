@@ -3,7 +3,7 @@
 > Vue consolidée de **ce qui est implémenté**, de son **comportement**, et de **ce qui reste**.
 > Pour le *pourquoi* d'une décision → [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) ;
 > pour le détail fonctionnel → les docs thématiques liées ci-dessous.
-> Dernière mise à jour : **2026-06-24**.
+> Dernière mise à jour : **2026-06-29**.
 
 **Légende** : ✅ implémenté & testé · 🟡 partiel / en cours · ⬜ reporté (post-MVP).
 
@@ -69,9 +69,13 @@ règles). ⬜ **Intérêts minoritaires** (par règles).
 
 ## Variations de périmètre
 
-🟡 Entrée (F00 → F01) et sortie (miroir −F98) : **repensées en règles** depuis la suppression du
-niveau `reclassified`. Les tests natifs correspondants sont `#[ignore]` en attendant les règles
-de périmètre. → [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9, [`A_NOUVEAU.md`](./A_NOUVEAU.md).
+✅ Entrée (F00 → F01), sortie (miroir −F98) et variation de % d'intégration (F90/F95)
+:**pilotées par règles** depuis la suppression du niveau `reclassified` (Q31 —
+ces traitements ne sont plus natifs). L'utilisateur compose les opérations dans
+l'éditeur de règles (cf. section dédiée) en scannant `sat_perimeter` ou le
+snapshot N-1 de l'à-nouveau. Les anciens tests natifs sont `#[ignore` — ils
+testaient un comportement aujourd'hui délégué aux règles.
+→ [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9, [`A_NOUVEAU.md`](./A_NOUVEAU.md).
 
 ## Périmètre versionné — [Q35]
 
@@ -199,19 +203,46 @@ techniques (level, opérateur, type de coefficient…) restent en code seul.
 ## Recette (config ≠ moteur)
 
 ✅ Le **moteur** est une mécanique pure (couverte par les tests Rust). La **justesse comptable**
-d'une configuration donnée (interco, équivalence…) relève de la **recette** : smoke tests Python.
-→ [`RECETTE_PYTHON.md`](./RECETTE_PYTHON.md). 🟡 Golden interco à porter en smoke test Python.
+d'une configuration donnée (interco, équivalence, variations de périmètre par règles) relève de
+la **recette** — validée end-to-end sur un cas réel complet (saisies + pipeline + ruleset
+interco + à-nouveau + UI). Les anciens scripts Python (`golden_test.py` / `rules_test.py` /
+`smoke_test.py`) ont été retirés lors du chantier migration CSV→JSON (cf.
+[`PLAN_MIGRATION_CSV_JSON.md`](./PLAN_MIGRATION_CSV_JSON.md)).
+
+## Performance — `conso-bench` ([Q12], [Q3])
+
+✅ **Mesurée** sur 3 volumétries via `conso-bench` (binaire `src/bin/bench.rs`). Jeu généré :
+60 entités × 200 comptes × 5 devises × F00/F20, périmètre avec méthodes mixtes + entrantes/
+sortantes. Pipeline mesuré sur DuckDB **fichier** (cas réel).
+
+| `stg_entry` | corporate | converted | consolidated | Total | Débit global |
+|---:|---:|---:|---:|---:|---:|
+| 10 k | 0,11 s | 0,17 s | 0,18 s | **0,47 s** | 21 k/s (cold start) |
+| 100 k | 0,49 s | 0,95 s | 1,22 s | **2,66 s** | 38 k/s |
+| 1 M | 3,14 s | 8,89 s | 9,97 s | **22,0 s** | 45 k/s |
+| 5 M | 14,2 s | 42,6 s | 46,3 s | **103 s** | 48 k/s |
+
+**Lecture** :
+- Étape **A (corporate / agrégation)** : la plus rapide — **636–703 k lignes/s** sur gros volumes
+  (DuckDB vectorisé). Tient le facteur d'échelle linéairement.
+- Étapes **C (convert) et D (consolidate)** : ~270 k lignes/s — **les goulots** (×2,5 plus lentes
+  que A). Conversion génère ~24 % de lignes en plus (F80/F81 écarts) ; consolidate fait le × pct.
+- **Débit global stable ~45–48 k lignes/s** sur gros volumes (cold start sur 10 k).
+- 5 M lignes traitées en **< 2 min** sur machine de dev — conforme à l'obligation de moyens
+  ([Q12]). Validation clôtures + invariants F80/F81 tenus à toutes les échelles.
+
+→ Détails dans `prototype/rust/src/bin/bench.rs` ; recette via
+`cargo run --release --bin conso-bench -- --rows 1000000`.
 
 ## Qualité
 
-✅ Suite de tests Rust **verte** : `tests/pipeline.rs`, `tests/rules.rs`, `tests/a_nouveau.rs` +
-tests unitaires de lib. ✅ Build web (tsc) vert. Performance : critère de validation (benchmark
-`conso-bench` sur gros volumes).
+✅ Suite de tests Rust **verte** : `tests/pipeline.rs`, `tests/rules.rs`, `tests/a_nouveau.rs`,
+`tests/loader.rs` + tests unitaires de lib (185 lib + 19 integration). ✅ Build web (tsc) vert.
+✅ `conso-bench` vert (identités de clôture + invariants F80/F81 tenus jusqu'à 5 M lignes).
 
 ---
 
 ## Reste à trancher (avant 1ʳᵉ implémentation élargie)
 
 Questions `TÔT` encore ouvertes — voir [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) :
-[Q6] mode complète/marge · [Q8] workflow de validation · [Q9] granularité de clôture ·
-[Q12] cible de performance chiffrée.
+[Q6] mode complète/marge · [Q8] workflow de validation · [Q9] granularité de clôture.

@@ -1,5 +1,12 @@
 # Refactor consolidation — reste à faire
 
+> **ARCHIVÉ (2026-06-29)** — ce document suit le chantier `scenario → consolidation`
+> livré en 2026-06-23 (Q41/Q42). Tous les points ouverts sont aujourd'hui clos :
+> les variations de périmètre passent par les règles (Q31), la recette
+> end-to-end a été validée, le bug `conso-bench` est corrigé (cf.
+> [`ETAT_AVANCEMENT.md`](./ETAT_AVANCEMENT.md) § Performance). Conservé pour
+> la traçabilité historique du chantier Q41/Q42.
+
 Suivi du chantier **scenario → consolidation** (+ taux d'ouverture).
 État au 2026-06-23. Deux temps livrés et validés (`cargo test` 115 verts, `npm run build` OK, `dump_pipeline` et smoke serveur OK).
 

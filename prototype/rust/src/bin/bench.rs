@@ -170,6 +170,14 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
 
         INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL', 'Périmètre réel 2024');
 
+        -- Méthodes de consolidation (Q33 : pilotables, flag `consolidated`).
+        -- Sans cet insert, sat_perimeter.methode reste NULL et l'étape D ne
+        -- produit aucune ligne consolidated.
+        INSERT INTO dim_method (code, libelle, consolidated) VALUES
+            ('globale', 'Intégration globale', TRUE),
+            ('proportionnelle', 'Intégration proportionnelle', TRUE),
+            ('MERE', 'Société mère (consolidante)', TRUE);
+
         -- dim_period et dim_currency avant dim_consolidation (B1 : exercice /
         -- presentation_currency / perimeter_period / rate_period sont des FK id).
         INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut) VALUES
@@ -417,9 +425,13 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
     }
 
     // (b) invariant structurel : F80/F81 absents du niveau fonctionnel.
+    // B1 étape 4 : fact_entry.flow est un INTEGER (FK vers dim_flow.id) — il
+    // faut résoudre les codes via dim_flow.
     for lvl in &["corporate"] {
         let n: i64 = con.query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND flow IN ('F80','F81')",
+            "SELECT COUNT(*) FROM fact_entry \
+             WHERE level = ? \
+               AND flow IN (SELECT id FROM dim_flow WHERE code IN ('F80','F81'))",
             [lvl],
             |row| row.get(0),
         )?;
@@ -431,7 +443,9 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
 
     // (c) invariant structurel : F80/F81 présents au niveau consolidated (entités non-EUR).
     let n_consol: i64 = con.query_row(
-        "SELECT COUNT(*) FROM fact_entry WHERE level = 'consolidated' AND flow IN ('F80','F81')",
+        "SELECT COUNT(*) FROM fact_entry \
+         WHERE level = 'consolidated' \
+           AND flow IN (SELECT id FROM dim_flow WHERE code IN ('F80','F81'))",
         [],
         |row| row.get(0),
     )?;
