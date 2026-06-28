@@ -292,6 +292,8 @@
 
 .table-wrap {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 60vh;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -353,6 +355,22 @@
   text-align: center;
   color: var(--text-muted);
   padding: 24px;
+}
+
+/* Colonnes sticky (Actions à droite) */
+.grid th[data-pinned="right"],
+.grid td[data-pinned="right"] {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -2px 0 4px rgba(0,0,0,0.06);
+}
+
+/* Header sticky + actions sticky → z-index plus élevé pour le header */
+.grid thead th[data-pinned="right"] {
+  z-index: 2;
 }
 
 /* ---------- Rapport détaillé (arbre compte → natures) ---------- */
@@ -1156,11 +1174,22 @@
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
 .rule-chip:hover {
   color: var(--primary);
   border-color: var(--primary);
+}
+.rule-chip--active {
+  border-style: solid;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+.rule-chip--active:hover {
+  background: var(--primary-hover, var(--primary));
+  color: #fff;
 }
 
 /* ─── Multi-select repliable (opérateur IN de la sélection) ─── */

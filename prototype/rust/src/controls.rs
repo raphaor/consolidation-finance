@@ -6,7 +6,6 @@
 //!
 //! Spec : `docs/CONTROLES_DONNEES.md`.
 
-use crate::formula::{self, OperandResolver, Resolved};
 use crate::state::{db_err, lock_con, AppError, AppState};
 use crate::{characteristics, custom_references, dimensions, references};
 use axum::{
@@ -114,6 +113,8 @@ pub struct ControlRowResult {
 pub struct ControlLevelResult {
     pub status: Status,
     pub rows: Vec<ControlRowResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -180,10 +181,14 @@ pub fn validate_definition(con: &Connection, def: &ControlDefinition) -> Result<
         validate_sel_cond(s, &sel_dims, con)?;
     }
 
-    // expression (optionnelle — si fournie, on tente un compile avec un resolver factice)
+    // expression (optionnelle — on ne passe PAS par le formule compiler pour
+    // les contrôles : l'expression est du SQL brut (SUM, CASE, IF, etc.) injecté
+    // directement dans la requête. La validation se fait à l'exécution.
+    // On vérifie juste que l'expression n'est pas vide.
     if let Some(expr) = &def.expression {
-        let resolver = ControlOperandResolver { con };
-        formula::compile(expr, &resolver).map_err(|e| format!("expression invalide : {e}"))?;
+        if expr.trim().is_empty() {
+            return Err("expression ne peut pas être vide".into());
+        }
     }
 
     // assertions
@@ -345,39 +350,6 @@ fn grain_columns(con: &Connection) -> Vec<String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  OperandResolver pour formules de contrôle
-// ─────────────────────────────────────────────────────────────────────────────
-
-struct ControlOperandResolver<'a> {
-    con: &'a Connection,
-}
-
-impl<'a> OperandResolver for ControlOperandResolver<'a> {
-    fn resolve(&self, name: &str) -> Result<Resolved, String> {
-        // 1. Chercher dans dim_aggregate (poste)
-        let agg_def: Option<String> = self
-            .con
-            .query_row(
-                "SELECT definition FROM dim_aggregate WHERE code = ?",
-                params![name],
-                |r| r.get(0),
-            )
-            .ok();
-        if agg_def.is_some() {
-            // On ne peut pas compiler un poste ici sans le contexte complet
-            // (QueryParts). Retourner une erreur explicite pour le niveau raw.
-            return Err(format!(
-                "les postes ne sont pas supportés dans les expressions de contrôle (utilisez SUM/ABS/etc.)"
-            ));
-        }
-        // 2. Littéral numérique ou fonction — laisser le parser formula.rs gérer
-        Err(format!(
-            "référence inconnue dans l'expression de contrôle : '{name}'"
-        ))
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Exécution d'un contrôle
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -443,21 +415,26 @@ fn run_raw(con: &Connection, def: &ControlDefinition, params: &RunParams) -> Res
     sql_params.push(DbValue::Text(phase.to_string()));
     sql_params.push(DbValue::Text(entry_period.to_string()));
 
+    let mut joins = String::new();
     for s in &def.selection {
-        let operand = format!("s.{}", s.dim);
+        let (operand, extra_join) = resolve_raw_sel_operand(con, s)?;
+        if let Some(j) = extra_join {
+            if !joins.contains(&j) {
+                joins.push_str(&j);
+            }
+        }
         let cond = push_condition(&operand, &s.op, &s.val, &mut sql_params)?;
         where_clauses.push(cond);
     }
 
-    // Expression (par défaut SUM(amount))
-    let value_expr = match &def.expression {
-        Some(expr) => {
-            // Pour raw, on ne supporte pas les postes/indicateurs.
-            // On compile la formule telle quelle en remplaçant SUM(e.amount) par SUM(s.amount).
-            expr.replace("e.amount", "s.amount").replace("SUM(amount)", "SUM(s.amount)")
-        }
-        None => "SUM(s.amount)".to_string(),
-    };
+    // Réécriture de l'expression : si une sélection utilise `ref:` (ex:
+    // account.sous_classe), l'expression peut référencer `sous_classe`
+    // directement. On remplace par l'alias de join `r_sous_classe.code` pour
+    // que le SQL fonctionne (la colonne brute est un INTEGER id, pas un code).
+    let value_expr = rewrite_expr_refs(&def.expression, &def.selection, "s");
+    let value_expr = value_expr
+        .replace("e.amount", "s.amount")
+        .replace("SUM(amount)", "SUM(s.amount)");
 
     let group = if grain.is_empty() {
         String::new()
@@ -467,7 +444,7 @@ fn run_raw(con: &Connection, def: &ControlDefinition, params: &RunParams) -> Res
 
     let sql = format!(
         "SELECT {select_grain}, {value_expr} AS value, COUNT(*) AS row_count, \
-         ARRAY_AGG(s.id) AS sample_ids\nFROM stg_entry s\nWHERE {}{group}",
+         ARRAY_AGG(s.id) AS sample_ids\nFROM stg_entry s{joins}\nWHERE {}{group}",
         where_clauses.join(" AND ")
     );
 
@@ -488,18 +465,27 @@ fn run_pipeline_level(
     let grain = &def.grain;
     let mut sql_params: Vec<DbValue> = Vec::new();
 
-    // Colonnes de grain (INTEGER ids dans fact_entry — on les restitue via JOINs)
-    // Pour simplifier, on utilise les colonnes directes de fact_entry.
-    // La restitution des codes se fait côté API.
-    let select_grain = if grain.is_empty() {
-        "1 AS _dummy_grain".to_string()
+    // Colonnes de grain (INTEGER ids dans fact_entry — on résout les codes via JOINs)
+    let mut select_grain_parts = Vec::new();
+    let mut grain_joins = String::new();
+    if grain.is_empty() {
+        select_grain_parts.push("1 AS _dummy_grain".to_string());
     } else {
-        grain
-            .iter()
-            .map(|g| format!("e.{g} AS {g}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
+        for g in grain {
+            if let Some((table, code_col)) = references::dimension_master(g) {
+                let alias = format!("gr_{g}");
+                select_grain_parts.push(format!("{alias}.{code_col} AS {g}"));
+                let join = format!("\nLEFT JOIN {table} {alias} ON {alias}.id = e.{g}");
+                if !grain_joins.contains(&join) {
+                    grain_joins.push_str(&join);
+                }
+            } else {
+                // Dimension libre (analysis, custom) — reste TEXT
+                select_grain_parts.push(format!("e.{g} AS {g}"));
+            }
+        }
+    }
+    let select_grain = select_grain_parts.join(", ");
 
     let mut where_clauses = vec![
         "e.consolidation_id = ?".to_string(),
@@ -522,11 +508,14 @@ fn run_pipeline_level(
         where_clauses.push(cond);
     }
 
-    // Expression (par défaut SUM(amount))
-    let value_expr = match &def.expression {
-        Some(expr) => expr.clone(),
-        None => "SUM(e.amount)".to_string(),
-    };
+    // Expression (par défaut SUM(e.amount))
+    // Même remplacement que raw pour que l'utilisateur puisse écrire `amount`
+    // (sans préfixe) et que ça fonctionne à tous les niveaux.
+    // Réécrit aussi les références `ref:` (ex: sous_classe → r_sous_classe.code).
+    let value_expr = rewrite_expr_refs(&def.expression, &def.selection, "e");
+    let value_expr = value_expr
+        .replace("s.amount", "e.amount")
+        .replace("SUM(amount)", "SUM(e.amount)");
 
     let group = if grain.is_empty() {
         String::new()
@@ -535,7 +524,14 @@ fn run_pipeline_level(
             "\nGROUP BY {}",
             grain
                 .iter()
-                .map(|g| format!("e.{g}"))
+                .map(|g| {
+                    if let Some((_table, code_col)) = references::dimension_master(g) {
+                        let alias = format!("gr_{g}");
+                        format!("{alias}.{code_col}")
+                    } else {
+                        format!("e.{g}")
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -543,7 +539,7 @@ fn run_pipeline_level(
 
     let sql = format!(
         "SELECT {select_grain}, {value_expr} AS value, COUNT(*) AS row_count, \
-         ARRAY_AGG(e.id) AS sample_ids\nFROM fact_entry e{joins}\nWHERE {}{group}",
+         ARRAY_AGG(e.id) AS sample_ids\nFROM fact_entry e{grain_joins}{joins}\nWHERE {}{group}",
         where_clauses.join(" AND ")
     );
 
@@ -569,17 +565,22 @@ fn resolve_sel_operand(
         );
         Ok((format!("c_{via}.code"), Some(join)))
     } else if let Some(rf) = &s.ref_field {
-        // Référence directe
+        // Référence directe (ex: account.sous_classe, entity.entite_parent)
+        // fact_entry.account = id INTEGER → JOIN dim_account → dim_sous_classe
         let dim = &s.dim;
         let target_dim = custom_references::target_of(con, dim, rf)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("référence {dim}.{rf} inconnue"))?;
-        let (mt, _) = references::dimension_master(&target_dim)
-            .ok_or_else(|| format!("dimension sans master data : {target_dim}"))?;
-        let (_, code_col) = references::dimension_master(dim)
+        let (host_table, _) = references::dimension_master(dim)
             .ok_or_else(|| format!("dimension sans master data : {dim}"))?;
-        let join = format!("\nLEFT JOIN {mt} r_{dim} ON r_{dim}.id = e.{dim}");
-        Ok((format!("r_{dim}.{code_col}"), Some(join)))
+        let join = format!("\nLEFT JOIN {host_table} r_{dim} ON r_{dim}.id = e.{dim}");
+        // Cible : résoudre table + colonne code
+        let (target_table, target_code) = references::target_master(con, &target_dim)
+            .ok_or_else(|| format!("dimension cible sans master data : {target_dim}"))?;
+        let join2 = format!(
+            "\nLEFT JOIN {target_table} r_{rf} ON r_{rf}.id = r_{dim}.{rf}"
+        );
+        Ok((format!("r_{rf}.{target_code}"), Some(format!("{join}{join2}"))))
     } else if let Some(attr) = &s.attr {
         // Enum natif
         let dim = &s.dim;
@@ -605,7 +606,110 @@ fn resolve_sel_operand(
     }
 }
 
-/// Construit une condition SQL paramétrée.
+/// Résout l'opérande d'une sélection pour stg_entry (TEXT codes).
+/// Gère les sélections directes (colonne sur stg_entry) et les références
+/// (traversée via `ref:` — JOIN sur la master data hôte puis filtre sur la
+/// table cible). Les alias JOIN sont harmonisés avec `resolve_sel_operand`
+/// (pipeline) pour que les expressions fonctionnent aux deux niveaux.
+fn resolve_raw_sel_operand(
+    con: &Connection,
+    s: &SelectionCond,
+) -> Result<(String, Option<String>), String> {
+    if let Some(rf) = &s.ref_field {
+        // Référence directe : account.sous_classe, entity.entite_parent, etc.
+        // stg_entry.account = code TEXT → JOIN dim_account → dim_sous_classe
+        let dim = &s.dim;
+        let target_dim = custom_references::target_of(con, dim, rf)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("référence {dim}.{rf} inconnue"))?;
+        let (host_table, _) = references::dimension_master(dim)
+            .ok_or_else(|| format!("dimension sans master data : {dim}"))?;
+        // stg_entry stocke des codes TEXT → JOIN sur la colonne code de la table hôte
+        let join = format!("\nLEFT JOIN {host_table} r_{dim} ON r_{dim}.code = s.{dim}");
+        // Cible : résoudre table + colonne code (secondaire ou primaire).
+        // Alias = r_{dim} (même convention que pipeline) ; la colonne filtrée
+        // est la colonne code de la table cible.
+        let (target_table, target_code) = references::target_master(con, &target_dim)
+            .ok_or_else(|| format!("dimension cible sans master data : {target_dim}"))?;
+        let join2 = format!(
+            "\nLEFT JOIN {target_table} r_{rf} ON r_{rf}.id = r_{dim}.{rf}"
+        );
+        Ok((format!("r_{rf}.{target_code}"), Some(format!("{join}{join2}"))))
+    } else if let Some(attr) = &s.attr {
+        // Enum natif (classe, etc.) — colonne directe sur la table hôte
+        let dim = &s.dim;
+        let (mt, _) = references::dimension_master(dim)
+            .ok_or_else(|| format!("dimension sans master data : {dim}"))?;
+        let join = format!("\nLEFT JOIN {mt} a_{dim} ON a_{dim}.code = s.{dim}");
+        Ok((format!("a_{dim}.{attr}"), Some(join)))
+    } else if let Some(via) = &s.via {
+        // Caractéristique N1
+        let _dim = &s.dim;
+        let char_id = characteristics::id_of(con, via)
+            .ok_or_else(|| format!("caractéristique '{via}' sans id technique"))?;
+        let val_table = characteristics::value_table(char_id);
+        let base = characteristics::base_dimension_of(con, via)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("caractéristique '{via}' sans base"))?;
+        // stg_entry stocke des codes TEXT → JOIN sur code
+        let join = format!("\nLEFT JOIN {val_table} c_{via} ON c_{via}.{base} = s.{base}");
+        Ok((format!("c_{via}.code"), Some(join)))
+    } else {
+        // Sélection directe : colonne sur stg_entry
+        Ok((format!("s.{}", s.dim), None))
+    }
+}
+
+/// Réécrit les références de colonnes dans une expression de contrôle.
+///
+/// Quand une sélection utilise `ref:` (ex: `account.sous_classe`), la colonne
+/// cible (`sous_classe`) est un INTEGER id dans la table de fait. Si
+/// l'expression référence cette colonne directement (ex: `sous_classe = 'actif'`),
+/// le SQL échoue (conversion string → INT). On remplace par l'alias de join
+/// `r_{ref}.code` (ex: `r_sous_classe.code = 'actif'`).
+///
+/// `table_prefix` est le préfixe de la table de fait (`s` pour raw, `e` pour pipeline).
+fn rewrite_expr_refs(
+    expr: &Option<String>,
+    selection: &[SelectionCond],
+    table_prefix: &str,
+) -> String {
+    let Some(expr) = expr else {
+        return format!("SUM({table_prefix}.amount)");
+    };
+    let mut out = expr.clone();
+    for s in selection {
+        if let Some(rf) = &s.ref_field {
+            let dim = rf.as_str();
+            // Remplacer le nom de colonne comme mot isolé par r_{dim}.code.
+            // On NE remplace PAS les occurrences préfixées par `.` ou `_`.
+            let patterns = [
+                (format!(" {dim} "), format!(" r_{dim}.code ")),
+                (format!("({dim} "), format!("(r_{dim}.code ")),
+                (format!(" {dim})"), format!(" r_{dim}.code)")),
+                (format!(" {dim}="), format!(" r_{dim}.code=")),
+                (format!("({dim}="), format!("(r_{dim}.code=")),
+                (format!(" {dim}!"), format!(" r_{dim}.code!")),
+                (format!(" {dim}>"), format!(" r_{dim}.code>")),
+                (format!(" {dim}<"), format!(" r_{dim}.code<")),
+                (format!("({dim},"), format!("(r_{dim}.code,")),
+                (format!(" {dim},"), format!(" r_{dim}.code,")),
+            ];
+            for (from, to) in &patterns {
+                out = out.replace(from, to);
+            }
+            // Cas début de chaîne
+            if out.starts_with(dim) {
+                let rest = &out[dim.len()..];
+                if rest.starts_with(|c: char| c == ' ' || c == '=' || c == '!' || c == '>' || c == '<' || c == ')' || c == ',') {
+                    out = format!("r_{dim}.code{}", &out[dim.len()..]);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn push_condition(
     operand: &str,
     op: &str,
@@ -862,7 +966,34 @@ pub fn run_control(
     let mut levels = BTreeMap::new();
 
     for level in &def.levels {
-        let mut rows = run_control_at_level(con, &def, level, params)?;
+        // Les niveaux pipeline (corporate, converted, consolidated) nécessitent
+        // un consolidation_id. Si absent, on saute silencieusement.
+        if level != "raw" && params.consolidation_id.is_none() {
+            continue;
+        }
+        let mut rows = match run_control_at_level(con, &def, level, params) {
+            Ok(rows) => rows,
+            Err(e) => {
+                // En mode set, on ne veut pas faire échouer tout le jeu pour un
+                // niveau manquant. On reporte l'erreur comme no_data.
+                levels.insert(
+                    level.clone(),
+                    ControlLevelResult {
+                        status: Status::NoData,
+                        rows: vec![ControlRowResult {
+                            grain: BTreeMap::new(),
+                            value: None,
+                            baseline: None,
+                            variation: None,
+                            status: Status::NoData,
+                            row_count: 0,
+                        }],
+                        error: Some(e),
+                    },
+                );
+                continue;
+            }
+        };
 
         // Comparaison inter-périodes
         if def.compare.is_some() && level != "raw" {
@@ -891,6 +1022,7 @@ pub fn run_control(
             ControlLevelResult {
                 status: level_status,
                 rows: result_rows,
+                error: None,
             },
         );
     }

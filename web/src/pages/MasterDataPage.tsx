@@ -501,6 +501,7 @@ export function MasterDataPage({
       id: '__actions',
       header: 'Actions',
       enableSorting: false,
+      meta: { pinned: 'right' } as any,
       cell: (info) => (
         <div className="row-actions">
           <button
@@ -540,6 +541,7 @@ export function MasterDataPage({
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    enableColumnPinning: true,
   });
 
   async function handleSubmit(values: Record<string, string>) {
@@ -719,8 +721,9 @@ export function MasterDataPage({
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const sorted = header.column.getIsSorted();
+                  const pinned = (header.column.columnDef.meta as any)?.pinned;
                   return (
-                    <th key={header.id}>
+                    <th key={header.id} data-pinned={pinned}>
                       {header.isPlaceholder ? null : (
                         <button
                           type="button"
@@ -761,11 +764,14 @@ export function MasterDataPage({
             )}
             {tableState.getRowModel().rows.map((row) => (
               <tr key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
+                {row.getVisibleCells().map((cell) => {
+                  const pinned = (cell.column.columnDef.meta as any)?.pinned;
+                  return (
+                    <td key={cell.id} data-pinned={pinned}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

@@ -17,12 +17,13 @@
 //! sauvegarde/restauration.
 
 use axum::{
-    extract::State,
+    extract::{Query, State},
     routing::{get, post},
     Json, Router,
 };
 use duckdb::{params_from_iter, types::Value as DbValue, Connection};
 use serde_json::{Map, Value as JsonValue};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::create_schema;
@@ -46,15 +47,17 @@ const TABLES: &[&str] = &[
     // / rate_period / presentation_currency sont FK vers leurs id).
     "dim_period",
     "dim_currency",
+    // dim_rule / dim_ruleset / dim_ruleset_item AVANT dim_consolidation :
+    // dim_consolidation.ruleset_code est une FK vers dim_ruleset.id.
     "dim_rule",
     "dim_ruleset",
     "dim_ruleset_item",
     "dim_consolidation",
     "dim_entity",
     "dim_sous_classe",
-    "dim_account",
     "dim_flow",
     "dim_flow_scheme",
+    "dim_account",
     "dim_nature",
     "dim_method",
     "sat_perimeter",
@@ -109,14 +112,122 @@ async fn export_all(State(state): State<Arc<AppState>>) -> Result<Json<JsonValue
     Ok(Json(bundle))
 }
 
-/// POST /api/import/all — restaure l'état depuis un paquet (remplacement total).
-async fn import_all(
-    State(state): State<Arc<AppState>>,
+/// Tables exposées dans le preview (ordre d'affichage).
+const PREVIEW_TABLES: &[&str] = &[
+    "dim_custom_dimension",
+    "app_config",
+    "dim_scenario_category",
+    "dim_variant",
+    "dim_rate_set",
+    "dim_perimeter_set",
+    "dim_period",
+    "dim_currency",
+    "dim_rule",
+    "dim_ruleset",
+    "dim_ruleset_item",
+    "dim_consolidation",
+    "dim_entity",
+    "dim_sous_classe",
+    "dim_account",
+    "dim_flow",
+    "dim_flow_scheme",
+    "dim_nature",
+    "dim_method",
+    "sat_perimeter",
+    "sat_exchange_rate",
+    "sat_flow_scheme_item",
+    "stg_entry",
+    "dim_coefficient",
+];
+
+/// Libellés lisibles pour l'UI de sélection.
+fn table_label(t: &str) -> &str {
+    match t {
+        "dim_custom_dimension" => "Dimensions custom",
+        "app_config" => "Configuration",
+        "dim_scenario_category" => "Catégories de scénario",
+        "dim_variant" => "Variantes",
+        "dim_rate_set" => "Jeux de taux",
+        "dim_perimeter_set" => "Jeux de périmètre",
+        "dim_period" => "Périodes",
+        "dim_currency" => "Devises",
+        "dim_rule" => "Règles",
+        "dim_ruleset" => "Jeux de règles",
+        "dim_ruleset_item" => "Items de jeux de règles",
+        "dim_consolidation" => "Consolidations",
+        "dim_entity" => "Entités",
+        "dim_sous_classe" => "Sous-classes",
+        "dim_account" => "Plan de comptes",
+        "dim_flow" => "Flux",
+        "dim_flow_scheme" => "Schémas de flux",
+        "dim_nature" => "Natures",
+        "dim_method" => "Méthodes",
+        "sat_perimeter" => "Périmètre",
+        "sat_exchange_rate" => "Taux de change",
+        "sat_flow_scheme_item" => "Items de schéma de flux",
+        "stg_entry" => "Écritures (staging)",
+        "dim_coefficient" => "Coefficients",
+        other => other,
+    }
+}
+
+/// POST /api/import/preview — analyse un paquet et retourne la liste des tables
+/// avec leur nombre de lignes. L'UI utilise cette info pour afficher la sélection.
+async fn import_preview(
     Json(bundle): Json<JsonValue>,
 ) -> Result<Json<JsonValue>, AppError> {
     let obj = bundle
         .as_object()
         .ok_or_else(|| AppError::bad_request("le paquet doit être un objet JSON"))?;
+
+    let meta = obj.get("_meta").cloned().unwrap_or(JsonValue::Object(Map::new()));
+
+    let mut tables = Vec::new();
+    for &t in PREVIEW_TABLES {
+        let rows = match obj.get(t) {
+            Some(JsonValue::Array(a)) => a.len(),
+            _ => 0,
+        };
+        tables.push(serde_json::json!({
+            "name": t,
+            "label": table_label(t),
+            "rows": rows,
+        }));
+    }
+
+    Ok(Json(serde_json::json!({
+        "meta": meta,
+        "tables": tables,
+    })))
+}
+
+/// Paramètres de requête pour `import_all`.
+#[derive(serde::Deserialize, Default)]
+struct ImportParams {
+    /// Tables à exclure (séparées par des virgules).
+    exclude: Option<String>,
+}
+
+/// POST /api/import/all — restaure l'état depuis un paquet (remplacement total).
+///
+/// Query param `exclude` : liste de tables séparées par des virgules à ne pas
+/// importer (ex. `?exclude=stg_entry,dim_consolidation`).
+async fn import_all(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ImportParams>,
+    Json(bundle): Json<JsonValue>,
+) -> Result<Json<JsonValue>, AppError> {
+    let obj = bundle
+        .as_object()
+        .ok_or_else(|| AppError::bad_request("le paquet doit être un objet JSON"))?;
+
+    let excluded: HashSet<&str> = params
+        .exclude
+        .as_deref()
+        .unwrap_or("")
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .collect();
 
     let counts = {
         let con = lock_con(&state)?;
@@ -126,29 +237,57 @@ async fn import_all(
 
         // 2. Recréer les dimensions custom (ALTER colonnes + registre) AVANT
         //    d'insérer stg_entry, qui peut porter ces colonnes.
-        if let Some(JsonValue::Array(customs)) = obj.get("dim_custom_dimension") {
-            for c in customs {
-                let name = c
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| AppError::bad_request("dim_custom_dimension.name manquant"))?;
-                let label = c.get("label").and_then(|v| v.as_str()).unwrap_or(name);
-                let target = c.get("target_dimension").and_then(|v| v.as_str());
-                dimensions::create_custom(&con, name, label, target).map_err(db_err)?;
+        if !excluded.contains("dim_custom_dimension") {
+            if let Some(JsonValue::Array(customs)) = obj.get("dim_custom_dimension") {
+                for c in customs {
+                    let name = c
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| AppError::bad_request("dim_custom_dimension.name manquant"))?;
+                    let label = c.get("label").and_then(|v| v.as_str()).unwrap_or(name);
+                    let target = c.get("target_dimension").and_then(|v| v.as_str());
+                    dimensions::create_custom(&con, name, label, target).map_err(db_err)?;
+                }
             }
         }
 
         // 3. Insérer chaque table dans l'ordre des dépendances.
         let mut counts = Map::new();
         for t in TABLES {
+            if excluded.contains(t) {
+                counts.insert((*t).to_string(), JsonValue::Number(0.into()));
+                continue;
+            }
             let n = insert_table(&con, t, obj.get(*t))?;
             counts.insert((*t).to_string(), JsonValue::Number(n.into()));
         }
 
         // 4. Coefficients utilisateur (les natifs ont été re-seedés par
         //    create_schema ; le paquet ne contient que les `kind = 'user'`).
-        let n_coef = insert_table(&con, "dim_coefficient", obj.get("dim_coefficient"))?;
-        counts.insert("dim_coefficient".to_string(), JsonValue::Number(n_coef.into()));
+        //    On vide les user avant réinsertion pour éviter les doublons (la
+        //    table survit au reset et peut déjà porter des user d'un import
+        //    précédent).
+        if excluded.contains("dim_coefficient") {
+            counts.insert("dim_coefficient".to_string(), JsonValue::Number(0.into()));
+        } else {
+            con.execute("DELETE FROM dim_coefficient WHERE kind = 'user'", [])
+                .map_err(db_err)?;
+            let n_coef = insert_table(&con, "dim_coefficient", obj.get("dim_coefficient"))?;
+            counts.insert("dim_coefficient".to_string(), JsonValue::Number(n_coef.into()));
+        }
+
+        // 5. Recaler les séquences sur le MAX(id) des tables à PK auto-incrémentée.
+        //    Un paquet exporté peut contenir des ids explicites ; sans recalage,
+        //    les inserts ultérieurs (DEFAULT nextval) entreraient en conflit de PK.
+        for &(seq, table) in &[
+            ("seq_consolidation", "dim_consolidation"),
+            ("seq_stg_entry", "stg_entry"),
+        ] {
+            let _ = con.execute(
+                &format!("SELECT setval('{seq}', COALESCE((SELECT MAX(id) FROM {table}), 0))"),
+                [],
+            );
+        }
 
         // Flushe tout le DDL (create_schema) + les données importées dans le
         // fichier .duckdb (WAL propre) : évite une base illisible si le serveur
@@ -245,6 +384,7 @@ fn import_db_value(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/export", get(export_all))
+        .route("/api/import/preview", post(import_preview))
         .route("/api/import/all", post(import_all))
 }
 

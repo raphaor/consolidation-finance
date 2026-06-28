@@ -49,7 +49,8 @@ use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, coefficients, controls, create_schema, custom_references, dimensions, entries,
     export, import, indicators, load_all, masterdata, money::Money, references, run_pipeline,
-    run_pipeline_with_hook, seed_demo_attributes, seed_demo_rules, value_lists, ConvertParams,
+    run_pipeline_with_hook, seed_demo_attributes, seed_demo_controls, seed_demo_rules,
+    value_lists, ConvertParams,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -781,6 +782,7 @@ async fn reset_handler(State(state): State<Arc<AppState>>) -> Result<Json<ResetR
         create_schema(&con).map_err(db_err)?; // DROP + CREATE (idempotent)
         load_all(&con, std::path::Path::new(&state.csv_dir)).map_err(db_err)?;
         seed_demo_rules(&con).map_err(db_err)?; // règle + jeu interco (hors CSV)
+        seed_demo_controls(&con).map_err(db_err)?; // contrôles de données exemples
         seed_demo_attributes(&con, std::path::Path::new(&state.csv_dir))?; // caractéristique + hiérarchie compte_parent
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM stg_entry", [], |row| row.get(0))
@@ -1626,6 +1628,10 @@ async fn main() {
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             [],
         );
+        // Contrôles de données exemples (idempotent : INSERT OR IGNORE).
+        if let Err(e) = seed_demo_controls(&con) {
+            eprintln!("   ⚠ seed_demo_controls (non bloquant) : {e}");
+        }
     } else {
         if force_reseed {
             println!("   CONSO_FORCE_RESEED=1 — rechargement complet demandé.");
@@ -1634,6 +1640,7 @@ async fn main() {
         create_schema(&con).expect("✗ create_schema");
         load_all(&con, std::path::Path::new(&csv_dir)).expect("✗ load_all");
         seed_demo_rules(&con).expect("✗ seed_demo_rules"); // règle + jeu interco (hors CSV)
+        seed_demo_controls(&con).expect("✗ seed_demo_controls"); // contrôles exemples
         seed_demo_attributes(&con, std::path::Path::new(&csv_dir)).expect("✗ seed_demo_attributes"); // caractéristique + hiérarchie compte_parent
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.

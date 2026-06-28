@@ -947,6 +947,7 @@ export interface ControlRowResult {
 export interface ControlLevelResult {
   status: ControlStatus;
   rows: ControlRowResult[];
+  error?: string;
 }
 
 export interface ControlReport {

@@ -1060,7 +1060,69 @@ pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
-/// Seede les **attributs de dimension du plan de comptes** : recrée, via les
+/// Contrôles de données de démonstration — exemples intégrés pour guider
+/// l'utilisateur. Appelée comme [`seed_demo_rules`] après l'import CSV.
+pub fn seed_demo_controls(con: &Connection) -> duckdb::Result<()> {
+    // ── CTRL_ACTIF_PASSIF : équilibre bilan (actif = passif) ──
+    let def_actif_passif = r#"{
+        "levels": ["raw", "corporate", "converted", "consolidated"],
+        "grain": ["entity", "entry_period"],
+        "selection": [
+            {"dim": "account", "ref": "sous_classe", "op": "IN", "val": ["actif", "passif"]}
+        ],
+        "expression": "SUM(IF(r_sous_classe.code = 'actif', amount, -amount))",
+        "assertions": [{"type": "equals", "target": 0}],
+        "compare": null
+    }"#;
+    con.execute(
+        "INSERT INTO dim_control (code, libelle, definition) VALUES (?, ?, ?) \
+         ON CONFLICT (code) DO UPDATE SET libelle = excluded.libelle, definition = excluded.definition",
+        params![
+            "CTRL_ACTIF_PASSIF",
+            "Équilibre actif = passif (bilan)",
+            def_actif_passif
+        ],
+    )?;
+
+    // ── CTRL_SOLDE_IC : vérification que l'interco est soldée ──
+    let def_solde_ic = r#"{
+        "levels": ["consolidated"],
+        "grain": ["entity", "entry_period"],
+        "selection": [
+            {"dim": "nature", "op": "=", "val": "2ELI"}
+        ],
+        "expression": null,
+        "assertions": [{"type": "equals", "target": 0}],
+        "compare": null
+    }"#;
+    con.execute(
+        "INSERT INTO dim_control (code, libelle, definition) VALUES (?, ?, ?) \
+         ON CONFLICT (code) DO UPDATE SET libelle = excluded.libelle, definition = excluded.definition",
+        params![
+            "CTRL_SOLDE_IC",
+            "Interco soldée (nature 2ELI = 0)",
+            def_solde_ic
+        ],
+    )?;
+
+    // ── Jeu de contrôles regroupant les exemples ──
+    con.execute(
+        "INSERT INTO dim_control_set (code, libelle) VALUES (?, ?) \
+         ON CONFLICT (code) DO UPDATE SET libelle = excluded.libelle",
+        params!["CS_BILAN", "Contrôles bilan (démo)"],
+    )?;
+    con.execute(
+        "INSERT INTO dim_control_set_item (set_code, control_code, ord) VALUES (?, ?, ?) \
+         ON CONFLICT (set_code, control_code) DO NOTHING",
+        params!["CS_BILAN", "CTRL_ACTIF_PASSIF", 1],
+    )?;
+    con.execute(
+        "INSERT INTO dim_control_set_item (set_code, control_code, ord) VALUES (?, ?, ?) \
+         ON CONFLICT (set_code, control_code) DO NOTHING",
+        params!["CS_BILAN", "CTRL_SOLDE_IC", 2],
+    )?;
+    Ok(())
+}
 /// mécanismes pilotables, ce qui était auparavant codé en dur sur `dim_account`.
 ///
 /// - **Caractéristique** `groupement` (N1 sur `account`) avec la valeur

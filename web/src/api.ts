@@ -164,11 +164,18 @@ export const api = {
   // écritures + règles + dimensions custom). `importAll` remplace tout.
   backup: {
     exportAll: () => getJson<Record<string, unknown>>('/export'),
-    importAll: (bundle: unknown) =>
-      postJsonRaw<{ status: string; imported: Record<string, number> }>(
-        '/import/all',
+    preview: (bundle: unknown) =>
+      postJsonRaw<{ meta: unknown; tables: { name: string; label: string; rows: number }[] }>(
+        '/import/preview',
         bundle,
       ),
+    importAll: (bundle: unknown, exclude?: string[]) => {
+      const qs = exclude?.length ? `?exclude=${exclude.join(',')}` : '';
+      return postJsonRaw<{ status: string; imported: Record<string, number> }>(
+        `/import/all${qs}`,
+        bundle,
+      );
+    },
   },
   consolidations: {
     list: () => getJson<ConsolidationSummary[]>('/consolidations'),
