@@ -274,7 +274,7 @@ automatique `server.rs:1650-1658` n'aurait rien à consolider).
 
 | Tâche | Statut | Commit | Date |
 |---|---|---|---|
-| T1 — `rerun-if-changed` dans `build.rs` | LIVRÉE | (à remplir) | 2026-06-28 |
+| T1 — `rerun-if-changed` dans `build.rs` | LIVRÉE | `d56790d` | 2026-06-28 |
 | T2 — Étendre export JSON | à faire | — | — |
 | T3 — Mode boot/reset JSON | à faire | — | — |
 | T4 — Migration tests vers JSON | à faire | — | — |
