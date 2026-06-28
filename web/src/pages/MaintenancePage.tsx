@@ -4,6 +4,7 @@
 // une modale de confirmation : un clic seul ne doit jamais écraser tout l'état.
 
 import { useRef, useState, type ChangeEvent } from 'react';
+import { errMsg } from '../utils/errMessage';
 import { api } from '../api';
 
 // Le paquet de sauvegarde est un blob JSON opaque côté front (le serveur en
@@ -79,7 +80,7 @@ export function MaintenancePage() {
       URL.revokeObjectURL(url);
       setStatus({ kind: 'done', label: 'Paquet exporté.' });
     } catch (err) {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
+      setStatus({ kind: 'error', message: errMsg(err, 'erreur') });
     }
   }
 
@@ -98,7 +99,7 @@ export function MaintenancePage() {
       setSelection({ bundle, fileName: file.name, preview, selected: allSelected });
       setStatus({ kind: 'idle' });
     } catch (err) {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'fichier illisible' });
+      setStatus({ kind: 'error', message: errMsg(err, 'fichier illisible') });
     }
   }
 
@@ -143,7 +144,7 @@ export function MaintenancePage() {
         await api.reset();
         setStatus({ kind: 'done', label: 'Base réinitialisée depuis les CSV.' });
       } catch (err) {
-        setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
+        setStatus({ kind: 'error', message: errMsg(err, 'erreur') });
       }
     } else if (action.kind === 'import' && selection) {
       const sel = selection;
@@ -161,7 +162,7 @@ export function MaintenancePage() {
           .join(', ');
         setStatus({ kind: 'done', label: `Paquet « ${sel.fileName} » importé. ${imported}` });
       } catch (err) {
-        setStatus({ kind: 'error', message: err instanceof Error ? err.message : 'erreur' });
+        setStatus({ kind: 'error', message: errMsg(err, 'erreur') });
       }
     }
   }

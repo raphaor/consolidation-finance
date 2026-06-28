@@ -7,6 +7,7 @@
 // choisit la première consolidation `'ouvert'` (rétro-compatibilité dev).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
 import { api } from '../api';
 import type {
   ConsolidationSummary,
@@ -130,7 +131,7 @@ export function ExecutionPage() {
     } catch (err) {
       setStatus({
         kind: 'error',
-        message: err instanceof Error ? err.message : 'erreur',
+        message: errMsg(err, 'erreur'),
       });
     }
   }

@@ -1,6 +1,7 @@
 // Page « Import » : chargement CSV des liasses (stg_entry) et des taux de change.
 
 import { type FormEvent, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
 import { api } from '../api';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
@@ -35,7 +36,7 @@ function UploadZone({ title, description, header, onImport }: UploadZoneProps) {
       setFile(null);
     } catch (err) {
       setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'erreur');
+      setMessage(errMsg(err, 'erreur'));
     }
   }
 

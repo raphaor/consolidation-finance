@@ -18,6 +18,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { errMsg } from '../utils/errMessage';
 import {
   type ColumnDef as RTColumnDef,
   flexRender,
@@ -63,7 +64,7 @@ export function DimensionsPage() {
       }
       setSources(map);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setDims([]);
     } finally {
       setLoading(false);
@@ -93,7 +94,7 @@ export function DimensionsPage() {
         setNewTarget('');
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       } finally {
         setCreating(false);
       }
@@ -109,7 +110,7 @@ export function DimensionsPage() {
         setNotice({ kind: 'success', text: `Dimension « ${name} » supprimée.` });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [load],

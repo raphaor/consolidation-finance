@@ -20,6 +20,8 @@
 // (cf. `rule-op-summary` de Règles) pour ne pas avoir à déchiffrer les champs.
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
+import { SubTabs } from '../components/SubTabs';
 import { api } from '../api';
 import { formatOptionLabel, sortForDisplay } from '../utils/format';
 import type {
@@ -61,7 +63,7 @@ export function CaracteristiquesPage() {
 
   const notifyErr = useCallback(
     (err: unknown) =>
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' }),
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') }),
     [],
   );
 
@@ -149,22 +151,14 @@ export function CaracteristiquesPage() {
         dimensions.
       </p>
 
-      <div className="subtabs">
-        <button
-          type="button"
-          className={`subtab ${subtab === 'attributs' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('attributs')}
-        >
-          Attributs de dimension
-        </button>
-        <button
-          type="button"
-          className={`subtab ${subtab === 'listes' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('listes')}
-        >
-          Listes de valeurs
-        </button>
-      </div>
+      <SubTabs
+        items={[
+          { id: 'attributs', label: 'Attributs de dimension' },
+          { id: 'listes', label: 'Listes de valeurs' },
+        ]}
+        active={subtab}
+        onChange={setSubtab}
+      />
 
       {notice && <div className={`alert alert--${notice.kind}`}>{notice.text}</div>}
 

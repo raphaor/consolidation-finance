@@ -19,6 +19,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { errMsg } from '../utils/errMessage';
 import {
   type ColumnDef as RTColumnDef,
   flexRender,
@@ -211,7 +212,7 @@ function RowForm({
     try {
       await onSubmit(values);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'erreur');
+      setFormError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -316,7 +317,7 @@ export function MasterDataPage({
     } catch (err) {
       setNotice({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'erreur',
+        text: errMsg(err, 'erreur'),
       });
     } finally {
       setHealthLoading(false);
@@ -427,7 +428,7 @@ export function MasterDataPage({
       if (needsRulesets) opts['rulesets'] = rulesets as unknown as Row[];
       setOptionsData(opts);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setData([]);
       setOptionsData({});
       setTableDef(null);
@@ -457,7 +458,7 @@ export function MasterDataPage({
         setNotice({ kind: 'success', text: 'Ligne supprimée.' });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [table, tableDef, load],

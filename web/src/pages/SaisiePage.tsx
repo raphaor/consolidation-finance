@@ -20,6 +20,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { errMsg } from '../utils/errMessage';
 import { api } from '../api';
 import { useDimValues } from '../hooks/useDimValues';
 import { DimRefProvider } from '../components/DimRefProvider';
@@ -290,7 +291,7 @@ function SaisieBatch({
       } catch (err) {
         setNotice({
           kind: 'error',
-          text: err instanceof Error ? err.message : 'erreur',
+          text: errMsg(err, 'erreur'),
         });
       } finally {
         setSubmitting(false);
@@ -493,7 +494,7 @@ function ManualList({
       });
       setRows(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setRows([]);
     } finally {
       setLoading(false);
@@ -517,7 +518,7 @@ function ManualList({
       await api.entriesMutations.remove(id);
       onChanged();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'erreur');
+      window.alert(errMsg(err, 'erreur'));
     } finally {
       setBusy(null);
     }
@@ -642,7 +643,7 @@ function EditModal({
       await api.entriesMutations.update(state.id, toEntryInput(values));
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }

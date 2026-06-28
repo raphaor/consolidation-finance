@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
 
 interface Props {
   oldCode: string;
@@ -21,7 +22,7 @@ export function RenameModal({ oldCode, entityLabel, onConfirm, onCancel }: Props
     try {
       await onConfirm(trimmed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setSubmitting(false);
     }
   }

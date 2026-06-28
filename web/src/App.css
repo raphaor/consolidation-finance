@@ -647,6 +647,26 @@
   gap: 6px;
 }
 
+/* Disposition « bibliothèque à gauche + éditeur à droite » partagée par les
+   pages Coefficients / Postes / Indicateurs / Contrôles / Règles. */
+.editor-split {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Barre d'actions d'un éditeur (Enregistrer / Fermer), alignée à gauche. */
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* ---------- Import ---------- */
 
 .upload-grid {
@@ -702,6 +722,7 @@
   display: flex;
   gap: 4px;
   border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
 }
 
 .subtab {

@@ -10,13 +10,17 @@ import {
   TraverseField,
 } from '../components/ConditionFields';
 import { NULL_OPS } from '../components/operators';
+import { PageHeader } from '../components/PageHeader';
+import { SubTabs } from '../components/SubTabs';
 import {
   DIM_TO_TABLE_FALLBACK,
   DimRefContext,
   buildDimToTable,
   type DimToTable,
 } from '../hooks/useDimValues';
+import { useDimensionMetadata } from '../hooks/useDimensionMetadata';
 import { parseCondVal } from '../utils/conditionValue';
+import { errMsg } from '../utils/errMessage';
 import { formatOptionLabel, sortForDisplay } from '../utils/format';
 import type {
   Characteristic,
@@ -185,32 +189,11 @@ const EMPTY_FORM: ControlForm = {
 // =====================================================================
 
 export function ControlsPage() {
-  const [dims, setDims] = useState<DimensionInfo[]>([]);
-  const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
-  const [customRefs, setCustomRefs] = useState<CustomReference[]>([]);
-  const [nativeEnums, setNativeEnums] = useState<NativeEnum[]>([]);
+  const { dims, characteristics, customRefs, nativeEnums, error: metaError } =
+    useDimensionMetadata();
   const [dimToTable, setDimToTable] = useState<DimToTable>(DIM_TO_TABLE_FALLBACK);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('biblio');
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [d, c, r, e] = await Promise.all([
-          api.dimensions.list(),
-          api.characteristics.list(),
-          api.customReferences.list(),
-          api.nativeEnums(),
-        ]);
-        setDims(sortForDisplay(d, (x) => formatOptionLabel(x.name, x.label)));
-        setCharacteristics(c);
-        setCustomRefs(r);
-        setNativeEnums(e);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,31 +208,25 @@ export function ControlsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  const tabBtn = (t: Tab, label: string) => (
-    <button
-      type="button"
-      className={`subtab ${tab === t ? 'subtab--active' : ''}`}
-      onClick={() => setTab(t)}
-    >
-      {label}
-    </button>
-  );
+  const banner = error ?? metaError;
 
   return (
     <DimRefContext.Provider value={dimToTable}>
     <div className="page">
-      <div className="page__header">
-        <h1>Contrôles de données</h1>
-        <p className="page__hint">
-          Vérifications configurables : complétude, cohérence, variations. Exécutées à la demande.
-        </p>
-      </div>
-      {error && <div className="banner banner--error">{error}</div>}
+      <PageHeader
+        title="Contrôles de données"
+        hint="Vérifications configurables : complétude, cohérence, variations. Exécutées à la demande."
+      />
+      {banner && <div className="banner banner--error">{banner}</div>}
 
-      <div className="subtabs" style={{ marginBottom: 12 }}>
-        {tabBtn('biblio', 'Bibliothèque')}
-        {tabBtn('jeux', 'Jeux de contrôles')}
-      </div>
+      <SubTabs
+        items={[
+          { id: 'biblio', label: 'Bibliothèque' },
+          { id: 'jeux', label: 'Jeux de contrôles' },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
 
       {tab === 'biblio' ? (
         <BiblioTab
@@ -315,7 +292,7 @@ function BiblioTab({
     try {
       setControls(await api.controls.list());
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errMsg(e));
     }
   }, [onError]);
 
@@ -370,7 +347,7 @@ function BiblioTab({
       await reload();
       setSelected(null);
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errMsg(e));
     } finally {
       setSaving(false);
     }
@@ -384,7 +361,7 @@ function BiblioTab({
         if (selected === code) setSelected(null);
         await reload();
       } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
+        onError(errMsg(e));
       }
     },
     [selected, reload, onError],
@@ -461,7 +438,7 @@ function BiblioTab({
       </div>
 
       {/* Éditeur */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="editor-pane">
         {selected !== null ? (
           <div>
             <h3>{selected === 'new' ? 'Nouveau contrôle' : `Modifier ${form.code}`}</h3>
@@ -740,7 +717,7 @@ function JeuxTab({
       setPeriods(pList as { code: string; libelle: string; type?: string }[]);
       setConsolidations(conList);
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errMsg(e));
     }
   }, [onError]);
 
@@ -781,7 +758,7 @@ function JeuxTab({
       await reload();
       setSetEditing(null);
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(errMsg(e));
     } finally {
       setCsSaving(false);
     }
@@ -795,7 +772,7 @@ function JeuxTab({
         if (setEditing === code) setSetEditing(null);
         await reload();
       } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
+        onError(errMsg(e));
       }
     },
     [setEditing, reload, onError],
@@ -813,7 +790,7 @@ function JeuxTab({
         });
         setReport(r);
       } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
+        onError(errMsg(e));
       } finally {
         setRunning(false);
       }
@@ -944,7 +921,7 @@ function JeuxTab({
       </div>
 
       {/* Éditeur / Rapport */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="editor-pane">
         {setEditing !== null ? (
           <div>
             <h3>{setEditing === 'new' ? 'Nouveau jeu de contrôles' : `Modifier ${setDraft.code}`}</h3>

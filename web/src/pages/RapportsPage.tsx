@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
 import { api } from '../api';
 import type { BilanRow, Level, ReportFilters } from '../types';
 import { LEVELS } from '../types';
@@ -83,7 +84,7 @@ export function RapportsPage() {
           : await api.bilan(level, filters);
       setRows(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setRows([]);
     } finally {
       setLoading(false);

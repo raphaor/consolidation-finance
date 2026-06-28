@@ -39,3 +39,14 @@ export function sortForDisplay<T>(rows: T[], getText: (row: T) => string): T[] {
   return [...rows].sort((a, b) => compareText(getText(a), getText(b)));
 }
 
+// Fonctions du langage de formules (cf. docs/FORMULES.md), partagées par les
+// barres de « chips » des éditeurs Coefficients et Indicateurs.
+export const FORMULA_FUNCTIONS = ['MIN', 'MAX', 'SAFE_DIV', 'IF', 'ABS', 'ROUND'];
+
+// Affiche une valeur de preview de formule : jusqu'à 6 décimales sans zéros
+// superflus (« — » si absente).
+export function formatFormulaValue(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '—';
+  return Number(v.toFixed(6)).toString();
+}
+

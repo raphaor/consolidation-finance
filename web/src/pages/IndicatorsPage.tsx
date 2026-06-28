@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { FormulaEditor, type FormulaEditorHandle } from '../components/FormulaEditor';
+import { LibraryList } from '../components/LibraryList';
 import { OperandPalette } from '../components/OperandPalette';
 import {
   OpSelect,
@@ -12,7 +13,11 @@ import {
   TraverseField,
 } from '../components/ConditionFields';
 import { NULL_OPS, OP_SYMBOL } from '../components/operators';
+import { PageHeader } from '../components/PageHeader';
+import { useCrudResource } from '../hooks/useCrudResource';
+import { useDimensionMetadata } from '../hooks/useDimensionMetadata';
 import { parseCondVal } from '../utils/conditionValue';
+import { errMsg } from '../utils/errMessage';
 import type {
   Aggregate,
   AggregateCond,
@@ -25,10 +30,14 @@ import type {
   IndicatorPreview,
   NativeEnum,
 } from '../types';
-import { formatOptionLabel, sortForDisplay } from '../utils/format';
+import {
+  FORMULA_FUNCTIONS,
+  formatFormulaValue,
+  formatOptionLabel,
+  sortForDisplay,
+} from '../utils/format';
 
 const LEVELS = ['corporate', 'converted', 'consolidated'];
-const FUNCTIONS = ['MIN', 'MAX', 'SAFE_DIV', 'IF', 'ABS', 'ROUND'];
 const FORMATS = ['nombre', 'pourcentage', 'ratio'];
 
 // Postes et Indicateurs sont désormais deux pages distinctes (groupe Calculs),
@@ -36,41 +45,18 @@ const FORMATS = ['nombre', 'pourcentage', 'ratio'];
 // charge seulement les données dont son volet a besoin.
 
 export function PostesPage() {
-  const [dims, setDims] = useState<DimensionInfo[]>([]);
-  const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
-  const [customRefs, setCustomRefs] = useState<CustomReference[]>([]);
-  const [nativeEnums, setNativeEnums] = useState<NativeEnum[]>([]);
+  const { dims, characteristics, customRefs, nativeEnums, error: metaError } =
+    useDimensionMetadata();
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const [d, c, r, e] = await Promise.all([
-          api.dimensions.list(),
-          api.characteristics.list(),
-          api.customReferences.list(),
-          api.nativeEnums(),
-        ]);
-        setDims(sortForDisplay(d, (x) => formatOptionLabel(x.name, x.label)));
-        setCharacteristics(c);
-        setCustomRefs(r);
-        setNativeEnums(e);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-  }, []);
+  const banner = error ?? metaError;
 
   return (
     <div className="page">
-      <div className="page__header">
-        <h2>Postes</h2>
-        <p className="page__hint">
-          Postes = sélections agrégées sur fact_entry, briques de base des
-          indicateurs.
-        </p>
-      </div>
-      {error && <div className="banner banner--error">{error}</div>}
+      <PageHeader
+        title="Postes"
+        hint="Postes = sélections agrégées sur fact_entry, briques de base des indicateurs."
+      />
+      {banner && <div className="banner banner--error">{banner}</div>}
 
       <PostesTab
         dims={dims}
@@ -98,20 +84,17 @@ export function IndicateursPage() {
         setDims(sortForDisplay(d, (x) => formatOptionLabel(x.name, x.label)));
         setConsolidations(sortForDisplay(cons, (x) => x.libelle));
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errMsg(err));
       }
     })();
   }, []);
 
   return (
     <div className="page">
-      <div className="page__header">
-        <h2>Indicateurs</h2>
-        <p className="page__hint">
-          Indicateurs = formules combinant des postes, calculées à un grain. Un
-          ratio n'est jamais sommé.
-        </p>
-      </div>
+      <PageHeader
+        title="Indicateurs"
+        hint="Indicateurs = formules combinant des postes, calculées à un grain. Un ratio n'est jamais sommé."
+      />
       {error && <div className="banner banner--error">{error}</div>}
 
       <IndicateursTab dims={dims} consolidations={consolidations} onError={setError} />
@@ -179,6 +162,16 @@ interface PosteForm {
 
 const EMPTY_POSTE: PosteForm = { code: '', libelle: '', level: 'consolidated', conditions: [] };
 
+// Corps d'API d'un poste (hors code) dérivé du formulaire : conditions → sélection.
+function posteToBody(f: PosteForm) {
+  const selection: AggregateCond[] = f.conditions.map((c) => {
+    const cond: AggregateCond = { dim: c.dim, op: c.op, ...decodeTraverse(c.traverse) };
+    if (!NULL_OPS.has(c.op)) cond.val = c.val;
+    return cond;
+  });
+  return { libelle: f.libelle || undefined, level: f.level, definition: { selection } };
+}
+
 function PostesTab({
   dims,
   characteristics,
@@ -192,31 +185,21 @@ function PostesTab({
   nativeEnums: NativeEnum[];
   onError: (e: string | null) => void;
 }) {
-  const [aggregates, setAggregates] = useState<Aggregate[]>([]);
-  const [selected, setSelected] = useState<string | 'new' | null>(null);
-  const [form, setForm] = useState<PosteForm>(EMPTY_POSTE);
-  const [saving, setSaving] = useState(false);
-
-  const reload = useCallback(async () => {
-    try {
-      setAggregates(await api.aggregates.list());
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-    }
-  }, [onError]);
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  const open = useCallback((a: Aggregate | 'new') => {
-    onError(null);
-    if (a === 'new') {
-      setSelected('new');
-      setForm(EMPTY_POSTE);
-      return;
-    }
-    setSelected(a.code);
-    setForm({
+  const {
+    items: aggregates,
+    selected,
+    setSelected,
+    form,
+    setForm,
+    saving,
+    open,
+    save,
+    remove,
+  } = useCrudResource<Aggregate, PosteForm>({
+    list: api.aggregates.list,
+    keyOf: (a) => a.code,
+    emptyForm: EMPTY_POSTE,
+    toForm: (a) => ({
       code: a.code,
       libelle: a.libelle ?? '',
       level: a.level,
@@ -226,8 +209,14 @@ function PostesTab({
         val: c.val,
         traverse: c.attr ? `attr:${c.attr}` : c.via ? `via:${c.via}` : c.ref ? `ref:${c.ref}` : '',
       })),
-    });
-  }, [onError]);
+    }),
+    codeOf: (f) => f.code,
+    create: (f) => api.aggregates.create({ code: f.code, ...posteToBody(f) }),
+    update: (code, f) => api.aggregates.update(code, posteToBody(f)),
+    remove: api.aggregates.remove,
+    confirmRemove: (code) => `Supprimer le poste « ${code} » ?`,
+    onError,
+  });
 
   // Ajoute une condition pour une dimension donnée (chips « + dim »).
   const addCondForDim = (dim: string) =>
@@ -242,73 +231,29 @@ function PostesTab({
       conditions: f.conditions.map((c, idx) => (idx === i ? { ...c, ...patch } : c)),
     }));
 
-  const save = useCallback(async () => {
-    onError(null);
-    setSaving(true);
-    try {
-      const selection: AggregateCond[] = form.conditions.map((c) => {
-        const cond: AggregateCond = { dim: c.dim, op: c.op, ...decodeTraverse(c.traverse) };
-        if (!NULL_OPS.has(c.op)) cond.val = c.val;
-        return cond;
-      });
-      const body = { libelle: form.libelle || undefined, level: form.level, definition: { selection } };
-      if (selected === 'new') await api.aggregates.create({ code: form.code, ...body });
-      else if (selected) await api.aggregates.update(selected, body);
-      await reload();
-      setSelected(form.code);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [form, selected, reload, onError]);
-
-  const remove = useCallback(
-    async (code: string) => {
-      if (!confirm(`Supprimer le poste « ${code} » ?`)) return;
-      try {
-        await api.aggregates.remove(code);
-        await reload();
-        if (selected === code) setSelected(null);
-      } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [reload, selected, onError],
-  );
-
   return (
-    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-      <div style={{ flex: '0 0 300px' }}>
-        <button type="button" className="btn btn--primary" onClick={() => open('new')}>
-          + Nouveau poste
-        </button>
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Niveau</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {aggregates.map((a) => (
-              <tr key={a.code} className={selected === a.code ? 'row--selected' : ''} style={{ cursor: 'pointer' }}>
-                <td onClick={() => open(a)}>{a.code}</td>
-                <td onClick={() => open(a)}>{a.level}</td>
-                <td>
-                  <button type="button" className="btn btn--ghost" onClick={() => remove(a.code)} title="Supprimer">
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="editor-split">
+      <LibraryList
+        items={aggregates}
+        getKey={(a) => a.code}
+        selected={selected}
+        onSelect={open}
+        onNew={() => open('new')}
+        newLabel="+ Nouveau poste"
+        width={300}
+        columns={[
+          { header: 'Code', cell: (a) => a.code },
+          { header: 'Niveau', cell: (a) => a.level },
+        ]}
+        actions={(a) => (
+          <button type="button" className="btn btn--ghost" onClick={() => remove(a.code)} title="Supprimer">
+            ✕
+          </button>
+        )}
+      />
 
       {selected !== null && (
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="editor-pane">
           <div style={{ display: 'flex', gap: 12 }}>
             <label className="field" style={{ flex: '0 0 180px' }}>
               <span>Code</span>
@@ -415,7 +360,7 @@ function PostesTab({
             <span>{summarizePoste(form.level, form.conditions)}</span>
           </div>
 
-          <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+          <div className="editor-actions">
             <button
               type="button"
               className="btn btn--primary"
@@ -448,6 +393,16 @@ interface IndicForm {
 
 const EMPTY_INDIC: IndicForm = { code: '', libelle: '', expression: '', grain: [], format: 'nombre' };
 
+// Corps d'API d'un indicateur (hors code) dérivé du formulaire.
+function indicToBody(f: IndicForm) {
+  return {
+    libelle: f.libelle || undefined,
+    expression: f.expression,
+    grain: f.grain,
+    format: f.format,
+  };
+}
+
 function IndicateursTab({
   dims,
   consolidations,
@@ -457,49 +412,63 @@ function IndicateursTab({
   consolidations: ConsolidationSummary[];
   onError: (e: string | null) => void;
 }) {
-  const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [operands, setOperands] = useState<IndicatorOperand[]>([]);
-  const [selected, setSelected] = useState<string | 'new' | null>(null);
-  const [form, setForm] = useState<IndicForm>(EMPTY_INDIC);
   const [consolidation, setConsolidation] = useState<number | undefined>(undefined);
   const [preview, setPreview] = useState<IndicatorPreview | null>(null);
-  const [saving, setSaving] = useState(false);
   const exprRef = useRef<FormulaEditorHandle>(null);
 
-  const reload = useCallback(async () => {
-    try {
-      const [list, ops] = await Promise.all([api.indicators.list(), api.indicators.operands()]);
-      setIndicators(list);
-      setOperands(ops);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-    }
-  }, [onError]);
+  const {
+    items: indicators,
+    selected,
+    setSelected,
+    form,
+    setForm,
+    saving,
+    open: openResource,
+    save,
+    remove,
+  } = useCrudResource<Indicator, IndicForm>({
+    list: api.indicators.list,
+    keyOf: (ind) => ind.code,
+    emptyForm: EMPTY_INDIC,
+    toForm: (ind) => ({
+      code: ind.code,
+      libelle: ind.libelle ?? '',
+      expression: ind.expression,
+      grain: ind.grain ?? [],
+      format: ind.format ?? 'nombre',
+    }),
+    codeOf: (f) => f.code,
+    create: (f) => api.indicators.create({ code: f.code, ...indicToBody(f) }),
+    update: (code, f) => api.indicators.update(code, indicToBody(f)),
+    remove: api.indicators.remove,
+    confirmRemove: (code) => `Supprimer l'indicateur « ${code} » ?`,
+    onError,
+  });
+
+  // Ouvrir (ré)initialise la preview, comme avant la factorisation.
+  const open = useCallback(
+    (ind: Indicator | 'new') => {
+      openResource(ind);
+      setPreview(null);
+    },
+    [openResource],
+  );
+
+  // Opérandes statiques vis-à-vis du CRUD : un chargement au montage.
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    void (async () => {
+      try {
+        setOperands(await api.indicators.operands());
+      } catch (e) {
+        onError(errMsg(e));
+      }
+    })();
+  }, [onError]);
 
   useEffect(() => {
     if (consolidation === undefined && consolidations.length) setConsolidation(consolidations[0].id);
   }, [consolidations, consolidation]);
-
-  const open = useCallback((ind: Indicator | 'new') => {
-    onError(null);
-    if (ind === 'new') {
-      setSelected('new');
-      setForm(EMPTY_INDIC);
-    } else {
-      setSelected(ind.code);
-      setForm({
-        code: ind.code,
-        libelle: ind.libelle ?? '',
-        expression: ind.expression,
-        grain: ind.grain ?? [],
-        format: ind.format ?? 'nombre',
-      });
-    }
-    setPreview(null);
-  }, [onError]);
 
   // Preview live (débouncée) sur la consolidation sélectionnée.
   useEffect(() => {
@@ -517,7 +486,7 @@ function IndicateursTab({
           }),
         );
       } catch (e) {
-        setPreview({ ok: false, error: e instanceof Error ? e.message : String(e), rows: [] });
+        setPreview({ ok: false, error: errMsg(e), rows: [] });
       }
     }, 350);
     return () => clearTimeout(handle);
@@ -527,41 +496,6 @@ function IndicateursTab({
     exprRef.current?.insert(fragment);
   }, []);
 
-  const save = useCallback(async () => {
-    onError(null);
-    setSaving(true);
-    try {
-      const body = {
-        libelle: form.libelle || undefined,
-        expression: form.expression,
-        grain: form.grain,
-        format: form.format,
-      };
-      if (selected === 'new') await api.indicators.create({ code: form.code, ...body });
-      else if (selected) await api.indicators.update(selected, body);
-      await reload();
-      setSelected(form.code);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [form, selected, reload, onError]);
-
-  const remove = useCallback(
-    async (code: string) => {
-      if (!confirm(`Supprimer l'indicateur « ${code} » ?`)) return;
-      try {
-        await api.indicators.remove(code);
-        await reload();
-        if (selected === code) setSelected(null);
-      } catch (e) {
-        onError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [reload, selected, onError],
-  );
-
   const toggleGrain = (name: string) =>
     setForm((f) => ({
       ...f,
@@ -569,37 +503,25 @@ function IndicateursTab({
     }));
 
   return (
-    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-      <div style={{ flex: '0 0 280px' }}>
-        <button type="button" className="btn btn--primary" onClick={() => open('new')}>
-          + Nouvel indicateur
-        </button>
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {indicators.map((ind) => (
-              <tr key={ind.code} className={selected === ind.code ? 'row--selected' : ''} style={{ cursor: 'pointer' }}>
-                <td onClick={() => open(ind)} title={ind.libelle ?? ''}>
-                  {ind.code}
-                </td>
-                <td>
-                  <button type="button" className="btn btn--ghost" onClick={() => remove(ind.code)} title="Supprimer">
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="editor-split">
+      <LibraryList
+        items={indicators}
+        getKey={(ind) => ind.code}
+        selected={selected}
+        onSelect={open}
+        onNew={() => open('new')}
+        newLabel="+ Nouvel indicateur"
+        width={280}
+        columns={[{ header: 'Code', cell: (ind) => ind.code, title: (ind) => ind.libelle ?? '' }]}
+        actions={(ind) => (
+          <button type="button" className="btn btn--ghost" onClick={() => remove(ind.code)} title="Supprimer">
+            ✕
+          </button>
+        )}
+      />
 
       {selected !== null && (
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="editor-pane">
           <div style={{ display: 'flex', gap: 12 }}>
             <label className="field" style={{ flex: '0 0 180px' }}>
               <span>Code</span>
@@ -633,7 +555,7 @@ function IndicateursTab({
           </div>
 
           <div style={{ margin: '12px 0 6px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {FUNCTIONS.map((fn) => (
+            {FORMULA_FUNCTIONS.map((fn) => (
               <button key={fn} type="button" className="chip chip--fn" onClick={() => insert(`${fn}()`)}>
                 {fn}
               </button>
@@ -704,7 +626,7 @@ function IndicateursTab({
             <PreviewTable preview={preview} grain={form.grain} format={form.format} />
           </div>
 
-          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <div className="editor-actions">
             <button
               type="button"
               className="btn btn--primary"
@@ -744,7 +666,7 @@ function PreviewTable({
     () => (v: number | null) => {
       if (v === null || v === undefined) return '—';
       if (format === 'pourcentage') return `${(v * 100).toFixed(2)} %`;
-      return Number(v.toFixed(6)).toString();
+      return formatFormulaValue(v);
     },
     [format],
   );

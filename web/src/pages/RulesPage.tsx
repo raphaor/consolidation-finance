@@ -13,6 +13,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { errMsg } from '../utils/errMessage';
 import {
   type ColumnDef as RTColumnDef,
   flexRender,
@@ -381,7 +382,7 @@ function RuleFormModal({
     try {
       await onSubmit(cleaned);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'erreur');
+      setFormError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -1204,7 +1205,7 @@ function RulesetFormModal({
     try {
       await onSubmit(draft);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'erreur');
+      setFormError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -1402,7 +1403,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
       const rows = await api.rules.list();
       setRules(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setRules([]);
     } finally {
       setLoading(false);
@@ -1422,7 +1423,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         setNotice({ kind: 'success', text: 'Règle supprimée.' });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [load],
@@ -1451,7 +1452,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         },
       });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
     }
   }, []);
 
@@ -1470,7 +1471,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         },
       });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
     }
   }, []);
 
@@ -1694,7 +1695,7 @@ function JeuxTab() {
       setDetails(full);
       setRuleOptions(rules);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setDetails([]);
     } finally {
       setLoading(false);
@@ -1718,7 +1719,7 @@ function JeuxTab() {
         },
       });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
     }
   }, []);
 
@@ -1730,7 +1731,7 @@ function JeuxTab() {
         setNotice({ kind: 'success', text: 'Jeu supprimé.' });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [load],
