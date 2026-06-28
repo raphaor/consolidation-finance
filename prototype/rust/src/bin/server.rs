@@ -820,6 +820,8 @@ struct DimensionInfo {
 struct DimensionBody {
     name: String,
     label: String,
+    #[serde(default)]
+    target_dimension: Option<String>,
 }
 
 impl DimensionInfo {
@@ -857,7 +859,8 @@ async fn create_dimension(
 ) -> Result<(StatusCode, Json<DimensionInfo>), AppError> {
     let info = {
         let con = lock_con(&state)?;
-        dimensions::create_custom(&con, &body.name, &body.label).map_err(|e| {
+        dimensions::create_custom(&con, &body.name, &body.label, body.target_dimension.as_deref())
+            .map_err(|e| {
             // Les erreurs de validation sont des `InvalidParameterName` → 400.
             AppError::bad_request(e.to_string())
         })?;
@@ -1612,6 +1615,10 @@ async fn main() {
         // B1 étape 13 : PK id réelle sur les dimensions (reconstruction tables).
         if let Err(e) = conso_engine::surrogate::migrate_dims_pk_to_id(&con) {
             eprintln!("   ⚠ migrate_dims_pk_to_id (non bloquant) : {e}");
+        }
+        // §11 : colonne target_dimension sur dim_custom_dimension.
+        if let Err(e) = conso_engine::dimensions::migrate_custom_dimension_target(&con) {
+            eprintln!("   ⚠ migrate_custom_dimension_target (non bloquant) : {e}");
         }
         // Marqueur de version de schéma (idempotent).
         let _ = con.execute(

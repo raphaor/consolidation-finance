@@ -18,6 +18,8 @@
 
 use duckdb::Connection;
 
+use crate::references;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Catégories et définitions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +47,10 @@ pub struct DimDef {
     pub custom: bool,
     /// Libellé UI.
     pub label: String,
+    /// Dimension cible pour les dimensions empruntées (§11).
+    /// `None` = dimension libre (TEXT, pas de validation).
+    /// `Some("entity")` = emprunte les valeurs de `dim_entity`.
+    pub target_dimension: Option<String>,
 }
 
 impl DimDef {
@@ -85,6 +91,7 @@ pub fn builtin_dims() -> Vec<DimDef> {
                 category: $cat,
                 custom: false,
                 label: $label.into(),
+                target_dimension: None,
             }
         };
     }
@@ -135,7 +142,7 @@ pub fn load_customs(con: &Connection) -> Result<Vec<DimDef>, duckdb::Error> {
         return Ok(Vec::new());
     }
     let mut stmt =
-        con.prepare("SELECT name, label, id FROM dim_custom_dimension ORDER BY name")?;
+        con.prepare("SELECT name, label, id, target_dimension FROM dim_custom_dimension ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
         let name: String = row.get(0)?;
         let id: Option<i64> = row.get(2)?;
@@ -146,6 +153,7 @@ pub fn load_customs(con: &Connection) -> Result<Vec<DimDef>, duckdb::Error> {
             category: DimCategory::Analytical,
             custom: true,
             label: row.get(1)?,
+            target_dimension: row.get(3)?,
         })
     })?;
     let mut out = Vec::new();
@@ -221,6 +229,27 @@ pub fn is_valid_custom_name(name: &str) -> bool {
         && !matches!(name, "level" | "amount" | "id")
 }
 
+/// Migration §11 : ajoute `target_dimension` à `dim_custom_dimension` si absent.
+/// Idempotent — ne fait rien si la colonne existe déjà.
+pub fn migrate_custom_dimension_target(con: &Connection) -> Result<(), duckdb::Error> {
+    let has_col: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns \
+             WHERE table_schema = 'main' AND table_name = 'dim_custom_dimension' \
+             AND column_name = 'target_dimension'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !has_col {
+        con.execute(
+            "ALTER TABLE dim_custom_dimension ADD COLUMN target_dimension TEXT",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 /// Crée une dimension custom (B1 étape 10) :
 /// - Valide le nom
 /// - Refuse les doublons (built-in ou déjà présente dans `dim_custom_dimension`)
@@ -230,7 +259,16 @@ pub fn is_valid_custom_name(name: &str) -> bool {
 ///
 /// La colonne physique `x{id}` ne dépend pas du code `name` : renommer la
 /// dimension ne nécessite pas d'`ALTER TABLE`.
-pub fn create_custom(con: &Connection, name: &str, label: &str) -> Result<(), duckdb::Error> {
+///
+/// `target_dimension` (optionnel) : si fourni, la dimension emprunte ses
+/// valeurs d'une autre dimension (comme `partner` → `entity`). La colonne
+/// `x{id}` sera alors validée contre la master data de la dimension cible.
+pub fn create_custom(
+    con: &Connection,
+    name: &str,
+    label: &str,
+    target_dimension: Option<&str>,
+) -> Result<(), duckdb::Error> {
     if !is_valid_custom_name(name) {
         return Err(duckdb::Error::InvalidParameterName(format!(
             "nom de dimension invalide : {name:?} (alphanum + underscore, 1-50 caractères, \
@@ -252,10 +290,18 @@ pub fn create_custom(con: &Connection, name: &str, label: &str) -> Result<(), du
             "dimension custom déjà existante : {name}"
         )));
     }
+    // Valider que la dimension cible a une master data (si fournie).
+    if let Some(target) = target_dimension {
+        if references::dimension_master(target).is_none() {
+            return Err(duckdb::Error::InvalidParameterName(format!(
+                "dimension cible sans master data : {target}"
+            )));
+        }
+    }
     // INSERT d'abord : la séquence alloue l'id.
     con.execute(
-        "INSERT INTO dim_custom_dimension (name, label) VALUES (?, ?)",
-        &[&name, &label],
+        "INSERT INTO dim_custom_dimension (name, label, target_dimension) VALUES (?, ?, ?)",
+        duckdb::params![name, label, target_dimension],
     )?;
     // Lire l'id obtenu pour nommer la colonne physique.
     let id: i64 = con.query_row(
@@ -419,4 +465,56 @@ pub fn apply_custom_columns(con: &Connection, customs: &[DimDef]) -> Result<(), 
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> Connection {
+        let con = Connection::open_in_memory().expect("open_in_memory");
+        crate::schema::create_schema(&con).expect("create_schema");
+        con
+    }
+
+    #[test]
+    fn create_custom_libre_ok() {
+        let con = setup();
+        create_custom(&con, "region", "Région", None).unwrap();
+        let customs = load_customs(&con).unwrap();
+        assert_eq!(customs.len(), 1);
+        assert_eq!(customs[0].name, "region");
+        assert_eq!(customs[0].target_dimension, None);
+    }
+
+    #[test]
+    fn create_custom_empruntee_ok() {
+        let con = setup();
+        create_custom(&con, "devise_tx", "Devise transaction", Some("currency")).unwrap();
+        let customs = load_customs(&con).unwrap();
+        assert_eq!(customs.len(), 1);
+        assert_eq!(customs[0].target_dimension.as_deref(), Some("currency"));
+    }
+
+    #[test]
+    fn create_custom_cible_invalide_erreur() {
+        let con = setup();
+        let err = create_custom(&con, "x", "X", Some("inexistant"));
+        assert!(err.is_err(), "dimension cible inexistante doit échouer");
+    }
+
+    #[test]
+    fn dynamic_references_empruntee() {
+        let con = setup();
+        create_custom(&con, "devise_tx", "Devise transaction", Some("currency")).unwrap();
+        let customs = load_customs(&con).unwrap();
+        let col = &customs[0].col; // "x{id}"
+        let refs = references::dynamic_references(&con);
+        assert!(
+            refs.iter().any(|r| r.table == "stg_entry"
+                && r.column == *col
+                && r.target_table == "dim_currency"),
+            "la dimension empruntée doit avoir une référence dans le graphe"
+        );
+    }
 }

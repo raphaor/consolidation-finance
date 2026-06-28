@@ -133,7 +133,8 @@ async fn import_all(
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| AppError::bad_request("dim_custom_dimension.name manquant"))?;
                 let label = c.get("label").and_then(|v| v.as_str()).unwrap_or(name);
-                dimensions::create_custom(&con, name, label).map_err(db_err)?;
+                let target = c.get("target_dimension").and_then(|v| v.as_str());
+                dimensions::create_custom(&con, name, label, target).map_err(db_err)?;
             }
         }
 

@@ -675,7 +675,7 @@ mod tests {
             create_list(&con, "account", "X").is_err(),
             "account est une dimension"
         );
-        crate::dimensions::create_custom(&con, "secteur", "Secteur").unwrap();
+        crate::dimensions::create_custom(&con, "secteur", "Secteur", None).unwrap();
         assert!(
             create_list(&con, "secteur", "X").is_err(),
             "secteur est une dimension custom"

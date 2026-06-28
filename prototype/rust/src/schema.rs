@@ -380,8 +380,9 @@ CREATE TABLE dim_ruleset_item (
 /// après re-création du schéma.
 pub const DDL_DIM_CUSTOM_DIMENSION: &str = "\
 CREATE TABLE IF NOT EXISTS dim_custom_dimension (
-    name  TEXT PRIMARY KEY,
-    label TEXT NOT NULL
+    name              TEXT PRIMARY KEY,
+    label             TEXT NOT NULL,
+    target_dimension  TEXT
 );";
 
 /// 8f. dim_characteristic : registre des **caractéristiques N1** (regroupements).

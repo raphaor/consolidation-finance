@@ -455,6 +455,29 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
         }
     }
 
+    // Dimensions custom empruntées (§11) : x{id} → master data de la cible.
+    if let Ok(mut stmt) = con.prepare(
+        "SELECT id, target_dimension FROM dim_custom_dimension \
+         WHERE target_dimension IS NOT NULL",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        }) {
+            for (id, target) in rows.flatten() {
+                if let Some((tt, tc)) = dimension_master(&target) {
+                    out.push(OwnedReference {
+                        table: "stg_entry".to_string(),
+                        column: format!("x{id}"),
+                        target_table: tt.to_string(),
+                        target_column: tc.to_string(),
+                        target_display_column: None,
+                        required: false,
+                    });
+                }
+            }
+        }
+    }
+
     out
 }
 
