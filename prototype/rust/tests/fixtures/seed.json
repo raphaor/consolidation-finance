@@ -18,7 +18,7 @@
     {
       "classe": "bilan",
       "code": "1",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 1,
       "libelle": "COMPTES DE CAPITAUX",
@@ -28,7 +28,7 @@
     {
       "classe": "bilan",
       "code": "10",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": "capitaux_propres",
       "id": 2,
       "libelle": "Capital et réserves",
@@ -38,7 +38,7 @@
     {
       "classe": "bilan",
       "code": "101",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 3,
       "libelle": "Capital",
@@ -48,7 +48,7 @@
     {
       "classe": "bilan",
       "code": "102",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 4,
       "libelle": "Fonds fiduciaires",
@@ -58,7 +58,7 @@
     {
       "classe": "bilan",
       "code": "104",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 5,
       "libelle": "Primes liées au capital",
@@ -68,7 +68,7 @@
     {
       "classe": "bilan",
       "code": "105",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 6,
       "libelle": "Écarts de réévaluation",
@@ -78,7 +78,7 @@
     {
       "classe": "bilan",
       "code": "106",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 7,
       "libelle": "Réserves",
@@ -88,7 +88,7 @@
     {
       "classe": "bilan",
       "code": "107",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 8,
       "libelle": "Écart d'équivalence",
@@ -98,7 +98,7 @@
     {
       "classe": "bilan",
       "code": "108",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 9,
       "libelle": "Compte de l'exploitant",
@@ -108,7 +108,7 @@
     {
       "classe": "bilan",
       "code": "109",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 10,
       "libelle": "Actionnaires : capital souscrit - non appelé",
@@ -118,7 +118,7 @@
     {
       "classe": "bilan",
       "code": "11",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 11,
       "libelle": "Report à nouveau",
@@ -128,7 +128,7 @@
     {
       "classe": "bilan",
       "code": "110",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 12,
       "libelle": "Report à nouveau - solde créditeur",
@@ -138,7 +138,7 @@
     {
       "classe": "bilan",
       "code": "110G",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 13,
       "libelle": "Report à nouveau - part du Groupe",
@@ -148,7 +148,7 @@
     {
       "classe": "bilan",
       "code": "110M",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 14,
       "libelle": "Report à nouveau - intérêts minoritaires",
@@ -158,7 +158,7 @@
     {
       "classe": "bilan",
       "code": "110C",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 15,
       "libelle": "Report à nouveau - écarts de conversion",
@@ -168,7 +168,7 @@
     {
       "classe": "bilan",
       "code": "110CG",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 16,
       "libelle": "Report à nouveau - écarts de conversion - part du Groupe",
@@ -178,7 +178,7 @@
     {
       "classe": "bilan",
       "code": "110CM",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 17,
       "libelle": "Report à nouveau - écarts de conversion - intérêt minoritaires",
@@ -188,7 +188,7 @@
     {
       "classe": "bilan",
       "code": "12",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 18,
       "libelle": "Résultat de l'exercice",
@@ -198,7 +198,7 @@
     {
       "classe": "bilan",
       "code": "120",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 19,
       "libelle": "Résultat de l'exercice - bénéfice",
@@ -208,7 +208,7 @@
     {
       "classe": "bilan",
       "code": "1209",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 20,
       "libelle": "Acomptes sur dividendes",
@@ -218,7 +218,7 @@
     {
       "classe": "bilan",
       "code": "120G",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 21,
       "libelle": "Résultat de l'exercice - part du Groupe",
@@ -228,7 +228,7 @@
     {
       "classe": "bilan",
       "code": "120M",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 22,
       "libelle": "Résultat de l'exercice - intérêts minoritaires",
@@ -238,7 +238,7 @@
     {
       "classe": "bilan",
       "code": "120C",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 23,
       "libelle": "Résultat de l'exercice - écarts de conversion",
@@ -248,7 +248,7 @@
     {
       "classe": "bilan",
       "code": "120CG",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 24,
       "libelle": "Résultat de l'exercice - écarts de conversion - part du Groupe",
@@ -258,7 +258,7 @@
     {
       "classe": "bilan",
       "code": "120CM",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 25,
       "libelle": "Résultat de l'exercice - écarts de conversion - intérêts minoritaires",
@@ -268,7 +268,7 @@
     {
       "classe": "bilan",
       "code": "13",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 26,
       "libelle": "Subventions d'investissement",
@@ -278,7 +278,7 @@
     {
       "classe": "bilan",
       "code": "131",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 27,
       "libelle": "Subventions d'investissement octroyées",
@@ -288,7 +288,7 @@
     {
       "classe": "bilan",
       "code": "139",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 28,
       "libelle": "Subventions d'investissement inscrites au compte de résultat",
@@ -298,7 +298,7 @@
     {
       "classe": "bilan",
       "code": "14",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 29,
       "libelle": "Provisions réglementées",
@@ -308,7 +308,7 @@
     {
       "classe": "bilan",
       "code": "143",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 30,
       "libelle": "Provisions réglementées pour hausse de prix",
@@ -318,7 +318,7 @@
     {
       "classe": "bilan",
       "code": "145",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 31,
       "libelle": "Amortissements dérogatoires",
@@ -328,7 +328,7 @@
     {
       "classe": "bilan",
       "code": "148",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 32,
       "libelle": "Autres provisions réglementées",
@@ -338,7 +338,7 @@
     {
       "classe": "bilan",
       "code": "15",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 33,
       "libelle": "Provisions",
@@ -348,7 +348,7 @@
     {
       "classe": "bilan",
       "code": "151",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 34,
       "libelle": "Provisions pour risques",
@@ -358,7 +358,7 @@
     {
       "classe": "bilan",
       "code": "152",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 35,
       "libelle": "Provisions pour charges",
@@ -368,7 +368,7 @@
     {
       "classe": "bilan",
       "code": "153",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 36,
       "libelle": "Provisions sur titres consolidés",
@@ -378,7 +378,7 @@
     {
       "classe": "bilan",
       "code": "16",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 37,
       "libelle": "Emprunts et dettes assimilées, fonds non remboursables et avances conditionnées",
@@ -388,7 +388,7 @@
     {
       "classe": "bilan",
       "code": "161",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 38,
       "libelle": "Emprunts obligataires convertibles si non-inscrits dans le compte 167",
@@ -398,7 +398,7 @@
     {
       "classe": "bilan",
       "code": "162",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 39,
       "libelle": "Obligations représentatives de passifs nets remis en fiducie si non-inscrites dans le compte 167",
@@ -408,7 +408,7 @@
     {
       "classe": "bilan",
       "code": "163",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 40,
       "libelle": "Autres emprunts obligataires si non-inscrits dans le compte 167",
@@ -418,7 +418,7 @@
     {
       "classe": "bilan",
       "code": "164",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 41,
       "libelle": "Emprunts auprès des établissements de crédit si non-inscrits dans le compte 167",
@@ -428,7 +428,7 @@
     {
       "classe": "bilan",
       "code": "165",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 42,
       "libelle": "Dépôts et cautionnements reçus",
@@ -438,7 +438,7 @@
     {
       "classe": "bilan",
       "code": "166",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 43,
       "libelle": "Participation des salariés aux résultats",
@@ -448,7 +448,7 @@
     {
       "classe": "bilan",
       "code": "167",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 44,
       "libelle": "Fonds non remboursables et avances conditionnées",
@@ -458,7 +458,7 @@
     {
       "classe": "bilan",
       "code": "168",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 45,
       "libelle": "Autres emprunts et dettes assimilées",
@@ -468,7 +468,7 @@
     {
       "classe": "bilan",
       "code": "169",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 46,
       "libelle": "Primes de remboursement des emprunts",
@@ -478,7 +478,7 @@
     {
       "classe": "bilan",
       "code": "17",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 47,
       "libelle": "Dettes rattachées à des participations",
@@ -488,7 +488,7 @@
     {
       "classe": "bilan",
       "code": "171",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 48,
       "libelle": "Dettes rattachées à des participations - groupe",
@@ -498,7 +498,7 @@
     {
       "classe": "bilan",
       "code": "174",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 49,
       "libelle": "Dettes rattachées à des participations - hors groupe",
@@ -508,7 +508,7 @@
     {
       "classe": "bilan",
       "code": "178",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 50,
       "libelle": "Dettes rattachées à des sociétés en participation",
@@ -518,7 +518,7 @@
     {
       "classe": "bilan",
       "code": "18",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 51,
       "libelle": "Comptes de liaison des établissements et sociétés en participation",
@@ -528,7 +528,7 @@
     {
       "classe": "bilan",
       "code": "181",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 52,
       "libelle": "Comptes de liaison des établissements",
@@ -538,7 +538,7 @@
     {
       "classe": "bilan",
       "code": "186",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 53,
       "libelle": "Biens et prestations de services échangés entre établissements - charges",
@@ -548,7 +548,7 @@
     {
       "classe": "bilan",
       "code": "187",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 54,
       "libelle": "Biens et prestations de services échangés entre établissements - produits",
@@ -558,7 +558,7 @@
     {
       "classe": "bilan",
       "code": "188",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 55,
       "libelle": "Comptes de liaison des sociétés en participation",
@@ -568,7 +568,7 @@
     {
       "classe": "bilan",
       "code": "2",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 56,
       "libelle": "COMPTES D'IMMOBILISATIONS",
@@ -578,7 +578,7 @@
     {
       "classe": "bilan",
       "code": "20",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 57,
       "libelle": "Immobilisations incorporelles et frais d'établissement",
@@ -588,7 +588,7 @@
     {
       "classe": "bilan",
       "code": "201",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 58,
       "libelle": "Frais d'établissement",
@@ -598,7 +598,7 @@
     {
       "classe": "bilan",
       "code": "203",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 59,
       "libelle": "Frais de développement",
@@ -608,7 +608,7 @@
     {
       "classe": "bilan",
       "code": "205",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 60,
       "libelle": "Concessions et droits similaires, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",
@@ -618,7 +618,7 @@
     {
       "classe": "bilan",
       "code": "206",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 61,
       "libelle": "Droit au bail",
@@ -628,7 +628,7 @@
     {
       "classe": "bilan",
       "code": "207",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 62,
       "libelle": "Fonds commercial",
@@ -638,7 +638,7 @@
     {
       "classe": "bilan",
       "code": "208",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 63,
       "libelle": "Autres immobilisations incorporelles",
@@ -648,7 +648,7 @@
     {
       "classe": "bilan",
       "code": "21",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 64,
       "libelle": "Immobilisations corporelles",
@@ -658,7 +658,7 @@
     {
       "classe": "bilan",
       "code": "211",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 65,
       "libelle": "Terrains",
@@ -668,7 +668,7 @@
     {
       "classe": "bilan",
       "code": "212",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 66,
       "libelle": "Agencements et aménagements de terrains",
@@ -678,7 +678,7 @@
     {
       "classe": "bilan",
       "code": "213",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 67,
       "libelle": "Constructions",
@@ -688,7 +688,7 @@
     {
       "classe": "bilan",
       "code": "214",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 68,
       "libelle": "Constructions sur sol d'autrui",
@@ -698,7 +698,7 @@
     {
       "classe": "bilan",
       "code": "215",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 69,
       "libelle": "Installations techniques, matériels et outillages industriels",
@@ -708,7 +708,7 @@
     {
       "classe": "bilan",
       "code": "218",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 70,
       "libelle": "Autres immobilisations corporelles",
@@ -718,7 +718,7 @@
     {
       "classe": "bilan",
       "code": "22",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 71,
       "libelle": "Immobilisations mises en concession",
@@ -728,7 +728,7 @@
     {
       "classe": "bilan",
       "code": "229",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 72,
       "libelle": "Droits du concédant",
@@ -738,7 +738,7 @@
     {
       "classe": "bilan",
       "code": "23",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 73,
       "libelle": "Immobilisations en cours, avances et acomptes",
@@ -748,7 +748,7 @@
     {
       "classe": "bilan",
       "code": "231",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 74,
       "libelle": "Immobilisations corporelles en cours",
@@ -758,7 +758,7 @@
     {
       "classe": "bilan",
       "code": "232",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 75,
       "libelle": "Immobilisations incorporelles en cours",
@@ -768,7 +768,7 @@
     {
       "classe": "bilan",
       "code": "237",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 76,
       "libelle": "Avances et acomptes versés sur commandes d'immobilisations incorporelles",
@@ -778,7 +778,7 @@
     {
       "classe": "bilan",
       "code": "238",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 77,
       "libelle": "Avances et acomptes versés sur commandes d'immobilisations corporelles",
@@ -788,7 +788,7 @@
     {
       "classe": "bilan",
       "code": "26",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 78,
       "libelle": "Participations et créances rattachées à des participations",
@@ -798,7 +798,7 @@
     {
       "classe": "bilan",
       "code": "261",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 79,
       "libelle": "Titres de participation",
@@ -808,7 +808,7 @@
     {
       "classe": "bilan",
       "code": "262",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 80,
       "libelle": "Titres évalués par équivalence",
@@ -818,7 +818,7 @@
     {
       "classe": "bilan",
       "code": "266",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 81,
       "libelle": "Autres formes de participation",
@@ -828,7 +828,7 @@
     {
       "classe": "bilan",
       "code": "267",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 82,
       "libelle": "Créances rattachées à des participations",
@@ -838,7 +838,7 @@
     {
       "classe": "bilan",
       "code": "268",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 83,
       "libelle": "Créances rattachées à des sociétés en participation",
@@ -848,7 +848,7 @@
     {
       "classe": "bilan",
       "code": "269",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 84,
       "libelle": "Versements restant à effectuer sur titres de participation non libérés",
@@ -858,7 +858,7 @@
     {
       "classe": "bilan",
       "code": "27",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 85,
       "libelle": "Autres immobilisations financières",
@@ -868,7 +868,7 @@
     {
       "classe": "bilan",
       "code": "271",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 86,
       "libelle": "Titres immobilisés autres que les titres immobilisés de l'activité de portefeuille",
@@ -878,7 +878,7 @@
     {
       "classe": "bilan",
       "code": "272",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 87,
       "libelle": "Titres immobilisés (droit de créance)",
@@ -888,7 +888,7 @@
     {
       "classe": "bilan",
       "code": "273",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 88,
       "libelle": "Titres immobilisés de l'activité de portefeuille",
@@ -898,7 +898,7 @@
     {
       "classe": "bilan",
       "code": "274",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 89,
       "libelle": "Prêts",
@@ -908,7 +908,7 @@
     {
       "classe": "bilan",
       "code": "275",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 90,
       "libelle": "Dépôts et cautionnements versés",
@@ -918,7 +918,7 @@
     {
       "classe": "bilan",
       "code": "276",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 91,
       "libelle": "Autres créances immobilisées",
@@ -928,7 +928,7 @@
     {
       "classe": "bilan",
       "code": "277",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 92,
       "libelle": "Actions propres ou parts propres",
@@ -938,7 +938,7 @@
     {
       "classe": "bilan",
       "code": "278",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 93,
       "libelle": "Mali de fusion sur actifs financiers",
@@ -948,7 +948,7 @@
     {
       "classe": "bilan",
       "code": "279",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 94,
       "libelle": "Versements restant à effectuer sur titres immobilisés non libérés",
@@ -958,7 +958,7 @@
     {
       "classe": "bilan",
       "code": "28",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 95,
       "libelle": "Amortissements des immobilisations",
@@ -968,7 +968,7 @@
     {
       "classe": "bilan",
       "code": "280",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 96,
       "libelle": "Amortissements des immobilisations incorporelles et des frais d'établissement",
@@ -978,7 +978,7 @@
     {
       "classe": "bilan",
       "code": "281",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 97,
       "libelle": "Amortissements des immobilisations corporelles",
@@ -988,7 +988,7 @@
     {
       "classe": "bilan",
       "code": "282",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 98,
       "libelle": "Amortissements des immobilisations mises en concession",
@@ -998,7 +998,7 @@
     {
       "classe": "bilan",
       "code": "29",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 99,
       "libelle": "Dépréciations des immobilisations",
@@ -1008,7 +1008,7 @@
     {
       "classe": "bilan",
       "code": "290",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 100,
       "libelle": "Dépréciations des immobilisations incorporelles",
@@ -1018,7 +1018,7 @@
     {
       "classe": "bilan",
       "code": "291",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 101,
       "libelle": "Dépréciations des immobilisations corporelles",
@@ -1028,7 +1028,7 @@
     {
       "classe": "bilan",
       "code": "292",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 102,
       "libelle": "Dépréciations des immobilisations mises en concession",
@@ -1038,7 +1038,7 @@
     {
       "classe": "bilan",
       "code": "293",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 103,
       "libelle": "Dépréciations des immobilisations en cours",
@@ -1048,7 +1048,7 @@
     {
       "classe": "bilan",
       "code": "296",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 104,
       "libelle": "Dépréciations des participations et créances rattachées à des participations",
@@ -1058,7 +1058,7 @@
     {
       "classe": "bilan",
       "code": "297",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 105,
       "libelle": "Dépréciations des autres immobilisations financières",
@@ -1068,7 +1068,7 @@
     {
       "classe": "bilan",
       "code": "3",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 106,
       "libelle": "COMPTES DE STOCKS ET EN-COURS",
@@ -1078,7 +1078,7 @@
     {
       "classe": "bilan",
       "code": "31",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 107,
       "libelle": "Matières premières et fournitures",
@@ -1088,7 +1088,7 @@
     {
       "classe": "bilan",
       "code": "32",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 108,
       "libelle": "Autres approvisionnements",
@@ -1098,7 +1098,7 @@
     {
       "classe": "bilan",
       "code": "321",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 109,
       "libelle": "Matières consommables",
@@ -1108,7 +1108,7 @@
     {
       "classe": "bilan",
       "code": "322",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 110,
       "libelle": "Fournitures consommables",
@@ -1118,7 +1118,7 @@
     {
       "classe": "bilan",
       "code": "326",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 111,
       "libelle": "Emballages",
@@ -1128,7 +1128,7 @@
     {
       "classe": "bilan",
       "code": "33",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 112,
       "libelle": "En-cours de production de biens",
@@ -1138,7 +1138,7 @@
     {
       "classe": "bilan",
       "code": "331",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 113,
       "libelle": "Produits en cours",
@@ -1148,7 +1148,7 @@
     {
       "classe": "bilan",
       "code": "335",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 114,
       "libelle": "Travaux en cours",
@@ -1158,7 +1158,7 @@
     {
       "classe": "bilan",
       "code": "34",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 115,
       "libelle": "En-cours de production de services",
@@ -1168,7 +1168,7 @@
     {
       "classe": "bilan",
       "code": "341",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 116,
       "libelle": "Études en cours",
@@ -1178,7 +1178,7 @@
     {
       "classe": "bilan",
       "code": "345",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 117,
       "libelle": "Prestations de services en cours",
@@ -1188,7 +1188,7 @@
     {
       "classe": "bilan",
       "code": "35",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 118,
       "libelle": "Stocks de produits",
@@ -1198,7 +1198,7 @@
     {
       "classe": "bilan",
       "code": "351",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 119,
       "libelle": "Produits intermédiaires",
@@ -1208,7 +1208,7 @@
     {
       "classe": "bilan",
       "code": "355",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 120,
       "libelle": "Produits finis",
@@ -1218,7 +1218,7 @@
     {
       "classe": "bilan",
       "code": "358",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 121,
       "libelle": "Produits résiduels ou matières de récupération",
@@ -1228,7 +1228,7 @@
     {
       "classe": "bilan",
       "code": "36",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 122,
       "libelle": "Stocks provenant d'immobilisations",
@@ -1238,7 +1238,7 @@
     {
       "classe": "bilan",
       "code": "37",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 123,
       "libelle": "Stocks de marchandises",
@@ -1248,7 +1248,7 @@
     {
       "classe": "bilan",
       "code": "38",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 124,
       "libelle": "Stocks en voie d'acheminement, mis en dépôt ou donnés en consignation",
@@ -1258,7 +1258,7 @@
     {
       "classe": "bilan",
       "code": "39",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 125,
       "libelle": "Dépréciations des stocks et en-cours",
@@ -1268,7 +1268,7 @@
     {
       "classe": "bilan",
       "code": "4P",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 126,
       "libelle": "COMPTES DE TIERS - PASSIF",
@@ -1278,7 +1278,7 @@
     {
       "classe": "bilan",
       "code": "4A",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 127,
       "libelle": "COMPTES DE TIERS - ACTIF",
@@ -1288,7 +1288,7 @@
     {
       "classe": "bilan",
       "code": "40",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 128,
       "libelle": "Fournisseurs et comptes rattachés",
@@ -1298,7 +1298,7 @@
     {
       "classe": "bilan",
       "code": "401",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 129,
       "libelle": "Fournisseurs",
@@ -1308,7 +1308,7 @@
     {
       "classe": "bilan",
       "code": "403",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 130,
       "libelle": "Fournisseurs - Effets à payer",
@@ -1318,7 +1318,7 @@
     {
       "classe": "bilan",
       "code": "404",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 131,
       "libelle": "Fournisseurs d'immobilisations",
@@ -1328,7 +1328,7 @@
     {
       "classe": "bilan",
       "code": "405",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 132,
       "libelle": "Fournisseurs d'immobilisations - Effets à payer",
@@ -1338,7 +1338,7 @@
     {
       "classe": "bilan",
       "code": "408",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 133,
       "libelle": "Fournisseurs - Factures non parvenues",
@@ -1348,7 +1348,7 @@
     {
       "classe": "bilan",
       "code": "409",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 134,
       "libelle": "Fournisseurs débiteurs",
@@ -1358,7 +1358,7 @@
     {
       "classe": "bilan",
       "code": "41",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 135,
       "libelle": "Clients et comptes rattachés",
@@ -1368,7 +1368,7 @@
     {
       "classe": "bilan",
       "code": "411",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 136,
       "libelle": "Clients",
@@ -1378,7 +1378,7 @@
     {
       "classe": "bilan",
       "code": "413",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 137,
       "libelle": "Clients - Effets à recevoir",
@@ -1388,7 +1388,7 @@
     {
       "classe": "bilan",
       "code": "416",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 138,
       "libelle": "Clients douteux ou litigieux",
@@ -1398,7 +1398,7 @@
     {
       "classe": "bilan",
       "code": "418",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 139,
       "libelle": "Clients - Produits non encore facturés",
@@ -1408,7 +1408,7 @@
     {
       "classe": "bilan",
       "code": "419",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 140,
       "libelle": "Clients créditeurs",
@@ -1418,7 +1418,7 @@
     {
       "classe": "bilan",
       "code": "42",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 141,
       "libelle": "Personnel et comptes rattachés",
@@ -1428,7 +1428,7 @@
     {
       "classe": "bilan",
       "code": "421",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 142,
       "libelle": "Personnel - Rémunérations dues",
@@ -1438,7 +1438,7 @@
     {
       "classe": "bilan",
       "code": "422",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 143,
       "libelle": "Comité social et économique",
@@ -1448,7 +1448,7 @@
     {
       "classe": "bilan",
       "code": "424",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 144,
       "libelle": "Participation des salariés aux résultats",
@@ -1458,7 +1458,7 @@
     {
       "classe": "bilan",
       "code": "425",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 145,
       "libelle": "Personnel - Avances et acomptes et autres comptes débiteurs",
@@ -1468,7 +1468,7 @@
     {
       "classe": "bilan",
       "code": "426",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 146,
       "libelle": "Personnel - Dépôts",
@@ -1478,7 +1478,7 @@
     {
       "classe": "bilan",
       "code": "427",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 147,
       "libelle": "Personnel - Oppositions",
@@ -1488,7 +1488,7 @@
     {
       "classe": "bilan",
       "code": "428",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 148,
       "libelle": "Personnel - Charges à payer",
@@ -1498,7 +1498,7 @@
     {
       "classe": "bilan",
       "code": "43",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 149,
       "libelle": "Sécurité sociale et autres organismes sociaux",
@@ -1508,7 +1508,7 @@
     {
       "classe": "bilan",
       "code": "431",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 150,
       "libelle": "Sécurité sociale",
@@ -1518,7 +1518,7 @@
     {
       "classe": "bilan",
       "code": "437",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 151,
       "libelle": "Autres organismes sociaux",
@@ -1528,7 +1528,7 @@
     {
       "classe": "bilan",
       "code": "438",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 152,
       "libelle": "Organismes sociaux - Charges à payer",
@@ -1538,7 +1538,7 @@
     {
       "classe": "bilan",
       "code": "439",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 153,
       "libelle": "Organismes sociaux - Produits à recevoir",
@@ -1548,7 +1548,7 @@
     {
       "classe": "bilan",
       "code": "44",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 154,
       "libelle": "État et autres collectivités publiques",
@@ -1558,7 +1558,7 @@
     {
       "classe": "bilan",
       "code": "441",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 155,
       "libelle": "État - Subventions et aides à recevoir",
@@ -1568,7 +1568,7 @@
     {
       "classe": "bilan",
       "code": "442",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 156,
       "libelle": "Contributions, impôts et taxes recouvrés pour le compte de l'État",
@@ -1578,7 +1578,7 @@
     {
       "classe": "bilan",
       "code": "444",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 157,
       "libelle": "État - Impôts sur les bénéfices",
@@ -1588,7 +1588,7 @@
     {
       "classe": "bilan",
       "code": "445",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 158,
       "libelle": "État - Taxes sur le chiffre d'affaires",
@@ -1598,7 +1598,7 @@
     {
       "classe": "bilan",
       "code": "446",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 159,
       "libelle": "Obligations cautionnées",
@@ -1608,7 +1608,7 @@
     {
       "classe": "bilan",
       "code": "447",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 160,
       "libelle": "Autres impôts, taxes et versements assimilés",
@@ -1618,7 +1618,7 @@
     {
       "classe": "bilan",
       "code": "448",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 161,
       "libelle": "État - Charges à payer et produits à recevoir",
@@ -1628,7 +1628,7 @@
     {
       "classe": "bilan",
       "code": "449",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 162,
       "libelle": "Quotas d'émission à acquérir",
@@ -1638,7 +1638,7 @@
     {
       "classe": "bilan",
       "code": "45",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 163,
       "libelle": "Groupe et associés",
@@ -1648,7 +1648,7 @@
     {
       "classe": "bilan",
       "code": "451",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 164,
       "libelle": "Groupe",
@@ -1658,7 +1658,7 @@
     {
       "classe": "bilan",
       "code": "455",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 165,
       "libelle": "Associés - Comptes courants",
@@ -1668,7 +1668,7 @@
     {
       "classe": "bilan",
       "code": "456",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 166,
       "libelle": "Associés - Opérations sur le capital",
@@ -1678,7 +1678,7 @@
     {
       "classe": "bilan",
       "code": "457",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 167,
       "libelle": "Associés - Dividendes à payer",
@@ -1688,7 +1688,7 @@
     {
       "classe": "bilan",
       "code": "458",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 168,
       "libelle": "Associés - Opérations faites en commun et en GIE",
@@ -1698,7 +1698,7 @@
     {
       "classe": "bilan",
       "code": "46",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 169,
       "libelle": "Débiteurs divers et créditeurs divers",
@@ -1708,7 +1708,7 @@
     {
       "classe": "bilan",
       "code": "462",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 170,
       "libelle": "Créances sur cessions d'immobilisations",
@@ -1718,7 +1718,7 @@
     {
       "classe": "bilan",
       "code": "464",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 171,
       "libelle": "Dettes sur acquisitions de valeurs mobilières de placement",
@@ -1728,7 +1728,7 @@
     {
       "classe": "bilan",
       "code": "465",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 172,
       "libelle": "Créances sur cessions de valeurs mobilières de placement",
@@ -1738,7 +1738,7 @@
     {
       "classe": "bilan",
       "code": "467",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 173,
       "libelle": "Divers comptes débiteurs et produits à recevoir",
@@ -1748,7 +1748,7 @@
     {
       "classe": "bilan",
       "code": "468",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 174,
       "libelle": "Divers comptes créditeurs et charges à payer",
@@ -1758,7 +1758,7 @@
     {
       "classe": "bilan",
       "code": "47",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 175,
       "libelle": "Comptes transitoires ou d'attente",
@@ -1768,7 +1768,7 @@
     {
       "classe": "bilan",
       "code": "471",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 176,
       "libelle": "Comptes d'attente",
@@ -1778,7 +1778,7 @@
     {
       "classe": "bilan",
       "code": "471L",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 177,
       "libelle": "Compte de Liaison Bilan",
@@ -1788,7 +1788,7 @@
     {
       "classe": "bilan",
       "code": "472",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 178,
       "libelle": "Comptes d'attente",
@@ -1798,7 +1798,7 @@
     {
       "classe": "bilan",
       "code": "473",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 179,
       "libelle": "Comptes d'attente",
@@ -1808,7 +1808,7 @@
     {
       "classe": "bilan",
       "code": "474",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 180,
       "libelle": "Différences d'évaluation – Actif",
@@ -1818,7 +1818,7 @@
     {
       "classe": "bilan",
       "code": "475",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 181,
       "libelle": "Différences d'évaluation – Passif",
@@ -1828,7 +1828,7 @@
     {
       "classe": "bilan",
       "code": "476",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 182,
       "libelle": "Différence de conversion - Actif",
@@ -1838,7 +1838,7 @@
     {
       "classe": "bilan",
       "code": "477",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 183,
       "libelle": "Différences de conversion - Passif",
@@ -1848,7 +1848,7 @@
     {
       "classe": "bilan",
       "code": "478",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 184,
       "libelle": "Autres comptes transitoires",
@@ -1858,7 +1858,7 @@
     {
       "classe": "bilan",
       "code": "48",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 185,
       "libelle": "Comptes de régularisation",
@@ -1868,7 +1868,7 @@
     {
       "classe": "bilan",
       "code": "481",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 186,
       "libelle": "Frais d'émission des emprunts",
@@ -1878,7 +1878,7 @@
     {
       "classe": "bilan",
       "code": "486",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 187,
       "libelle": "Charges constatées d'avance",
@@ -1888,7 +1888,7 @@
     {
       "classe": "bilan",
       "code": "487",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 188,
       "libelle": "Produits constatés d'avance",
@@ -1898,7 +1898,7 @@
     {
       "classe": "bilan",
       "code": "488",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 189,
       "libelle": "Comptes de répartition périodique des charges et des produits",
@@ -1908,7 +1908,7 @@
     {
       "classe": "bilan",
       "code": "49",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 190,
       "libelle": "Dépréciations des comptes de tiers",
@@ -1918,7 +1918,7 @@
     {
       "classe": "bilan",
       "code": "491",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 191,
       "libelle": "Dépréciations des comptes de clients",
@@ -1928,7 +1928,7 @@
     {
       "classe": "bilan",
       "code": "495",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 192,
       "libelle": "Dépréciations des comptes du groupe et des associés",
@@ -1938,7 +1938,7 @@
     {
       "classe": "bilan",
       "code": "496",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 193,
       "libelle": "Dépréciations des comptes de débiteurs divers",
@@ -1948,7 +1948,7 @@
     {
       "classe": "bilan",
       "code": "5",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 194,
       "libelle": "COMPTES FINANCIERS",
@@ -1958,7 +1958,7 @@
     {
       "classe": "bilan",
       "code": "50",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 195,
       "libelle": "Valeurs mobilières de placement",
@@ -1968,7 +1968,7 @@
     {
       "classe": "bilan",
       "code": "502",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 196,
       "libelle": "Actions propres",
@@ -1978,7 +1978,7 @@
     {
       "classe": "bilan",
       "code": "503",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 197,
       "libelle": "Actions",
@@ -1988,7 +1988,7 @@
     {
       "classe": "bilan",
       "code": "504",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 198,
       "libelle": "Autres titres conférant un droit de propriété",
@@ -1998,7 +1998,7 @@
     {
       "classe": "bilan",
       "code": "505",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 199,
       "libelle": "Obligations et bons émis par la société et rachetés par elle",
@@ -2008,7 +2008,7 @@
     {
       "classe": "bilan",
       "code": "506",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 200,
       "libelle": "Obligations",
@@ -2018,7 +2018,7 @@
     {
       "classe": "bilan",
       "code": "507",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 201,
       "libelle": "Bons du Trésor et bons de caisse à court terme",
@@ -2028,7 +2028,7 @@
     {
       "classe": "bilan",
       "code": "508",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 202,
       "libelle": "Autres valeurs mobilières de placement et autres créances assimilées",
@@ -2038,7 +2038,7 @@
     {
       "classe": "bilan",
       "code": "509",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 203,
       "libelle": "Versements restant à effectuer sur valeurs mobilières de placement non libérées",
@@ -2048,7 +2048,7 @@
     {
       "classe": "bilan",
       "code": "51",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 204,
       "libelle": "Banques, établissements financiers et assimilés",
@@ -2058,7 +2058,7 @@
     {
       "classe": "bilan",
       "code": "511",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 205,
       "libelle": "Valeurs à l'encaissement",
@@ -2068,7 +2068,7 @@
     {
       "classe": "bilan",
       "code": "512",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 206,
       "libelle": "Banques",
@@ -2078,7 +2078,7 @@
     {
       "classe": "bilan",
       "code": "517",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 207,
       "libelle": "Autres organismes financiers",
@@ -2088,7 +2088,7 @@
     {
       "classe": "bilan",
       "code": "518",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 208,
       "libelle": "Intérêts courus",
@@ -2098,7 +2098,7 @@
     {
       "classe": "bilan",
       "code": "519",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 209,
       "libelle": "Concours bancaires courants",
@@ -2108,7 +2108,7 @@
     {
       "classe": "bilan",
       "code": "52",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 210,
       "libelle": "Instruments financiers à terme et jetons détenus",
@@ -2118,7 +2118,7 @@
     {
       "classe": "bilan",
       "code": "521",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 211,
       "libelle": "Instruments financiers à terme",
@@ -2128,7 +2128,7 @@
     {
       "classe": "bilan",
       "code": "522",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 212,
       "libelle": "Jetons détenus",
@@ -2138,7 +2138,7 @@
     {
       "classe": "bilan",
       "code": "523",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 213,
       "libelle": "Jetons auto-détenus",
@@ -2148,7 +2148,7 @@
     {
       "classe": "bilan",
       "code": "524",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 214,
       "libelle": "Jetons empruntés",
@@ -2158,7 +2158,7 @@
     {
       "classe": "bilan",
       "code": "53",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 215,
       "libelle": "Caisse",
@@ -2168,7 +2168,7 @@
     {
       "classe": "bilan",
       "code": "58",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 216,
       "libelle": "Virements internes",
@@ -2178,7 +2178,7 @@
     {
       "classe": "bilan",
       "code": "59",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 217,
       "libelle": "Dépréciations des comptes financiers",
@@ -2188,7 +2188,7 @@
     {
       "classe": "bilan",
       "code": "590",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 218,
       "libelle": "Dépréciations des valeurs mobilières de placement",
@@ -2198,7 +2198,7 @@
     {
       "classe": "resultat",
       "code": "6",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 219,
       "libelle": "COMPTES DE CHARGES",
@@ -2208,7 +2208,7 @@
     {
       "classe": "resultat",
       "code": "60",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 220,
       "libelle": "Achats (sauf 603)",
@@ -2218,7 +2218,7 @@
     {
       "classe": "resultat",
       "code": "601",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 221,
       "libelle": "Achats stockés - Matières premières et fournitures",
@@ -2228,7 +2228,7 @@
     {
       "classe": "resultat",
       "code": "602",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 222,
       "libelle": "Achats stockés - Autres approvisionnements",
@@ -2238,7 +2238,7 @@
     {
       "classe": "resultat",
       "code": "604",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 223,
       "libelle": "Achats d'études et prestations de services",
@@ -2248,7 +2248,7 @@
     {
       "classe": "resultat",
       "code": "605",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 224,
       "libelle": "Achats de matériel, équipements et travaux",
@@ -2258,7 +2258,7 @@
     {
       "classe": "resultat",
       "code": "606",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 225,
       "libelle": "Achats non stockés de matière et fournitures",
@@ -2268,7 +2268,7 @@
     {
       "classe": "resultat",
       "code": "607",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 226,
       "libelle": "Achats de marchandises",
@@ -2278,7 +2278,7 @@
     {
       "classe": "resultat",
       "code": "608",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 227,
       "libelle": "Frais accessoires incorporés aux achats",
@@ -2288,7 +2288,7 @@
     {
       "classe": "resultat",
       "code": "609",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 228,
       "libelle": "Rabais, remises et ristournes obtenus sur achats",
@@ -2298,7 +2298,7 @@
     {
       "classe": "resultat",
       "code": "603",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 229,
       "libelle": "Variation des stocks d'approvisionnements et de marchandises",
@@ -2308,7 +2308,7 @@
     {
       "classe": "resultat",
       "code": "61",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 230,
       "libelle": "Services extérieurs",
@@ -2318,7 +2318,7 @@
     {
       "classe": "resultat",
       "code": "611",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 231,
       "libelle": "Sous-traitance générale",
@@ -2328,7 +2328,7 @@
     {
       "classe": "resultat",
       "code": "612",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 232,
       "libelle": "Redevances de crédit-bail",
@@ -2338,7 +2338,7 @@
     {
       "classe": "resultat",
       "code": "613",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 233,
       "libelle": "Locations",
@@ -2348,7 +2348,7 @@
     {
       "classe": "resultat",
       "code": "614",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 234,
       "libelle": "Charges locatives et de copropriété",
@@ -2358,7 +2358,7 @@
     {
       "classe": "resultat",
       "code": "615",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 235,
       "libelle": "Entretien et réparation",
@@ -2368,7 +2368,7 @@
     {
       "classe": "resultat",
       "code": "616",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 236,
       "libelle": "Primes d'assurances",
@@ -2378,7 +2378,7 @@
     {
       "classe": "resultat",
       "code": "617",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 237,
       "libelle": "Études et recherches",
@@ -2388,7 +2388,7 @@
     {
       "classe": "resultat",
       "code": "618",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 238,
       "libelle": "Divers",
@@ -2398,7 +2398,7 @@
     {
       "classe": "resultat",
       "code": "619",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 239,
       "libelle": "Rabais, remises et ristournes obtenus sur services extérieurs",
@@ -2408,7 +2408,7 @@
     {
       "classe": "resultat",
       "code": "62",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 240,
       "libelle": "Autres services extérieurs",
@@ -2418,7 +2418,7 @@
     {
       "classe": "resultat",
       "code": "621",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 241,
       "libelle": "Personnel extérieur à l'entité",
@@ -2428,7 +2428,7 @@
     {
       "classe": "resultat",
       "code": "622",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 242,
       "libelle": "Rémunérations d'intermédiaires et honoraires",
@@ -2438,7 +2438,7 @@
     {
       "classe": "resultat",
       "code": "623",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 243,
       "libelle": "Publicité, publications, relations publiques",
@@ -2448,7 +2448,7 @@
     {
       "classe": "resultat",
       "code": "624",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 244,
       "libelle": "Transports de biens et transports collectifs du personnel",
@@ -2458,7 +2458,7 @@
     {
       "classe": "resultat",
       "code": "625",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 245,
       "libelle": "Déplacements, missions et réceptions",
@@ -2468,7 +2468,7 @@
     {
       "classe": "resultat",
       "code": "626",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 246,
       "libelle": "Frais postaux et de télécommunications",
@@ -2478,7 +2478,7 @@
     {
       "classe": "resultat",
       "code": "627",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 247,
       "libelle": "Services bancaires et assimilés",
@@ -2488,7 +2488,7 @@
     {
       "classe": "resultat",
       "code": "628",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 248,
       "libelle": "Divers",
@@ -2498,7 +2498,7 @@
     {
       "classe": "resultat",
       "code": "629",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 249,
       "libelle": "Rabais, remises et ristournes obtenus sur autres services extérieurs",
@@ -2508,7 +2508,7 @@
     {
       "classe": "resultat",
       "code": "63",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 250,
       "libelle": "Impôts, taxes et versements assimilés",
@@ -2518,7 +2518,7 @@
     {
       "classe": "resultat",
       "code": "631",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 251,
       "libelle": "Impôts, taxes et versements assimilés sur rémunérations (administrations des impôts)",
@@ -2528,7 +2528,7 @@
     {
       "classe": "resultat",
       "code": "633",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 252,
       "libelle": "Impôts, taxes et versements assimilés sur rémunérations (autres organismes)",
@@ -2538,7 +2538,7 @@
     {
       "classe": "resultat",
       "code": "635",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 253,
       "libelle": "Autres impôts, taxes et versements assimilés (administrations des impôts)",
@@ -2548,7 +2548,7 @@
     {
       "classe": "resultat",
       "code": "637",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 254,
       "libelle": "Autres impôts, taxes et versements assimilés (autres organismes)",
@@ -2558,7 +2558,7 @@
     {
       "classe": "resultat",
       "code": "638",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 255,
       "libelle": "Rappel d'impôts (autres qu'impôts sur les bénéfices)",
@@ -2568,7 +2568,7 @@
     {
       "classe": "resultat",
       "code": "64",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 256,
       "libelle": "Charges de personnel",
@@ -2578,7 +2578,7 @@
     {
       "classe": "resultat",
       "code": "641",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 257,
       "libelle": "Rémunérations du personnel",
@@ -2588,7 +2588,7 @@
     {
       "classe": "resultat",
       "code": "644",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 258,
       "libelle": "Rémunération du travail de l'exploitant",
@@ -2598,7 +2598,7 @@
     {
       "classe": "resultat",
       "code": "645",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 259,
       "libelle": "Cotisations de sécurité sociale et de prévoyance",
@@ -2608,7 +2608,7 @@
     {
       "classe": "resultat",
       "code": "646",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 260,
       "libelle": "Cotisations sociales personnelles de l'exploitant",
@@ -2618,7 +2618,7 @@
     {
       "classe": "resultat",
       "code": "647",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 261,
       "libelle": "Autres cotisations sociales",
@@ -2628,7 +2628,7 @@
     {
       "classe": "resultat",
       "code": "648",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 262,
       "libelle": "Autres charges de personnel",
@@ -2638,7 +2638,7 @@
     {
       "classe": "resultat",
       "code": "649",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 263,
       "libelle": "Remboursements de charges de personnel",
@@ -2648,7 +2648,7 @@
     {
       "classe": "resultat",
       "code": "65",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 264,
       "libelle": "Autres charges de gestion courante",
@@ -2658,7 +2658,7 @@
     {
       "classe": "resultat",
       "code": "651",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 265,
       "libelle": "Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",
@@ -2668,7 +2668,7 @@
     {
       "classe": "resultat",
       "code": "653",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 266,
       "libelle": "Rémunérations de l'activité des administrateurs et des gérants",
@@ -2678,7 +2678,7 @@
     {
       "classe": "resultat",
       "code": "654",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 267,
       "libelle": "Pertes sur créances irrécouvrables",
@@ -2688,7 +2688,7 @@
     {
       "classe": "resultat",
       "code": "655",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 268,
       "libelle": "Quote-part de résultat sur opérations faites en commun",
@@ -2698,7 +2698,7 @@
     {
       "classe": "resultat",
       "code": "656",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 269,
       "libelle": "Pertes de change sur créances et dettes commerciales",
@@ -2708,7 +2708,7 @@
     {
       "classe": "resultat",
       "code": "657",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 270,
       "libelle": "Valeurs comptables des immobilisations incorporelles et corporelles cédées",
@@ -2718,7 +2718,7 @@
     {
       "classe": "resultat",
       "code": "658",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 271,
       "libelle": "Pénalités et autres charges",
@@ -2728,7 +2728,7 @@
     {
       "classe": "resultat",
       "code": "66",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 272,
       "libelle": "Charges financières",
@@ -2738,7 +2738,7 @@
     {
       "classe": "resultat",
       "code": "661",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 273,
       "libelle": "Charges d'intérêts",
@@ -2748,7 +2748,7 @@
     {
       "classe": "resultat",
       "code": "664",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 274,
       "libelle": "Pertes sur créances liées à des participations",
@@ -2758,7 +2758,7 @@
     {
       "classe": "resultat",
       "code": "665",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 275,
       "libelle": "Escomptes accordés",
@@ -2768,7 +2768,7 @@
     {
       "classe": "resultat",
       "code": "666",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 276,
       "libelle": "Pertes de change financières",
@@ -2778,7 +2778,7 @@
     {
       "classe": "resultat",
       "code": "666L",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 277,
       "libelle": "Compte de liaison Résultat",
@@ -2788,7 +2788,7 @@
     {
       "classe": "resultat",
       "code": "667",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 278,
       "libelle": "Charges sur cession d'éléments financiers",
@@ -2798,7 +2798,7 @@
     {
       "classe": "resultat",
       "code": "668",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 279,
       "libelle": "Autres charges financières",
@@ -2808,7 +2808,7 @@
     {
       "classe": "resultat",
       "code": "67",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 280,
       "libelle": "Charges exceptionnelles",
@@ -2818,7 +2818,7 @@
     {
       "classe": "resultat",
       "code": "672",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 281,
       "libelle": "Charges sur exercices antérieurs",
@@ -2828,7 +2828,7 @@
     {
       "classe": "resultat",
       "code": "678",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 282,
       "libelle": "Autres charges exceptionnelles",
@@ -2838,7 +2838,7 @@
     {
       "classe": "resultat",
       "code": "68",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 283,
       "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions",
@@ -2848,7 +2848,7 @@
     {
       "classe": "resultat",
       "code": "681",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 284,
       "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges d'exploitation)",
@@ -2858,7 +2858,7 @@
     {
       "classe": "resultat",
       "code": "686",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 285,
       "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges financières)",
@@ -2868,7 +2868,7 @@
     {
       "classe": "resultat",
       "code": "687",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 286,
       "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges exceptionnelles)",
@@ -2878,7 +2878,7 @@
     {
       "classe": "resultat",
       "code": "69",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 287,
       "libelle": "Participation des salariés - Impôts sur les bénéfices et assimilés",
@@ -2888,7 +2888,7 @@
     {
       "classe": "resultat",
       "code": "691",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 288,
       "libelle": "Participation des salariés aux résultats",
@@ -2898,7 +2898,7 @@
     {
       "classe": "resultat",
       "code": "695",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 289,
       "libelle": "Impôts sur les bénéfices",
@@ -2908,7 +2908,7 @@
     {
       "classe": "resultat",
       "code": "696",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 290,
       "libelle": "Suppléments d'impôt sur les sociétés liés aux distributions",
@@ -2918,7 +2918,7 @@
     {
       "classe": "resultat",
       "code": "698",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 291,
       "libelle": "Intégration fiscale",
@@ -2928,7 +2928,7 @@
     {
       "classe": "resultat",
       "code": "699",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 292,
       "libelle": "Produits - Reports en arrière des déficits",
@@ -2938,7 +2938,7 @@
     {
       "classe": "resultat",
       "code": "7",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 293,
       "libelle": "COMPTES DE PRODUITS",
@@ -2948,7 +2948,7 @@
     {
       "classe": "resultat",
       "code": "70",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 294,
       "libelle": "Ventes de produits fabriqués, prestations de services, marchandises",
@@ -2958,7 +2958,7 @@
     {
       "classe": "resultat",
       "code": "701",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 295,
       "libelle": "Ventes de produits finis",
@@ -2968,7 +2968,7 @@
     {
       "classe": "resultat",
       "code": "702",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 296,
       "libelle": "Ventes de produits intermédiaires",
@@ -2978,7 +2978,7 @@
     {
       "classe": "resultat",
       "code": "703",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 297,
       "libelle": "Ventes de produits résiduels",
@@ -2988,7 +2988,7 @@
     {
       "classe": "resultat",
       "code": "704",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 298,
       "libelle": "Travaux",
@@ -2998,7 +2998,7 @@
     {
       "classe": "resultat",
       "code": "705",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 299,
       "libelle": "Études",
@@ -3008,7 +3008,7 @@
     {
       "classe": "resultat",
       "code": "706",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 300,
       "libelle": "Prestations de services",
@@ -3018,7 +3018,7 @@
     {
       "classe": "resultat",
       "code": "707",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 301,
       "libelle": "Ventes de marchandises",
@@ -3028,7 +3028,7 @@
     {
       "classe": "resultat",
       "code": "708",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 302,
       "libelle": "Produits des activités annexes",
@@ -3038,7 +3038,7 @@
     {
       "classe": "resultat",
       "code": "709",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 303,
       "libelle": "Rabais, remises et ristournes accordés",
@@ -3048,7 +3048,7 @@
     {
       "classe": "resultat",
       "code": "71",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 304,
       "libelle": "Production stockée (ou déstockage)",
@@ -3058,7 +3058,7 @@
     {
       "classe": "resultat",
       "code": "713",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 305,
       "libelle": "Variation des stocks des en-cours de production et de produits",
@@ -3068,7 +3068,7 @@
     {
       "classe": "resultat",
       "code": "72",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 306,
       "libelle": "Production immobilisée",
@@ -3078,7 +3078,7 @@
     {
       "classe": "resultat",
       "code": "721",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 307,
       "libelle": "Immobilisations incorporelles",
@@ -3088,7 +3088,7 @@
     {
       "classe": "resultat",
       "code": "722",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 308,
       "libelle": "Immobilisations corporelles",
@@ -3098,7 +3098,7 @@
     {
       "classe": "resultat",
       "code": "74",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 309,
       "libelle": "Subventions",
@@ -3108,7 +3108,7 @@
     {
       "classe": "resultat",
       "code": "741",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 310,
       "libelle": "Subventions d'exploitation",
@@ -3118,7 +3118,7 @@
     {
       "classe": "resultat",
       "code": "742",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 311,
       "libelle": "Subventions d'équilibre",
@@ -3128,7 +3128,7 @@
     {
       "classe": "resultat",
       "code": "747",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 312,
       "libelle": "Quote-part des subventions d'investissement virée au résultat de l'exercice",
@@ -3138,7 +3138,7 @@
     {
       "classe": "resultat",
       "code": "75",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 313,
       "libelle": "Autres produits de gestion courante",
@@ -3148,7 +3148,7 @@
     {
       "classe": "resultat",
       "code": "751",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 314,
       "libelle": "Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",
@@ -3158,7 +3158,7 @@
     {
       "classe": "resultat",
       "code": "752",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 315,
       "libelle": "Revenus des immeubles non affectés à des activités professionnelles",
@@ -3168,7 +3168,7 @@
     {
       "classe": "resultat",
       "code": "753",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 316,
       "libelle": "Rémunérations de l'activité des administrateurs et des gérants",
@@ -3178,7 +3178,7 @@
     {
       "classe": "resultat",
       "code": "754",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 317,
       "libelle": "Ristournes perçues des coopératives provenant des excédents",
@@ -3188,7 +3188,7 @@
     {
       "classe": "resultat",
       "code": "755",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 318,
       "libelle": "Quote-part de résultat sur opérations faites en commun",
@@ -3198,7 +3198,7 @@
     {
       "classe": "resultat",
       "code": "756",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 319,
       "libelle": "Gains de change sur créances et dettes commerciales",
@@ -3208,7 +3208,7 @@
     {
       "classe": "resultat",
       "code": "757",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 320,
       "libelle": "Produits des cessions d'immobilisations incorporelles et corporelles",
@@ -3218,7 +3218,7 @@
     {
       "classe": "resultat",
       "code": "758",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 321,
       "libelle": "Indemnités et autres produits",
@@ -3228,7 +3228,7 @@
     {
       "classe": "resultat",
       "code": "76",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 322,
       "libelle": "Produits financiers",
@@ -3238,7 +3238,7 @@
     {
       "classe": "resultat",
       "code": "761",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 323,
       "libelle": "Produits de participations",
@@ -3248,7 +3248,7 @@
     {
       "classe": "resultat",
       "code": "762",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 324,
       "libelle": "Produits des autres immobilisations financières",
@@ -3258,7 +3258,7 @@
     {
       "classe": "resultat",
       "code": "763",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 325,
       "libelle": "Revenus des autres créances",
@@ -3268,7 +3268,7 @@
     {
       "classe": "resultat",
       "code": "764",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 326,
       "libelle": "Revenus des valeurs mobilières de placement",
@@ -3278,7 +3278,7 @@
     {
       "classe": "resultat",
       "code": "765",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 327,
       "libelle": "Escomptes obtenus",
@@ -3288,7 +3288,7 @@
     {
       "classe": "resultat",
       "code": "766",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 328,
       "libelle": "Gains de change financiers",
@@ -3298,7 +3298,7 @@
     {
       "classe": "resultat",
       "code": "767",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 329,
       "libelle": "Produits sur cession d'éléments financiers",
@@ -3308,7 +3308,7 @@
     {
       "classe": "resultat",
       "code": "768",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 330,
       "libelle": "Autres produits financiers",
@@ -3318,7 +3318,7 @@
     {
       "classe": "resultat",
       "code": "77",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 331,
       "libelle": "Produits exceptionnels",
@@ -3328,7 +3328,7 @@
     {
       "classe": "resultat",
       "code": "772",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 332,
       "libelle": "Produits sur exercices antérieurs",
@@ -3338,7 +3338,7 @@
     {
       "classe": "resultat",
       "code": "778",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 333,
       "libelle": "Autres produits exceptionnels",
@@ -3348,7 +3348,7 @@
     {
       "classe": "resultat",
       "code": "78",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 334,
       "libelle": "Reprises sur amortissements, dépréciations et provisions",
@@ -3358,7 +3358,7 @@
     {
       "classe": "resultat",
       "code": "781",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 335,
       "libelle": "Reprises sur amortissements, dépréciations et provisions (à inscrire dans les produits d'exploitation)",
@@ -3368,7 +3368,7 @@
     {
       "classe": "resultat",
       "code": "786",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 336,
       "libelle": "Reprises sur dépréciations et provisions (à inscrire dans les produits financiers)",
@@ -3378,7 +3378,7 @@
     {
       "classe": "resultat",
       "code": "787",
-      "flow_scheme": null,
+      "flow_scheme": 2,
       "groupement": null,
       "id": 337,
       "libelle": "Reprises sur dépréciations et provisions (à inscrire dans les produits exceptionnels)",
@@ -3388,7 +3388,7 @@
     {
       "classe": "bilan",
       "code": "119",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 338,
       "libelle": "Report à nouveau - solde débiteur",
@@ -3398,7 +3398,7 @@
     {
       "classe": "bilan",
       "code": "129",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 339,
       "libelle": "Résultat de l'exercice – perte",
@@ -3408,7 +3408,7 @@
     {
       "classe": "bilan",
       "code": "391",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 340,
       "libelle": "Dépréciations des matières premières et fournitures",
@@ -3418,7 +3418,7 @@
     {
       "classe": "bilan",
       "code": "392",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 341,
       "libelle": "Dépréciations des autres approvisionnements",
@@ -3428,7 +3428,7 @@
     {
       "classe": "bilan",
       "code": "393",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 342,
       "libelle": "Dépréciations des en-cours de production de biens",
@@ -3438,7 +3438,7 @@
     {
       "classe": "bilan",
       "code": "394",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 343,
       "libelle": "Dépréciations des en-cours de production de services",
@@ -3448,7 +3448,7 @@
     {
       "classe": "bilan",
       "code": "395",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 344,
       "libelle": "Dépréciations des stocks de produits",
@@ -3458,7 +3458,7 @@
     {
       "classe": "bilan",
       "code": "397",
-      "flow_scheme": null,
+      "flow_scheme": 1,
       "groupement": null,
       "id": 345,
       "libelle": "Dépréciations des stocks de marchandises",
