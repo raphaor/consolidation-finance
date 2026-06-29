@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "conso": {
+      "type": "local",
+      "command": ["prototype/rust/target/release/conso-server.exe", "--mcp"],
+      "cwd": ".",
+      "environment": {
+        "CONSO_DB_PATH": ".conso-mcp.duckdb",
+        "CONSO_SEED_JSON": "prototype/rust/tests/fixtures/seed.json"
+      },
+      "enabled": true,
+      "timeout": 20000
+    }
+  }
+}

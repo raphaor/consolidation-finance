@@ -57,7 +57,19 @@ Windows). La 1ʳᵉ compilation est lourde (DuckDB C++ embarqué + rmcp + schema
 
 ## Configuration d'opencode
 
-### Windows — `.opencode/opencode.jsonc` (workspace) ou `%APPDATA%\opencode\opencode.jsonc`
+Une config workspace est fournie (`.opencode/opencode.jsonc`) : elle est
+**chargée automatiquement à chaque session** opencode dans ce projet. Elle
+pointe vers une base de test dédiée `.conso-mcp.duckdb` (seedée depuis
+`tests/fixtures/seed.json` au premier lancement) — elle ne touche pas la base
+dev utilisée par l'UI.
+
+> Activation : opencode charge les serveurs MCP **au démarrage de la session**.
+> Pour prendre en compte la config, **relancez la session opencode** (ou
+> redémarrez opencode). En nouvelle session, c'est automatique. Vérifiez avec
+> `opencode mcp list` (statut du serveur `conso`) ; les outils apparaissent
+> préfixés `conso_*`.
+
+### Windows — `.opencode/opencode.jsonc` (workspace, fourni)
 
 ```jsonc
 {
@@ -165,3 +177,37 @@ CONSO_DB_PATH=/tmp/conso.duckdb CONSO_SEED_JSON=tests/fixtures/seed.json \
 
 Les réponses (une par ligne sur stdout) contiennent `result.content[0].text`
 (JSON sérialisé de l'outil).
+
+## Recette automatisée (smoke test)
+
+Un script PowerShell valide le serveur MCP via stdio **sans opencode** (CI-able) :
+
+```bash
+# depuis prototype/rust/
+cargo build --release --bin conso-server   # prérequis
+.\tests\mcp_smoke.ps1
+```
+
+Il envoie `initialize` + `tools/list` + 4 `tools/call` représentatifs
+(`describe_model`, `list_master_data` paginé, recherche `?search`, etc.) sur une
+base jetable, et asserte : ≥ 10 outils exposés, présences des outils clés,
+`describe_model` renvoie le catalogue de flux, la pagination respecte `limit`,
+la recherche `ILIKE` filtre. Sortie `[OK]`/`[ECHEC]` par vérification, exit 0/1.
+
+### Recette via opencode (après activation)
+
+Une fois le MCP chargé, demander à l'agent (prompts types) :
+
+1. **Lecture** : « use conso : décris le modèle puis liste 5 comptes de classe
+   bilan » → valide `describe_model` + `list_master_data` (filtre `classe`).
+2. **Saisie + exécution** : « use conso : importe ces écritures (coller un CSV
+   minimal) puis lance la consolidation 1 » → valide `import_entries` +
+   `run_consolidation`.
+3. **Rapports** : « use conso : donne le bilan consolidé et le compte de
+   résultat de la consolidation 1 » → valide `get_bilan` + `get_compte_resultat`.
+4. **Contrôles** : « use conso : liste les control-set puis exécute le premier
+   sur la consolidation 1 » → valide `run_controls` (découverte + exécution).
+
+Pour réinitialiser la base de test (repartir d'un seed propre) : supprimez
+`.conso-mcp.duckdb` à la racine du workspace — il sera recréé au prochain
+démarrage du MCP.

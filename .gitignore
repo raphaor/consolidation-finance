@@ -5,3 +5,7 @@ __pycache__/
 
 # Rust
 prototype/rust/target/
+
+# DuckDB — bases runtime (dev conso.duckdb + base de test MCP .conso-mcp.duckdb)
+*.duckdb
+*.duckdb.wal
