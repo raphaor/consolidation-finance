@@ -30,7 +30,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{delete, get, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use duckdb::types::Value as DbValue;
@@ -41,9 +41,29 @@ use crate::dimensions::is_valid_custom_name;
 use crate::masterdata;
 use crate::state::{db_err, lock_con, AppError, AppState};
 
-/// Nom de la table de valeurs d'une liste.
-pub fn value_table(code: &str) -> String {
-    format!("lst_{code}")
+/// Nom physique de la table de valeurs d'une liste (B1 étape 5 : par `id`).
+pub fn value_table(id: i64) -> String {
+    format!("lst_{id}")
+}
+
+/// `id` technique d'une liste de valeurs, ou `None` si elle n'existe pas.
+pub fn id_of(con: &duckdb::Connection, code: &str) -> Option<i64> {
+    con.query_row(
+        "SELECT id FROM dim_value_list WHERE code = ?",
+        [code],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
+/// Nom physique de la table de valeurs pour un code de liste (lookup id).
+fn vtable_for(con: &duckdb::Connection, list_code: &str) -> duckdb::Result<String> {
+    let id: i64 = con.query_row(
+        "SELECT id FROM dim_value_list WHERE code = ?",
+        [list_code],
+        |r| r.get(0),
+    )?;
+    Ok(value_table(id))
 }
 
 // ───────────────────────────── Modèle / chargement ─────────────────────────────
@@ -51,6 +71,7 @@ pub fn value_table(code: &str) -> String {
 /// Une liste de valeurs (référentiel).
 #[derive(Serialize)]
 pub struct ValueListDef {
+    pub id: i64,
     pub code: String,
     pub libelle: String,
     pub value_table: String,
@@ -87,13 +108,16 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<ValueListDef>> {
     if !registry_exists(con) {
         return Ok(Vec::new());
     }
-    let mut stmt = con.prepare("SELECT code, libelle FROM dim_value_list ORDER BY code")?;
+    let mut stmt =
+        con.prepare("SELECT id, code, libelle FROM dim_value_list ORDER BY code")?;
     let rows = stmt.query_map([], |row| {
-        let code = row.get::<_, String>(0)?;
+        let id = row.get::<_, i64>(0)?;
+        let code = row.get::<_, String>(1)?;
         Ok(ValueListDef {
-            value_table: value_table(&code),
+            id,
+            value_table: value_table(id),
             code,
-            libelle: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            libelle: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
         })
     })?;
     rows.collect()
@@ -149,40 +173,46 @@ pub fn create_list(con: &duckdb::Connection, code: &str, libelle: &str) -> Resul
     if exists {
         return Err(AppError::conflict(format!("liste déjà existante : {code}")));
     }
-    let vtable = value_table(code);
-    con.execute(
-        &format!("CREATE TABLE {vtable} (code TEXT PRIMARY KEY, libelle TEXT)"),
-        [],
-    )
-    .map_err(db_err)?;
+    // INSERT en premier pour récupérer l'id technique (séquence auto).
     con.execute(
         "INSERT INTO dim_value_list (code, libelle) VALUES (?, ?)",
         &[&code, &libelle],
     )
     .map_err(db_err)?;
-    Ok(())
-}
-
-/// Supprime une liste de valeurs : table `lst_<code>` + registre. Refusée si un
-/// attribut N2 la cible encore.
-pub fn delete_list(con: &duckdb::Connection, code: &str) -> Result<(), AppError> {
-    ensure_valid_ident("code de liste", code)?;
-    let exists: bool = con
+    let id: i64 = con
         .query_row(
-            "SELECT COUNT(*) > 0 FROM dim_value_list WHERE code = ?",
+            "SELECT id FROM dim_value_list WHERE code = ?",
             [code],
             |r| r.get(0),
         )
         .map_err(db_err)?;
-    if !exists {
-        return Err(AppError::not_found(format!("liste inexistante : {code}")));
-    }
+    let vtable = value_table(id);
+    con.execute(
+        &format!("CREATE TABLE {vtable} (code TEXT PRIMARY KEY, libelle TEXT)"),
+        [],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Supprime une liste de valeurs : table `lst_<id>` + registre. Refusée si un
+/// attribut N2 la cible encore.
+pub fn delete_list(con: &duckdb::Connection, code: &str) -> Result<(), AppError> {
+    ensure_valid_ident("code de liste", code)?;
+    let list_id: Option<i64> = con
+        .query_row(
+            "SELECT id FROM dim_value_list WHERE code = ?",
+            [code],
+            |r| r.get(0),
+        )
+        .ok();
+    let list_id = list_id.ok_or_else(|| AppError::not_found(format!("liste inexistante : {code}")))?;
     if is_referenced(con, code) {
         return Err(AppError::conflict(format!(
             "liste utilisée par un attribut de caractéristique : {code}"
         )));
     }
-    con.execute(&format!("DROP TABLE IF EXISTS {}", value_table(code)), [])
+    con.execute(&format!("DROP TABLE IF EXISTS {}", value_table(list_id)), [])
         .map_err(db_err)?;
     con.execute("DELETE FROM dim_value_list WHERE code = ?", [code])
         .map_err(db_err)?;
@@ -215,12 +245,10 @@ fn reject_unknown_value_fields(obj: &Map<String, JsonValue>) -> Result<(), AppEr
 /// Liste les valeurs (lignes) d'une liste.
 pub fn list_values(con: &duckdb::Connection, code: &str) -> Result<Vec<JsonValue>, AppError> {
     require_list(con, code)?;
+    let vtable = vtable_for(con, code).map_err(db_err)?;
     masterdata::run_query(
         con,
-        &format!(
-            "SELECT code, libelle FROM {} ORDER BY code",
-            value_table(code)
-        ),
+        &format!("SELECT code, libelle FROM {vtable} ORDER BY code"),
         Vec::new(),
     )
 }
@@ -238,7 +266,7 @@ pub fn create_value(
         .and_then(JsonValue::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| AppError::bad_request("code de valeur requis"))?;
-    let vtable = value_table(list_code);
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
     let exists: bool = con
         .query_row(
             &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
@@ -269,7 +297,7 @@ pub fn update_value(
 ) -> Result<(), AppError> {
     require_list(con, list_code)?;
     reject_unknown_value_fields(obj)?;
-    let vtable = value_table(list_code);
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
     let exists: bool = con
         .query_row(
             &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
@@ -302,9 +330,10 @@ pub fn delete_value(
     value_code: &str,
 ) -> Result<(), AppError> {
     require_list(con, list_code)?;
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
     let n = con
         .execute(
-            &format!("DELETE FROM {} WHERE code = ?", value_table(list_code)),
+            &format!("DELETE FROM {vtable} WHERE code = ?"),
             [value_code],
         )
         .map_err(db_err)?;
@@ -316,13 +345,172 @@ pub fn delete_value(
     Ok(())
 }
 
+/// Renomme le code d'une valeur dans `lst_<id>`.
+///
+/// Contrairement aux caractéristiques, les listes de valeurs n'ont pas de
+/// colonne assignée sur une master data — la cascade se limite à la table
+/// physique `lst_<id>` elle-même.
+pub fn rename_value_code(
+    con: &duckdb::Connection,
+    list_code: &str,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    if new_value.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new_value == old_value {
+        return Ok(());
+    }
+    require_list(con, list_code)?;
+    let vtable = vtable_for(con, list_code).map_err(db_err)?;
+
+    let exists: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [old_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!("valeur inexistante : {old_value}")));
+    }
+    let taken: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [new_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if taken {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new_value}")));
+    }
+    con.execute(
+        &format!("UPDATE {vtable} SET code = ? WHERE code = ?"),
+        [new_value, old_value],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Met à jour le libellé d'une liste de valeurs.
+pub fn update_list(
+    con: &duckdb::Connection,
+    list_code: &str,
+    libelle: &str,
+) -> Result<(), AppError> {
+    let n: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM dim_value_list WHERE code = ?",
+            [list_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if n == 0 {
+        return Err(AppError::not_found(format!(
+            "liste inconnue : {list_code}"
+        )));
+    }
+    con.execute(
+        "UPDATE dim_value_list SET libelle = ? WHERE code = ?",
+        [libelle, list_code],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Renomme le code d'une liste de valeurs.
+///
+/// Cascade (code TEXT) :
+/// - `dim_characteristic_attribute.target_dimension`
+/// - `dim_custom_reference.target_dimension` (silencieux si la table n'existe pas)
+/// La table physique `lst_<id>` n'est **pas** touchée — c'est le gain B1.
+pub fn rename_value_list_code(
+    con: &duckdb::Connection,
+    old: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(());
+    }
+    ensure_valid_ident("code de liste", new)?;
+    if collides_with_dimension(con, new) {
+        return Err(AppError::bad_request(format!(
+            "'{new}' est déjà le nom d'une dimension"
+        )));
+    }
+    let old_exists: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_value_list WHERE code = ?",
+            [old],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !old_exists {
+        return Err(AppError::not_found(format!("liste inconnue : {old}")));
+    }
+    let conflict: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_value_list WHERE code = ?",
+            [new],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if conflict {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+    // Mettre à jour le registre.
+    con.execute(
+        "UPDATE dim_value_list SET code = ? WHERE code = ?",
+        [new, old],
+    )
+    .map_err(db_err)?;
+    // Cascade FK : attributs N2 dont la cible est cette liste.
+    let _ = con.execute(
+        "UPDATE dim_characteristic_attribute \
+         SET target_dimension = ? WHERE target_dimension = ?",
+        [new, old],
+    );
+    // Cascade FK : références directes (patron B) dont la cible est cette liste.
+    let _ = con.execute(
+        "UPDATE dim_custom_reference SET target_dimension = ? WHERE target_dimension = ?",
+        [new, old],
+    );
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenameListBody {
+    new_code: String,
+}
 
 #[derive(Deserialize)]
 struct CreateListBody {
     code: String,
     #[serde(default)]
     libelle: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateListBody {
+    libelle: String,
+}
+
+/// POST /api/meta/value-lists/{code}/rename — renomme le code d'une liste.
+async fn rename_handler(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<RenameListBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_value_list_code(&con, &code, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": code, "new": body.new_code } })))
 }
 
 /// GET /api/meta/value-lists — liste les listes de valeurs.
@@ -339,6 +527,17 @@ async fn create(
     let con = lock_con(&state)?;
     create_list(&con, &body.code, &body.libelle)?;
     Ok((StatusCode::CREATED, Json(json!({ "code": body.code }))))
+}
+
+/// PUT /api/meta/value-lists/{code} — modifie le libellé d'une liste.
+async fn update(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<UpdateListBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    update_list(&con, &code, &body.libelle)?;
+    Ok(Json(json!({ "code": code, "libelle": body.libelle })))
 }
 
 /// DELETE /api/meta/value-lists/{code} — supprime une liste.
@@ -398,10 +597,28 @@ async fn values_delete(
     Ok(Json(json!({ "deleted": value })))
 }
 
+#[derive(Deserialize)]
+struct RenameValueBody {
+    new_code: String,
+}
+
+/// POST /api/meta/value-lists/{code}/values/{value}/rename — renomme une valeur.
+async fn values_rename(
+    State(state): State<Arc<AppState>>,
+    Path((code, value)): Path<(String, String)>,
+    Json(body): Json<RenameValueBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_value_code(&con, &code, &value, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": value, "new": body.new_code } })))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/value-lists", get(list).post(create))
-        .route("/api/meta/value-lists/{code}", delete(remove))
+        .route("/api/meta/value-lists/{code}", put(update).delete(remove))
+        .route("/api/meta/value-lists/{code}/rename", post(rename_handler))
         .route(
             "/api/meta/value-lists/{code}/values",
             get(values_list).post(values_create),
@@ -409,6 +626,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/api/meta/value-lists/{code}/values/{value}",
             put(values_update).delete(values_delete),
+        )
+        .route(
+            "/api/meta/value-lists/{code}/values/{value}/rename",
+            post(values_rename),
         )
 }
 
@@ -438,11 +659,13 @@ mod tests {
     fn cree_liste_avec_table_de_valeurs() {
         let con = setup();
         create_list(&con, "incoterm", "Incoterms").unwrap();
-        assert!(table_exists(&con, "lst_incoterm"), "table de valeurs créée");
+        let lid = id_of(&con, "incoterm").unwrap();
+        let vtable = value_table(lid);
+        assert!(table_exists(&con, &vtable), "table de valeurs créée");
         let all = load_all(&con).unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].code, "incoterm");
-        assert_eq!(all[0].value_table, "lst_incoterm");
+        assert_eq!(all[0].value_table, vtable);
     }
 
     #[test]
@@ -452,7 +675,7 @@ mod tests {
             create_list(&con, "account", "X").is_err(),
             "account est une dimension"
         );
-        crate::dimensions::create_custom(&con, "secteur", "Secteur").unwrap();
+        crate::dimensions::create_custom(&con, "secteur", "Secteur", None).unwrap();
         assert!(
             create_list(&con, "secteur", "X").is_err(),
             "secteur est une dimension custom"
@@ -482,9 +705,10 @@ mod tests {
         let mut upd = Map::new();
         upd.insert("libelle".into(), json!("Franco à bord"));
         update_value(&con, "incoterm", "FOB", &upd).unwrap();
+        let lid = id_of(&con, "incoterm").unwrap();
         let lib: String = con
             .query_row(
-                "SELECT libelle FROM lst_incoterm WHERE code = 'FOB'",
+                &format!("SELECT libelle FROM lst_{lid} WHERE code = 'FOB'"),
                 [],
                 |r| r.get(0),
             )
@@ -509,11 +733,16 @@ mod tests {
         crate::characteristics::add_attribute(&con, "comportement", "inco", "Incoterm", "incoterm")
             .unwrap();
 
+        let char_id = crate::characteristics::id_of(&con, "comportement").unwrap();
+        let list_id = id_of(&con, "incoterm").unwrap();
+        // Après B1 étape 9, la colonne physique est c{attr_id}, pas le nom d'attribut.
+        let inco_col = crate::characteristics::attr_col_for(&con, "comportement", "inco")
+            .expect("attr_col_for 'inco' doit trouver la colonne");
         let refs = crate::references::dynamic_references(&con);
         assert!(
-            refs.iter().any(|r| r.table == "car_comportement"
-                && r.column == "inco"
-                && r.target_table == "lst_incoterm"
+            refs.iter().any(|r| r.table == format!("car_{char_id}")
+                && r.column == inco_col
+                && r.target_table == format!("lst_{list_id}")
                 && r.target_column == "code"),
             "l'attribut N2 → liste apparaît dans le graphe de références"
         );
@@ -560,6 +789,7 @@ mod tests {
         v.insert("code".into(), json!("FOB"));
         create_value(&con, "incoterm", &v).unwrap();
 
+        let lid = id_of(&con, "incoterm").unwrap();
         crate::schema::create_schema(&con).expect("re-create_schema");
 
         let n: i64 = con
@@ -567,7 +797,7 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1, "registre survit au reset");
         assert!(
-            table_exists(&con, "lst_incoterm"),
+            table_exists(&con, &value_table(lid)),
             "table de valeurs survit"
         );
         assert_eq!(
@@ -575,5 +805,24 @@ mod tests {
             1,
             "valeurs préservées"
         );
+    }
+
+    #[test]
+    fn rename_value_code_ok() {
+        let con = setup();
+        create_list(&con, "incoterm", "Incoterms").unwrap();
+        let mut v = Map::new();
+        v.insert("code".into(), json!("FOB"));
+        create_value(&con, "incoterm", &v).unwrap();
+        rename_value_code(&con, "incoterm", "FOB", "FOB_2024").unwrap();
+        let lid = id_of(&con, "incoterm").unwrap();
+        let code: String = con
+            .query_row(
+                &format!("SELECT code FROM {} WHERE code = 'FOB_2024'", value_table(lid)),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(code, "FOB_2024");
     }
 }

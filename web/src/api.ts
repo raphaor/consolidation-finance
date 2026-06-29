@@ -18,6 +18,12 @@ import type {
   Coefficient,
   CoefficientOperand,
   CoefficientPreview,
+  Control,
+  ControlDefinition,
+  ControlOperand,
+  ControlReport,
+  ControlSet,
+  ControlSetReport,
   CustomReference,
   DataHealthReport,
   Aggregate,
@@ -30,7 +36,7 @@ import type {
   LevelCount,
   MasterTable,
   NativeEnum,
-  PipelineCounts,
+  PipelineRunResult,
   ReferenceInfo,
   ReportFilters,
   RuleDetail,
@@ -151,18 +157,25 @@ export const api = {
   },
   run: (consolidationId?: number) =>
     consolidationId !== undefined
-      ? postJsonRaw<PipelineCounts>('/run', { consolidation_id: consolidationId })
-      : postJson<PipelineCounts>('/run'),
+      ? postJsonRaw<PipelineRunResult>('/run', { consolidation_id: consolidationId })
+      : postJson<PipelineRunResult>('/run'),
   reset: () => postJson<{ status: string; entries: number }>('/reset'),
   // Sauvegarde / restauration : paquet JSON complet de l'état (référentiels +
   // écritures + règles + dimensions custom). `importAll` remplace tout.
   backup: {
     exportAll: () => getJson<Record<string, unknown>>('/export'),
-    importAll: (bundle: unknown) =>
-      postJsonRaw<{ status: string; imported: Record<string, number> }>(
-        '/import/all',
+    preview: (bundle: unknown) =>
+      postJsonRaw<{ meta: unknown; tables: { name: string; label: string; rows: number }[] }>(
+        '/import/preview',
         bundle,
       ),
+    importAll: (bundle: unknown, exclude?: string[]) => {
+      const qs = exclude?.length ? `?exclude=${exclude.join(',')}` : '';
+      return postJsonRaw<{ status: string; imported: Record<string, number> }>(
+        `/import/all${qs}`,
+        bundle,
+      );
+    },
   },
   consolidations: {
     list: () => getJson<ConsolidationSummary[]>('/consolidations'),
@@ -181,6 +194,14 @@ export const api = {
       const qs = new URLSearchParams(pk).toString();
       return deleteJson<{ deleted: number }>(`/md/${table}?${qs}`);
     },
+    // Renommage de code (chantier B1, étape 7) : possible uniquement si plus
+    // aucune référence ne pointe vers le code (sinon le serveur refuse en
+    // listant les blocages).
+    rename: (table: MasterTable, oldCode: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(`/md/${table}/rename`, {
+        old: oldCode,
+        new: newCode,
+      }),
   },
   importEntries: (file: File) => {
     const form = new FormData();
@@ -269,6 +290,41 @@ export const api = {
     ) => putJson<Indicator>(`/indicators/${code}`, { code, ...body }),
     remove: (code: string) => deleteJson<{ deleted: string }>(`/indicators/${code}`),
   },
+  // Contrôles de données
+  controls: {
+    list: () => getJson<Control[]>('/controls'),
+    get: (code: string) => getJson<Control>(`/controls/${code}`),
+    create: (body: { code: string; libelle?: string; definition: ControlDefinition }) =>
+      postJsonRaw<Control>('/controls', body),
+    update: (code: string, body: { libelle?: string; definition: ControlDefinition }) =>
+      putJson<Control>(`/controls/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/controls/${code}`),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/controls/${code}/rename`,
+        { new: newCode },
+      ),
+    run: (code: string, params: { consolidation_id?: number; phase?: string; entry_period?: string }) =>
+      postJsonRaw<ControlReport>(`/controls/${code}/run`, params),
+    operands: () => getJson<ControlOperand[]>('/controls/operands'),
+  },
+  controlSets: {
+    list: () => getJson<ControlSet[]>('/control-sets'),
+    get: (code: string) => getJson<ControlSet>(`/control-sets/${code}`),
+    create: (body: { code: string; libelle?: string; controls: { code: string; ord?: number }[] }) =>
+      postJsonRaw<ControlSet>('/control-sets', body),
+    update: (code: string, body: { libelle?: string; controls: { code: string; ord?: number }[] }) =>
+      putJson<ControlSet>(`/control-sets/${code}`, { code, ...body }),
+    remove: (code: string) => deleteJson<{ deleted: string }>(`/control-sets/${code}`),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/control-sets/${code}/rename`,
+        { new: newCode },
+      ),
+    run: (code: string, params: { consolidation_id?: number; phase?: string; entry_period?: string }) =>
+      postJsonRaw<ControlSetReport>(`/control-sets/${code}/run`, params),
+    results: (code: string) => getJson<ControlSetReport>(`/control-sets/${code}/results`),
+  },
   // Graphe des références (source de vérité serveur), pour les dropdowns
   // contextuels — remplace les miroirs codés en dur côté front.
   references: () => getJson<ReferenceInfo[]>('/meta/references'),
@@ -279,7 +335,7 @@ export const api = {
   dataHealth: () => getJson<DataHealthReport>('/meta/health'),
   dimensions: {
     list: () => getJson<DimensionInfo[]>('/meta/dimensions'),
-    create: (body: { name: string; label: string }) =>
+    create: (body: { name: string; label: string; target_dimension?: string }) =>
       postJsonRaw<DimensionInfo>('/meta/dimensions', body),
     remove: (name: string) =>
       deleteJson<{ deleted: number }>(`/meta/dimensions/${name}`),
@@ -290,6 +346,8 @@ export const api = {
     list: () => getJson<Characteristic[]>('/meta/characteristics'),
     create: (body: { code: string; libelle: string; base_dimension: string }) =>
       postJsonRaw<{ code: string }>('/meta/characteristics', body),
+    update: (code: string, body: { libelle: string }) =>
+      putJson<{ code: string; libelle: string }>(`/meta/characteristics/${code}`, body),
     remove: (code: string) =>
       deleteJson<{ deleted: string }>(`/meta/characteristics/${code}`),
     addAttribute: (
@@ -306,8 +364,18 @@ export const api = {
       putJson<unknown>(`/meta/characteristics/${code}/values/${value}`, row),
     removeValue: (code: string, value: string) =>
       deleteJson<unknown>(`/meta/characteristics/${code}/values/${value}`),
+    renameValue: (code: string, value: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/characteristics/${code}/values/${value}/rename`,
+        { new_code: newCode },
+      ),
     assign: (code: string, body: { member: string; value: string | null }) =>
       putJson<unknown>(`/meta/characteristics/${code}/assign`, body),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/characteristics/${code}/rename`,
+        { new_code: newCode },
+      ),
   },
   // Listes de valeurs (référentiels) : nomenclatures code/libellé autonomes,
   // réutilisables comme cible d'un attribut N2, mais qui ne sont pas des
@@ -316,6 +384,8 @@ export const api = {
     list: () => getJson<ValueList[]>('/meta/value-lists'),
     create: (body: { code: string; libelle: string }) =>
       postJsonRaw<{ code: string }>('/meta/value-lists', body),
+    update: (code: string, body: { libelle: string }) =>
+      putJson<{ code: string; libelle: string }>(`/meta/value-lists/${code}`, body),
     remove: (code: string) =>
       deleteJson<{ deleted: string }>(`/meta/value-lists/${code}`),
     listValues: (code: string) =>
@@ -326,6 +396,16 @@ export const api = {
       putJson<unknown>(`/meta/value-lists/${code}/values/${value}`, row),
     removeValue: (code: string, value: string) =>
       deleteJson<unknown>(`/meta/value-lists/${code}/values/${value}`),
+    renameValue: (code: string, value: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/value-lists/${code}/values/${value}/rename`,
+        { new_code: newCode },
+      ),
+    rename: (code: string, newCode: string) =>
+      postJsonRaw<{ renamed: { old: string; new: string } }>(
+        `/meta/value-lists/${code}/rename`,
+        { new_code: newCode },
+      ),
   },
   // Références directes (patron B) : colonne sur une dimension hôte pointant vers
   // une dimension cible (y compris elle-même). Cf. custom_references.rs.

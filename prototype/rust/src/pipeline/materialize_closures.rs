@@ -113,15 +113,15 @@ WHERE fe.level = ?\n\
   AND EXISTS (\n\
       SELECT 1 FROM v_flow_behavior cb\n\
       WHERE cb.account = fe.account AND cb.flow = fe.flow\n\
-        AND cb.flux_de_report = fe.flow\n\
+        AND cb.flux_de_report_id = fe.flow\n\
   )\n\
   AND EXISTS (\n\
       SELECT 1\n\
       FROM fact_entry e\n\
       JOIN v_flow_behavior fl ON fl.account = e.account AND fl.flow = e.flow\n\
       WHERE e.level = ?\n\
-        AND fl.flux_de_report = fe.flow\n\
-        AND e.flow <> fl.flux_de_report\n\
+        AND fl.flux_de_report_id = fe.flow\n\
+        AND e.flow <> fl.flux_de_report_id\n\
         AND {fe_grain_match}\n\
   );"
         ),
@@ -136,37 +136,29 @@ INSERT INTO fact_entry\n\
     ({grain_list}, flow, level, amount)\n\
 SELECT\n\
     {e_grain_list},\n\
-    fl.flux_de_report AS flow,\n\
-    ?                AS level,\n\
-    SUM(e.amount)    AS amount\n\
+    fl.flux_de_report_id AS flow,\n\
+    ?                    AS level,\n\
+    SUM(e.amount)        AS amount\n\
 FROM fact_entry e\n\
 JOIN v_flow_behavior fl ON fl.account = e.account AND fl.flow = e.flow\n\
 WHERE e.level = ?\n\
-  AND fl.flux_de_report IS NOT NULL\n\
-  AND e.flow <> fl.flux_de_report\n\
-  -- On ne reconstruit que vers un flux de clôture (auto-référentiel) DANS LE\n\
-  -- SCHÉMA DU COMPTE de la composante :\n\
+  AND fl.flux_de_report_id IS NOT NULL\n\
+  AND e.flow <> fl.flux_de_report_id\n\
   AND EXISTS (\n\
       SELECT 1 FROM v_flow_behavior c\n\
-      WHERE c.account = e.account AND c.flow = fl.flux_de_report\n\
-        AND c.flux_de_report = c.flow\n\
+      WHERE c.account = e.account AND c.flow = fl.flux_de_report_id\n\
+        AND c.flux_de_report_id = c.flow\n\
   )\n\
 GROUP BY\n\
-    {e_grain_list}, fl.flux_de_report;"
+    {e_grain_list}, fl.flux_de_report_id;"
         ),
         [level, level],
     )?;
 
-    let n: i64 = con.query_row(
-        "SELECT COUNT(*) FROM fact_entry fe \
-         WHERE fe.level = ? \
-           AND EXISTS ( \
-               SELECT 1 FROM v_flow_behavior cb \
-               WHERE cb.account = fe.account AND cb.flow = fe.flow \
-                 AND cb.flux_de_report = fe.flow \
-           )",
-        [level],
-        |row| row.get(0),
-    )?;
-    Ok(n as usize)
+    // COUNT final retiré : la valeur de retour de `materialize_closures` n'est
+    // pas utilisée par `run_steps` ni par le hook règles (uniquement propagée
+    // pour l'erreur). Le COUNT précédent faisait un full scan + EXISTS sur
+    // `v_flow_behavior` à chaque appel (3× par run), pénalisant le timing des
+    // étapes C/D qui l'incluent. On retourne 0 par convention.
+    Ok(0)
 }

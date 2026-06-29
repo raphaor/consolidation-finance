@@ -3,7 +3,7 @@
 > Vue consolidée de **ce qui est implémenté**, de son **comportement**, et de **ce qui reste**.
 > Pour le *pourquoi* d'une décision → [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) ;
 > pour le détail fonctionnel → les docs thématiques liées ci-dessous.
-> Dernière mise à jour : **2026-06-24**.
+> Dernière mise à jour : **2026-06-29**.
 
 **Légende** : ✅ implémenté & testé · 🟡 partiel / en cours · ⬜ reporté (post-MVP).
 
@@ -69,9 +69,13 @@ règles). ⬜ **Intérêts minoritaires** (par règles).
 
 ## Variations de périmètre
 
-🟡 Entrée (F00 → F01) et sortie (miroir −F98) : **repensées en règles** depuis la suppression du
-niveau `reclassified`. Les tests natifs correspondants sont `#[ignore]` en attendant les règles
-de périmètre. → [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9, [`A_NOUVEAU.md`](./A_NOUVEAU.md).
+✅ Entrée (F00 → F01), sortie (miroir −F98) et variation de % d'intégration (F90/F95)
+:**pilotées par règles** depuis la suppression du niveau `reclassified` (Q31 —
+ces traitements ne sont plus natifs). L'utilisateur compose les opérations dans
+l'éditeur de règles (cf. section dédiée) en scannant `sat_perimeter` ou le
+snapshot N-1 de l'à-nouveau. Les anciens tests natifs sont `#[ignore` — ils
+testaient un comportement aujourd'hui délégué aux règles.
+→ [`FLUX_CONSO.md`](./FLUX_CONSO.md) §9, [`A_NOUVEAU.md`](./A_NOUVEAU.md).
 
 ## Périmètre versionné — [Q35]
 
@@ -199,19 +203,68 @@ techniques (level, opérateur, type de coefficient…) restent en code seul.
 ## Recette (config ≠ moteur)
 
 ✅ Le **moteur** est une mécanique pure (couverte par les tests Rust). La **justesse comptable**
-d'une configuration donnée (interco, équivalence…) relève de la **recette** : smoke tests Python.
-→ [`RECETTE_PYTHON.md`](./RECETTE_PYTHON.md). 🟡 Golden interco à porter en smoke test Python.
+d'une configuration donnée (interco, équivalence, variations de périmètre par règles) relève de
+la **recette** — validée end-to-end sur un cas réel complet (saisies + pipeline + ruleset
+interco + à-nouveau + UI). Les anciens scripts Python (`golden_test.py` / `rules_test.py` /
+`smoke_test.py`) ont été retirés lors du chantier migration CSV→JSON (cf.
+[`PLAN_MIGRATION_CSV_JSON.md`](./PLAN_MIGRATION_CSV_JSON.md)).
+
+## Performance — `conso-bench` ([Q12], [Q3])
+
+✅ **Mesurée** sur 3 volumétries via `conso-bench` (binaire `src/bin/bench.rs`). Jeu généré :
+60 entités × 200 comptes × 5 devises × F00/F20, périmètre avec méthodes mixtes + entrantes/
+sortantes. Pipeline mesuré sur DuckDB **fichier** (cas réel). Le bench référence un ruleset
+d'élimination interco (`RS_BENCH_INTERCO`, partenaire rempli sur 30 % des écritures) pour
+mesurer aussi le hook règles — flag `--no-rules` pour comparer en natif.
+
+### Natif (sans règles)
+
+| `stg_entry` | corporate | converted | consolidated | Total | Débit global |
+|---:|---:|---:|---:|---:|---:|
+| 100 k | 0,49 s | 0,95 s | 1,22 s | **2,66 s** | 38 k/s |
+| 1 M | 3,17 s | 10,1 s | 10,2 s | **23,4 s** | 43 k/s |
+| 5 M | 14,7 s | 44,7 s | 52,0 s | **111 s** | 45 k/s |
+
+### Avec ruleset interco (`RS_BENCH_INTERCO`, 2 opérations)
+
+| `stg_entry` | consolidated (lignes) | Total | Surcoût hook |
+|---:|---:|---:|---:|
+| 1 M | 3,51 M (+1,03 M écritures 2ELI) | **27,6 s** | +4,2 s (+18 %) |
+| 5 M | 17,5 M (+5,14 M écritures 2ELI) | **128 s** | +17 s (+15 %) |
+
+**Lecture** :
+- Étape **A (corporate / agrégation)** : la plus rapide — **630–700 k lignes/s** (DuckDB vectorisé).
+- Étapes **C (convert) et D (consolidate)** : ~245–280 k lignes/s — **les goulots natifs**
+  (2 branches d'écriture en C, JOINs `v_flow_behavior` + `sat_exchange_rate`, ×2,5 plus de
+  lignes qu'en A). Le coût est structurel, peu optimisable sans casser la sémantique.
+- **Hook règles pas critique** : +15–18 % pour produire 5 M lignes d'élimination au niveau
+  consolidated (snapshot + INSERT par opération). Scale linéairement, ~3 µs/ligne 2ELI.
+- **Débit global stable ~40–45 k lignes stg/s** sur gros volumes. 5 M lignes traitées en
+  ~2 min en natif, ~2 min 8 s avec ruleset — conforme à l'obligation de moyens ([Q12]).
+- Validation clôtures + invariants F80/F81 tenus à toutes les échelles, avec ou sans ruleset.
+
+### Optimisations testées (2026-06-29)
+
+- **Index secondaires** (`fact_entry (consolidation_id, level)`, `(account, flow)`,
+  `stg_entry (phase, entry_period)`) : **rejetés**. Sur DuckDB columnar + écriture massive
+  d'un niveau complet par étape, le coût de maintenance de l'ART dépasse le gain en lecture
+  (1M : 22 s → 53 s, ×2,4 plus lent). Les zone-maps suffisent car `consolidation_id` est
+  physiquement groupé (1 valeur par run, insertion par étape).
+- **`PRAGMA preserve_insertion_order=false`** : adopté dans le bench (neutre, bonne pratique).
+- **Retrait du `COUNT` final dans `materialize_closures`** (valeur non utilisée) : adopté.
+
+→ Détails dans `prototype/rust/src/bin/bench.rs` ; recette via
+`cargo run --release --bin conso-bench -- --rows 1000000` (ajouter `--no-rules` pour le natif).
 
 ## Qualité
 
-✅ Suite de tests Rust **verte** : `tests/pipeline.rs`, `tests/rules.rs`, `tests/a_nouveau.rs` +
-tests unitaires de lib. ✅ Build web (tsc) vert. Performance : critère de validation (benchmark
-`conso-bench` sur gros volumes).
+✅ Suite de tests Rust **verte** : `tests/pipeline.rs`, `tests/rules.rs`, `tests/a_nouveau.rs`,
+`tests/loader.rs` + tests unitaires de lib (185 lib + 19 integration). ✅ Build web (tsc) vert.
+✅ `conso-bench` vert (identités de clôture + invariants F80/F81 tenus jusqu'à 5 M lignes).
 
 ---
 
 ## Reste à trancher (avant 1ʳᵉ implémentation élargie)
 
 Questions `TÔT` encore ouvertes — voir [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) :
-[Q6] mode complète/marge · [Q8] workflow de validation · [Q9] granularité de clôture ·
-[Q12] cible de performance chiffrée.
+[Q6] mode complète/marge · [Q8] workflow de validation · [Q9] granularité de clôture.

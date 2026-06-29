@@ -5,9 +5,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { FormulaEditor, type FormulaEditorHandle } from '../components/FormulaEditor';
+import { LibraryList } from '../components/LibraryList';
+import { OperandPalette } from '../components/OperandPalette';
+import { PageHeader } from '../components/PageHeader';
+import { useCrudResource } from '../hooks/useCrudResource';
+import { FORMULA_FUNCTIONS, formatFormulaValue } from '../utils/format';
+import { errMsg } from '../utils/errMessage';
 import type { Coefficient, CoefficientOperand, CoefficientPreview } from '../types';
-
-const FUNCTIONS = ['MIN', 'MAX', 'SAFE_DIV', 'IF', 'ABS', 'ROUND'];
 
 interface FormState {
   code: string;
@@ -18,16 +23,41 @@ interface FormState {
 const EMPTY_FORM: FormState = { code: '', libelle: '', expression: '' };
 
 export function CoefficientsPage() {
-  const [coefficients, setCoefficients] = useState<Coefficient[]>([]);
   const [operands, setOperands] = useState<CoefficientOperand[]>([]);
-  // null = rien d'ouvert ; 'new' = création ; sinon le code édité.
-  const [selected, setSelected] = useState<string | 'new' | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [samples, setSamples] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<CoefficientPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const exprRef = useRef<HTMLTextAreaElement>(null);
+  const exprRef = useRef<FormulaEditorHandle>(null);
+
+  const {
+    items: coefficients,
+    selected,
+    setSelected,
+    form,
+    setForm,
+    saving,
+    open,
+    startDraft,
+    save,
+    remove,
+  } = useCrudResource<Coefficient, FormState>({
+    list: api.coefficients.list,
+    keyOf: (c) => c.code,
+    emptyForm: EMPTY_FORM,
+    toForm: (c) => ({ code: c.code, libelle: c.libelle ?? '', expression: c.expression }),
+    codeOf: (f) => f.code,
+    create: (f) =>
+      api.coefficients.create({
+        code: f.code,
+        libelle: f.libelle || undefined,
+        expression: f.expression,
+      }),
+    update: (code, f) =>
+      api.coefficients.update(code, { libelle: f.libelle || undefined, expression: f.expression }),
+    remove: api.coefficients.remove,
+    confirmRemove: (code) => `Supprimer le coefficient « ${code} » ?`,
+    onError: setError,
+  });
 
   const isBuiltin = useMemo(() => {
     if (selected === 'new' || selected === null) return false;
@@ -35,33 +65,16 @@ export function CoefficientsPage() {
   }, [selected, coefficients]);
   const readOnly = isBuiltin;
 
-  const reload = useCallback(async () => {
-    try {
-      const [list, ops] = await Promise.all([
-        api.coefficients.list(),
-        api.coefficients.operands(),
-      ]);
-      setCoefficients(list);
-      setOperands(ops);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
-
+  // Les opérandes sont statiques vis-à-vis du CRUD des coefficients : un seul
+  // chargement au montage suffit.
   useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Ouvre un coefficient en édition (ou la création).
-  const open = useCallback((c: Coefficient | 'new') => {
-    setError(null);
-    if (c === 'new') {
-      setSelected('new');
-      setForm(EMPTY_FORM);
-    } else {
-      setSelected(c.code);
-      setForm({ code: c.code, libelle: c.libelle ?? '', expression: c.expression });
-    }
+    void (async () => {
+      try {
+        setOperands(await api.coefficients.operands());
+      } catch (e) {
+        setError(errMsg(e));
+      }
+    })();
   }, []);
 
   // Preview live (débouncée) : valide + évalue la formule contre des valeurs
@@ -81,7 +94,7 @@ export function CoefficientsPage() {
       } catch (e) {
         setPreview({
           ok: false,
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg(e),
           operands: [],
         });
       }
@@ -108,123 +121,67 @@ export function CoefficientsPage() {
 
   // Insère un fragment à la position du curseur dans la barre de formule.
   const insert = useCallback((fragment: string) => {
-    const ta = exprRef.current;
-    setForm((f) => {
-      const start = ta?.selectionStart ?? f.expression.length;
-      const end = ta?.selectionEnd ?? f.expression.length;
-      const next = f.expression.slice(0, start) + fragment + f.expression.slice(end);
-      // Replace le curseur après le fragment inséré (au prochain tick).
-      requestAnimationFrame(() => {
-        if (ta) {
-          const pos = start + fragment.length;
-          ta.focus();
-          ta.setSelectionRange(pos, pos);
-        }
-      });
-      return { ...f, expression: next };
-    });
+    exprRef.current?.insert(fragment);
   }, []);
 
-  const save = useCallback(async () => {
-    setError(null);
-    setSaving(true);
-    try {
-      const body = { libelle: form.libelle || undefined, expression: form.expression };
-      if (selected === 'new') {
-        await api.coefficients.create({ code: form.code, ...body });
-      } else if (selected) {
-        await api.coefficients.update(selected, body);
-      }
-      await reload();
-      setSelected(form.code);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [form, selected, reload]);
-
-  const remove = useCallback(
-    async (code: string) => {
-      if (!confirm(`Supprimer le coefficient « ${code} » ?`)) return;
-      setError(null);
-      try {
-        await api.coefficients.remove(code);
-        await reload();
-        if (selected === code) setSelected(null);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [reload, selected],
+  const duplicate = useCallback(
+    (c: Coefficient) =>
+      startDraft({ code: `${c.code}_COPIE`, libelle: c.libelle ?? '', expression: c.expression }),
+    [startDraft],
   );
-
-  const duplicate = useCallback((c: Coefficient) => {
-    setError(null);
-    setSelected('new');
-    setForm({ code: `${c.code}_COPIE`, libelle: c.libelle ?? '', expression: c.expression });
-  }, []);
 
   return (
     <div className="page">
-      <div className="page__header">
-        <h2>Coefficients</h2>
-        <p className="page__hint">
-          Formules type Excel évaluées au grain d'une écriture de règle. Opérandes
-          de périmètre aux 4 perspectives ; fonctions <code>MIN MAX SAFE_DIV IF ABS ROUND</code>.
-        </p>
-      </div>
+      <PageHeader
+        title="Coefficients"
+        hint={
+          <>
+            Formules type Excel évaluées au grain d'une écriture de règle. Opérandes
+            de périmètre aux 4 perspectives ; fonctions <code>MIN MAX SAFE_DIV IF ABS ROUND</code>.
+          </>
+        }
+      />
 
       {error && <div className="banner banner--error">{error}</div>}
 
-      <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+      <div className="editor-split">
         {/* ── Bibliothèque ── */}
-        <div style={{ flex: '0 0 320px' }}>
-          <button type="button" className="btn btn--primary" onClick={() => open('new')}>
-            + Nouveau coefficient
-          </button>
-          <table className="table" style={{ marginTop: 12 }}>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Type</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {coefficients.map((c) => (
-                <tr
-                  key={c.code}
-                  className={selected === c.code ? 'row--selected' : ''}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <td onClick={() => open(c)} title={c.libelle ?? ''}>
-                    {c.code}
-                  </td>
-                  <td onClick={() => open(c)}>
-                    <span className={`rule-badge ${c.kind === 'builtin' ? '' : 'rule-badge--user'}`}>
-                      {c.kind === 'builtin' ? 'natif' : 'utilisateur'}
-                    </span>
-                  </td>
-                  <td>
-                    <button type="button" className="btn btn--ghost" onClick={() => duplicate(c)} title="Dupliquer">
-                      ⧉
-                    </button>
-                    {c.kind === 'user' && (
-                      <button type="button" className="btn btn--ghost" onClick={() => remove(c.code)} title="Supprimer">
-                        ✕
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <LibraryList
+          items={coefficients}
+          getKey={(c) => c.code}
+          selected={selected}
+          onSelect={open}
+          onNew={() => open('new')}
+          newLabel="+ Nouveau coefficient"
+          width={320}
+          columns={[
+            { header: 'Code', cell: (c) => c.code, title: (c) => c.libelle ?? '' },
+            {
+              header: 'Type',
+              cell: (c) => (
+                <span className={`rule-badge ${c.kind === 'builtin' ? '' : 'rule-badge--user'}`}>
+                  {c.kind === 'builtin' ? 'natif' : 'utilisateur'}
+                </span>
+              ),
+            },
+          ]}
+          actions={(c) => (
+            <>
+              <button type="button" className="btn btn--ghost" onClick={() => duplicate(c)} title="Dupliquer">
+                ⧉
+              </button>
+              {c.kind === 'user' && (
+                <button type="button" className="btn btn--ghost" onClick={() => remove(c.code)} title="Supprimer">
+                  ✕
+                </button>
+              )}
+            </>
+          )}
+        />
 
         {/* ── Éditeur ── */}
         {selected !== null && (
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="editor-pane">
             <div style={{ display: 'flex', gap: 12 }}>
               <label className="field" style={{ flex: '0 0 200px' }}>
                 <span>Code</span>
@@ -250,7 +207,7 @@ export function CoefficientsPage() {
 
             {/* Fonctions insérables */}
             <div style={{ margin: '12px 0 6px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {FUNCTIONS.map((fn) => (
+              {FORMULA_FUNCTIONS.map((fn) => (
                 <button
                   key={fn}
                   type="button"
@@ -267,28 +224,26 @@ export function CoefficientsPage() {
             {/* Barre de formule */}
             <label className="field">
               <span>Formule</span>
-              <textarea
+              <FormulaEditor
                 ref={exprRef}
-                rows={4}
                 value={form.expression}
+                onChange={(v) => setForm((f) => ({ ...f, expression: v }))}
+                operands={operands}
                 readOnly={readOnly}
-                spellCheck={false}
-                style={{ fontFamily: 'monospace', fontSize: 14 }}
-                onChange={(e) => setForm((f) => ({ ...f, expression: e.target.value }))}
+                rows={4}
                 placeholder="MIN(1; SAFE_DIV([pct_integration.partner]; [pct_integration.entity]))"
               />
             </label>
 
             {/* Preview live */}
-            <div className={`preview ${preview && !preview.ok ? 'preview--err' : 'preview--ok'}`}
-                 style={{ marginTop: 8, padding: 10, borderRadius: 6, border: '1px solid #ddd' }}>
+            <div
+              className={`preview ${preview && !preview.ok ? 'preview--err' : 'preview--ok'}`}
+            >
               {!preview && <span className="muted">Saisissez une formule pour la prévisualiser.</span>}
               {preview && preview.ok && (
                 <div>
-                  <strong>Résultat&nbsp;: {formatValue(preview.value)}</strong>
-                  {preview.sql && (
-                    <pre style={{ margin: '6px 0 0', fontSize: 12, whiteSpace: 'pre-wrap' }}>{preview.sql}</pre>
-                  )}
+                  <strong>Résultat&nbsp;: {formatFormulaValue(preview.value)}</strong>
+                  {preview.sql && <pre>{preview.sql}</pre>}
                 </div>
               )}
               {preview && !preview.ok && (
@@ -298,16 +253,16 @@ export function CoefficientsPage() {
 
             {/* Valeurs d'exemple de la preview */}
             {preview?.operands?.length ? (
-              <div style={{ marginTop: 8 }}>
-                <div className="muted" style={{ marginBottom: 4 }}>Valeurs d'exemple (preview) :</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div className="coeff-samples">
+                <div className="muted coeff-samples__label">Valeurs d'exemple (preview) :</div>
+                <div className="coeff-samples__grid">
                   {preview.operands.map((op) => (
                     <label key={op} className="field field--inline">
-                      <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{op}</span>
+                      <span className="coeff-samples__token">{op}</span>
                       <input
                         type="number"
                         step="any"
-                        style={{ width: 90 }}
+                        className="coeff-samples__input"
                         value={samples[op] ?? 1}
                         onChange={(e) =>
                           setSamples((s) => ({ ...s, [op]: Number(e.target.value) }))
@@ -321,7 +276,7 @@ export function CoefficientsPage() {
 
             {/* Actions */}
             {!readOnly && (
-              <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+              <div className="editor-actions">
                 <button
                   type="button"
                   className="btn btn--primary"
@@ -343,36 +298,16 @@ export function CoefficientsPage() {
             )}
 
             {/* Panneau d'opérandes insérables */}
-            <div style={{ marginTop: 20 }}>
-              <h3 style={{ margin: '0 0 6px' }}>Opérandes disponibles (périmètre)</h3>
-              <p className="muted" style={{ margin: '0 0 8px' }}>
-                Cliquez pour insérer dans la formule. Taux absent → 0 (vigilance à
-                votre charge ; protégez les divisions avec <code>SAFE_DIV</code>).
-              </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {operands.map((op) => (
-                  <button
-                    key={op.token}
-                    type="button"
-                    className="chip"
-                    disabled={readOnly}
-                    title={op.token}
-                    onClick={() => insert(`[${op.token}]`)}
-                  >
-                    {op.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <OperandPalette
+              title="Opérandes disponibles (périmètre)"
+              hint="Cliquez pour insérer dans la formule. Taux absent → 0 (vigilance à votre charge ; protégez les divisions avec SAFE_DIV)."
+              operands={operands}
+              disabled={readOnly}
+              onPick={(token) => insert(`[${token}]`)}
+            />
           </div>
         )}
       </div>
     </div>
   );
-}
-
-function formatValue(v: number | undefined): string {
-  if (v === undefined) return '—';
-  // Affiche jusqu'à 6 décimales sans zéros superflus.
-  return Number(v.toFixed(6)).toString();
 }

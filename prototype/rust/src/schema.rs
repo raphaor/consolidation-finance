@@ -115,16 +115,16 @@ CREATE TABLE dim_consolidation (
     id                          INTEGER DEFAULT nextval('seq_consolidation') PRIMARY KEY,
     libelle                     TEXT,
     -- Clé naturelle (identité métier) :
-    phase                       TEXT,   -- FK dim_scenario_category ('REEL', 'BUDGET'…)
-    exercice                    TEXT,   -- FK dim_period ('2024') — sélectionne la remontée
-    perimeter_set               TEXT,   -- FK dim_perimeter_set
-    variant                     TEXT,   -- FK dim_variant ('BASE')
-    presentation_currency       TEXT,   -- FK dim_currency ('EUR')
+    phase                       INTEGER,-- FK dim_scenario_category.id (clé technique B1 ; contrat code 'REEL')
+    exercice                    INTEGER,-- FK dim_period.id (clé technique B1 ; contrat code '2024') — sélectionne la remontée
+    perimeter_set               INTEGER,-- FK dim_perimeter_set.id (clé technique B1 ; contrat code)
+    variant                     INTEGER,-- FK dim_variant.id (clé technique, chantier B1 ; contrat externe = code 'BASE')
+    presentation_currency       INTEGER,-- FK dim_currency.id (clé technique B1 ; contrat code_iso 'EUR')
     -- Hors clé (paramètres de traitement) :
-    perimeter_period            TEXT,   -- FK dim_period (défaut = exercice)
-    rate_set                    TEXT,   -- FK dim_rate_set
-    rate_period                 TEXT,   -- FK dim_period (défaut = exercice)
-    ruleset_code                TEXT,   -- FK dim_ruleset (NULL = pas de règles)
+    perimeter_period            INTEGER,-- FK dim_period.id (clé technique B1 ; contrat code, défaut = exercice)
+    rate_set                    INTEGER,-- FK dim_rate_set.id (clé technique B1 ; contrat code)
+    rate_period                 INTEGER,-- FK dim_period.id (clé technique B1 ; contrat code, défaut = exercice)
+    ruleset_code                INTEGER,-- FK dim_ruleset.id (clé technique B1 ; contrat code, NULL = pas de règles)
     a_nouveau_consolidation_id  INTEGER, -- FK dim_consolidation : conso N-1 figée dont on reporte l'ouverture (NULL = pas d'à-nouveau). Cf. docs/A_NOUVEAU.md §2.2
     statut                      TEXT,   -- 'brouillon' / 'ouvert' / 'verrouillé'
     UNIQUE (phase, exercice, perimeter_set, variant, presentation_currency)
@@ -135,8 +135,8 @@ pub const DDL_DIM_ENTITY: &str = "\
 CREATE TABLE dim_entity (
     code                 TEXT PRIMARY KEY,
     libelle              TEXT,
-    devise_fonctionnelle TEXT,   -- code ISO (EUR, USD, GBP…)
-    entite_parent        TEXT,   -- code entité parente (hiérarchie de groupe)
+    devise_fonctionnelle INTEGER, -- FK dim_currency.id (B1 ; contrat code_iso)
+    entite_parent        INTEGER, -- FK dim_entity.id (B1 ; contrat code, auto-ref)
     statut               TEXT
 );";
 
@@ -166,8 +166,8 @@ CREATE TABLE dim_account (
     code               TEXT PRIMARY KEY,
     libelle            TEXT,
     classe             TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
-    sous_classe        TEXT,           -- référence dim_sous_classe.code
-    flow_scheme        TEXT            -- référence dim_flow_scheme.code ; NULL = défaut dérivé de la classe (cf. pipeline::convert / docs/QUESTIONS_OUVERTES.md Q32)
+    sous_classe        INTEGER,        -- FK dim_sous_classe.id (clé technique B1 ; contrat code)
+    flow_scheme        INTEGER         -- FK dim_flow_scheme.id (clé technique B1 ; contrat code). Q45 : 100 % user-driven, plus de défaut dérivé de la classe. NULL = exclu (silencieusement) de la conversion/clôture (option b, cf. v_flow_behavior)
 );";
 
 /// 4c. dim_flow_scheme : schémas d'articulation des flux (catalogue).
@@ -195,7 +195,7 @@ CREATE TABLE dim_flow_scheme (
 /// résolution par compte se fait via la vue [`v_flow_behavior`].
 pub const DDL_SAT_FLOW_SCHEME_ITEM: &str = "\
 CREATE TABLE sat_flow_scheme_item (
-    scheme          TEXT,
+    scheme          INTEGER,        -- FK dim_flow_scheme.id (clé technique B1 ; contrat code) — partie de PK
     flow            TEXT,
     taux_conversion TEXT CHECK (taux_conversion IN ('close_n1', 'avg', 'close_n')),
     flux_ecart      TEXT,           -- flux d'écart associé (NULL = aucun écart)
@@ -206,24 +206,32 @@ CREATE TABLE sat_flow_scheme_item (
 
 /// 8j. v_flow_behavior : **vue** résolvant le comportement d'un flux **par compte**.
 ///
-/// Joint chaque compte à son schéma de flux (`dim_account.flow_scheme`, ou à
-/// défaut dérivé de la classe : `resultat` → `RESULTAT`, sinon `BILAN`) et expose
+/// Joint chaque compte à son schéma de flux (`dim_account.flow_scheme`) et expose
 /// `(account, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau)`.
-/// Source unique consommée par `pipeline::convert`, `materialize_closures` et
-/// `pipeline::a_nouveau` (à la place de l'ex-`dim_flow.*`). Cf. Q32.
+/// **Q45 (2026-06-25)** : plus de défaut dérivé de la classe — `flow_scheme` est
+/// 100 % user-driven. `LEFT JOIN` (option b) : un compte sans schéma est **toléré
+/// mais exclu** silencieusement de la conversion et de la reconstruction de
+/// clôture (aucune ligne de comportement ne matche son flux). Source unique
+/// consommée par `pipeline::convert`, `materialize_closures` et
+/// `pipeline::a_nouveau` (à la place de l'ex-`dim_flow.*`). Cf. Q32 / Q45.
 pub const DDL_V_FLOW_BEHAVIOR: &str = "\
 CREATE VIEW v_flow_behavior AS
 SELECT
-    a.code           AS account,
-    si.flow          AS flow,
+    a.id                  AS account,
+    df.id                 AS flow,
     si.taux_conversion,
     si.flux_ecart,
+    dfe.id                AS flux_ecart_id,
     si.flux_de_report,
-    si.flux_a_nouveau
+    dfr.id                AS flux_de_report_id,
+    si.flux_a_nouveau,
+    dfan.id               AS flux_a_nouveau_id
 FROM dim_account a
-JOIN sat_flow_scheme_item si
-  ON si.scheme = COALESCE(a.flow_scheme,
-                          CASE WHEN a.classe = 'resultat' THEN 'RESULTAT' ELSE 'BILAN' END);";
+LEFT JOIN sat_flow_scheme_item si  ON si.scheme = a.flow_scheme
+LEFT JOIN dim_flow df   ON df.code  = si.flow
+LEFT JOIN dim_flow dfe  ON dfe.code = si.flux_ecart
+LEFT JOIN dim_flow dfr  ON dfr.code = si.flux_de_report
+LEFT JOIN dim_flow dfan ON dfan.code = si.flux_a_nouveau;";
 
 /// 4b. dim_sous_classe : sous-classes de comptes (actif / passif / charges / produits).
 ///
@@ -233,7 +241,12 @@ pub const DDL_DIM_SOUS_CLASSE: &str = "\
 CREATE TABLE dim_sous_classe (
     code    TEXT PRIMARY KEY,
     libelle TEXT,
-    classe  TEXT CHECK (classe IN ('bilan', 'resultat', 'flux'))
+    classe  TEXT CHECK (classe IN ('bilan', 'resultat', 'flux')),
+    -- Sens comptable user-driven (Q44) : 'C' créditeur (passif, produits),
+    -- 'D' débiteur (actif, charges). NULL = exclu des totaux signés des rapports.
+    -- Remplace le CASE en dur `SENS_CASE` (server.rs) — les rapports signent via
+    -- un JOIN sur cette colonne. Rend `sous_classe` renommable (plus de dur).
+    sens    TEXT CHECK (sens IN ('C', 'D'))
 );";
 
 /// 5. dim_flow : catalogue des flux (cf. docs/FLUX_CONSO.md §6).
@@ -293,10 +306,10 @@ CREATE TABLE dim_method (
 /// (entrée / sortie) pour l'exercice courant.
 pub const DDL_SAT_PERIMETER: &str = "\
 CREATE TABLE sat_perimeter (
-    perimeter_set   TEXT,          -- FK dim_perimeter_set : version du périmètre (cf. Q35)
+    perimeter_set   INTEGER,       -- FK dim_perimeter_set.id (clé technique B1 ; contrat code)
     entity          TEXT,
     period          TEXT,          -- correspond au Entry_period (exercice clôturé)
-    methode         TEXT,          -- FK dim_method.code (intégrité via references.rs, pas de CHECK : les méthodes sont pilotables)
+    methode         INTEGER,       -- FK dim_method.id (B1 : code mutable, id stable)
     pct_interet     DECIMAL(10,4),
     pct_integration DECIMAL(10,4), -- % de contrôle (1.0 pour la globale)
     entree          BOOLEAN DEFAULT FALSE,
@@ -313,7 +326,7 @@ CREATE TABLE sat_perimeter (
 /// dans plusieurs jeux de taux (réels vs budget). Cf. SPEC_SCENARIO_V2.md §1, §2.
 pub const DDL_SAT_EXCHANGE_RATE: &str = "\
 CREATE TABLE sat_exchange_rate (
-    rate_set        TEXT,        -- FK dim_rate_set
+    rate_set        INTEGER,     -- FK dim_rate_set.id (clé technique B1 ; contrat code)
     currency_source TEXT,        -- devise source (convertie vers le pivot)
     period          TEXT,
     taux_close      DECIMAL(18,8),
@@ -346,9 +359,10 @@ CREATE TABLE dim_ruleset (
 /// 8d. dim_ruleset_item : items ordonnés d'un jeu (lien vers dim_rule).
 ///
 /// La PK (ruleset_code, ordre) garantit l'unicité de l'ordre dans un jeu.
+/// `ruleset_code` stocke l'`id` technique de `dim_ruleset` (chantier B1).
 pub const DDL_DIM_RULESET_ITEM: &str = "\
 CREATE TABLE dim_ruleset_item (
-    ruleset_code TEXT,
+    ruleset_code INTEGER,
     ordre        INTEGER,
     rule_code    TEXT,
     PRIMARY KEY (ruleset_code, ordre)
@@ -366,8 +380,9 @@ CREATE TABLE dim_ruleset_item (
 /// après re-création du schéma.
 pub const DDL_DIM_CUSTOM_DIMENSION: &str = "\
 CREATE TABLE IF NOT EXISTS dim_custom_dimension (
-    name  TEXT PRIMARY KEY,
-    label TEXT NOT NULL
+    name              TEXT PRIMARY KEY,
+    label             TEXT NOT NULL,
+    target_dimension  TEXT
 );";
 
 /// 8f. dim_characteristic : registre des **caractéristiques N1** (regroupements).
@@ -413,8 +428,13 @@ CREATE TABLE IF NOT EXISTS dim_characteristic_attribute (
 /// par `custom_references::seed_native` depuis le catalogue statique
 /// `references::NATIVE_MASTER_REFS` (FK natives des master data). Elles sont
 /// verrouillées (non éditables/supprimables via l'API) car elles reflètent le DDL.
+/// Séquence pour les `id` de `dim_custom_reference` (B1 étape 11).
+pub const DDL_SEQ_DIM_CUSTOM_REFERENCE: &str =
+    "CREATE SEQUENCE IF NOT EXISTS seq_dim_custom_reference START 1 INCREMENT 1;";
+
 pub const DDL_DIM_CUSTOM_REFERENCE: &str = "\
 CREATE TABLE IF NOT EXISTS dim_custom_reference (
+    id               INTEGER DEFAULT nextval('seq_dim_custom_reference'),
     host_dimension   TEXT NOT NULL,
     column_name      TEXT NOT NULL,
     target_dimension TEXT NOT NULL,
@@ -486,6 +506,36 @@ CREATE TABLE IF NOT EXISTS dim_indicator (
     format     TEXT
 );";
 
+/// 8o. dim_control : **contrôles de données** — vérifications configurables.
+///
+/// Chaque contrôle est une sélection + assertion exécutée à la demande sur
+/// les données staging ou consolidées. Survit au reset (hors `ALL_DROP`).
+/// Spec : `docs/CONTROLES_DONNEES.md`.
+pub const DDL_DIM_CONTROL: &str = "\
+CREATE TABLE IF NOT EXISTS dim_control (
+    code       TEXT PRIMARY KEY,
+    libelle    TEXT,
+    definition TEXT NOT NULL
+);";
+
+/// 8p. dim_control_set : **jeux de contrôles** — ensembles ordonnés de contrôles.
+/// Survit au reset.
+pub const DDL_DIM_CONTROL_SET: &str = "\
+CREATE TABLE IF NOT EXISTS dim_control_set (
+    code    TEXT PRIMARY KEY,
+    libelle TEXT
+);";
+
+/// 8q. dim_control_set_item : items d'un jeu de contrôles (liens ordonnés).
+/// Survit au reset.
+pub const DDL_DIM_CONTROL_SET_ITEM: &str = "\
+CREATE TABLE IF NOT EXISTS dim_control_set_item (
+    set_code     TEXT,
+    control_code TEXT,
+    ord          INTEGER,
+    PRIMARY KEY (set_code, control_code)
+);";
+
 // --- Staging : saisie brute (format liasse CSV) -------------------------------
 
 /// 9. stg_entry : saisie brute — au grain **remontée** (phase + entry_period).
@@ -528,16 +578,16 @@ pub const DDL_FACT_ENTRY: &str = "\
 CREATE TABLE fact_entry (
     id               INTEGER DEFAULT nextval('seq_entry'),
     consolidation_id INTEGER,
-    phase            TEXT,
-    entity           TEXT,
-    entry_period     TEXT,
-    period           TEXT,
-    account          TEXT,
-    flow             TEXT,
-    currency         TEXT,
-    nature           TEXT NOT NULL,
-    partner          TEXT,
-    share            TEXT,
+    phase            INTEGER,
+    entity           INTEGER,
+    entry_period     INTEGER,
+    period           INTEGER,
+    account          INTEGER,
+    flow             INTEGER,
+    currency         INTEGER,
+    nature           INTEGER NOT NULL,
+    partner          INTEGER,
+    share            INTEGER,
     analysis         TEXT,
     analysis2        TEXT,
     level            TEXT CHECK (level IN ('corporate', 'converted', 'consolidated')),
@@ -581,18 +631,23 @@ pub const ALL_DDL: &[&str] = &[
     DDL_SAT_PERIMETER,
     DDL_SAT_EXCHANGE_RATE,
     DDL_SAT_FLOW_SCHEME_ITEM,
-    DDL_V_FLOW_BEHAVIOR,
+    // NOTE: DDL_V_FLOW_BEHAVIOR est créée APRÈS ensure_ids dans create_schema
+    // car elle référence les colonnes `id` ajoutées par ensure_ids.
     DDL_DIM_RULE,
     DDL_DIM_RULESET,
     DDL_DIM_RULESET_ITEM,
     DDL_DIM_CUSTOM_DIMENSION,
     DDL_DIM_CHARACTERISTIC,
     DDL_DIM_CHARACTERISTIC_ATTRIBUTE,
+    DDL_SEQ_DIM_CUSTOM_REFERENCE,
     DDL_DIM_CUSTOM_REFERENCE,
     DDL_DIM_VALUE_LIST,
     DDL_DIM_COEFFICIENT,
     DDL_DIM_AGGREGATE,
     DDL_DIM_INDICATOR,
+    DDL_DIM_CONTROL,
+    DDL_DIM_CONTROL_SET,
+    DDL_DIM_CONTROL_SET_ITEM,
     DDL_STG_ENTRY,
     DDL_FACT_ENTRY,
 ];
@@ -656,27 +711,44 @@ pub fn create_schema(con: &duckdb::Connection) -> duckdb::Result<()> {
         con.execute(stmt, [])?;
     }
 
-    // 4. Ré-appliquer les colonnes custom survivantes.
+    // 4. Doter chaque dimension d'un `id` technique (chantier B1, étape 1).
+    //    Doit précéder reapply() qui lit dim_characteristic.id.
+    crate::surrogate::ensure_ids(con)?;
+
+    // 4b. Doter dim_characteristic_attribute d'un `id` (clé composite → séquence).
+    crate::surrogate::ensure_characteristic_attribute_ids(con)?;
+
+    // 4c. Renommer les tables de valeurs car_<code> → car_<id> et lst_<code> →
+    //     lst_<id> sur les bases existantes (no-op sur base fraîche).
+    crate::surrogate::migrate_characteristic_tables_to_id(con)?;
+    crate::surrogate::migrate_value_list_tables_to_id(con)?;
+
+    // 5. Ré-appliquer les colonnes custom survivantes.
     crate::dimensions::apply_custom_columns(con, &saved_customs)?;
 
-    // 5. Ré-appliquer les colonnes de rattachement des caractéristiques N1
+    // 6. Ré-appliquer les colonnes de rattachement des caractéristiques N1
     //    (perdues au DROP des tables de dimension de base ; les tables de
-    //    valeurs `car_<code>` survivent au reset, donc ne sont pas recréées).
+    //    valeurs `car_<id>` survivent au reset, donc ne sont pas recréées).
     crate::characteristics::reapply(con)?;
 
-    // 6. Ré-appliquer les colonnes des références directes (patron B), perdues
+    // 7. Ré-appliquer les colonnes des références directes (patron B), perdues
     //    elles aussi au DROP des dimensions hôtes (le registre survit au reset).
     crate::custom_references::reapply(con)?;
 
-    // 7. Peupler les FK natives du DDL statique dans `dim_custom_reference`
+    // 8. Peupler les FK natives du DDL statique dans `dim_custom_reference`
     //    (account.sous_classe, entity.entite_parent, scenario.category, …).
     //    Marquées `native=TRUE` et verrouillées contre édition via l'API.
     //    Idempotent : INSERT OR IGNORE préserve les customs utilisateur.
     crate::custom_references::seed_native(con)?;
 
-    // 8. (Re)seeder les coefficients natifs (moteur de formules, volet 1).
+    // 9. (Re)seeder les coefficients natifs (moteur de formules, volet 1).
     //    Idempotent (INSERT OR IGNORE) ; les coefficients utilisateur survivent.
     crate::coefficients::seed_builtins(con)?;
+
+    // 10. Créer la vue v_flow_behavior APRÈS ensure_ids car elle référence les
+    //     colonnes `id` ajoutées par cette étape (dim_account.id, dim_flow.id).
+    //     `ALL_DROP` la supprime ; elle n'est donc pas dans `ALL_DDL`.
+    con.execute_batch(DDL_V_FLOW_BEHAVIOR)?;
 
     Ok(())
 }

@@ -64,7 +64,12 @@ pub struct ConvertParams {
     /// Devise pivot applicative (tous les taux stockés convertissent vers elle).
     pub pivot_currency: String,
     /// Jeu de périmètre du run (clé dans `sat_perimeter`).
-    pub perimeter_set: String,
+    ///
+    /// **Id technique** (chantier B1) : `sat_perimeter.perimeter_set` est stockée
+    /// en id. Contrairement à `phase`/`rate_set` (résolus en code pour leurs
+    /// consommateurs code-based), `perimeter_set` reste en id — ses seuls
+    /// consommateurs sont les jointures sur `sat_perimeter` (désormais id=id).
+    pub perimeter_set: i64,
     /// Période du périmètre (défaut = exercice).
     pub perimeter_period: String,
     /// Jeu de taux à utiliser (clé dans `sat_exchange_rate`).
@@ -93,12 +98,23 @@ impl ConvertParams {
             rate_set,
             rate_period,
             a_nouveau_consolidation_id,
-        ): (String, String, String, String, String, String, String, Option<i64>) = con.query_row(
-            "SELECT c.phase, c.exercice, c.presentation_currency,
-                    c.perimeter_set, c.perimeter_period,
-                    c.rate_set, c.rate_period,
+        ): (String, String, String, i64, String, String, String, Option<i64>) = con.query_row(
+            // Toutes les FK de dim_consolidation sont en clé technique (id, B1) :
+            // phase / rate_set / exercice / presentation_currency / perimeter_period /
+            // rate_period sont résolus id→code par JOIN (consommateurs code-based).
+            // perimeter_set est un id non résolu : sat_perimeter est id-keyed,
+            // on passe l'id directement aux jointures pipeline.
+            "SELECT sc.code, p_ex.code, cur.code_iso,
+                    c.perimeter_set, p_pp.code,
+                    rs.code, p_rp.code,
                     c.a_nouveau_consolidation_id
              FROM dim_consolidation c
+             LEFT JOIN dim_scenario_category sc ON sc.id = c.phase
+             LEFT JOIN dim_period p_ex ON p_ex.id = c.exercice
+             LEFT JOIN dim_currency cur ON cur.id = c.presentation_currency
+             LEFT JOIN dim_period p_pp ON p_pp.id = c.perimeter_period
+             LEFT JOIN dim_rate_set rs ON rs.id = c.rate_set
+             LEFT JOIN dim_period p_rp ON p_rp.id = c.rate_period
              WHERE c.id = ?",
             [consolidation_id],
             |r| {
@@ -106,7 +122,7 @@ impl ConvertParams {
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(3)?,
                     r.get::<_, String>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, String>(6)?,
@@ -115,8 +131,17 @@ impl ConvertParams {
             },
         )?;
 
+        // B1 étape 8 : préférer pivot_currency_id (résolution id→code) pour que la
+        // devise pivot reste correcte même si son code est renommé. Fallback sur le
+        // code direct (legacy) si la migration n'a pas encore tourné.
         let pivot_currency: String = con.query_row(
-            "SELECT COALESCE((SELECT value FROM app_config WHERE key = 'pivot_currency'), 'EUR')",
+            "SELECT COALESCE(\
+                (SELECT dc.code_iso FROM app_config ac \
+                 JOIN dim_currency dc ON dc.id = CAST(ac.value AS BIGINT) \
+                 WHERE ac.key = 'pivot_currency_id'),\
+                (SELECT value FROM app_config WHERE key = 'pivot_currency'),\
+                'EUR'\
+             )",
             [],
             |r| r.get::<_, String>(0),
         )?;

@@ -97,10 +97,12 @@ fn load_closure_components(con: &Connection) -> duckdb::Result<Vec<(String, Vec<
 /// Charge une grille (account, flow) → montant pour un niveau donné.
 fn load_grid(con: &Connection, level: &str) -> duckdb::Result<BTreeMap<(String, String), Decimal>> {
     let mut stmt = con.prepare(
-        "SELECT account, flow, SUM(amount) AS amount
-         FROM fact_entry
-         WHERE level = ?
-         GROUP BY account, flow",
+        "SELECT da.code AS account, df.code AS flow, SUM(f.amount) AS amount
+         FROM fact_entry f
+         JOIN dim_account da ON da.id = f.account
+         JOIN dim_flow df ON df.id = f.flow
+         WHERE f.level = ?
+         GROUP BY da.code, df.code",
     )?;
     let rows = stmt.query_map([level], |row| {
         let m: Money = row.get(2)?;
@@ -251,17 +253,24 @@ pub fn check_a_nouveau_coherence(
     // 1. Divergence `entree` (saisi) vs présence au snapshot, pour les entités
     //    du périmètre courant. `entree` devrait = NON was_consolidated ; donc
     //    `entree == was_consolidated` est une divergence.
+    // fact_entry.flow (INTEGER) vs sat_flow_scheme_item.flow (TEXT) → bridge via dim_flow.
+    // fact_entry.entity (INTEGER) vs sat_perimeter.entity (TEXT) → bridge via dim_entity.
     let mut stmt = con.prepare(
         "SELECT p.entity,
                 COALESCE(p.entree, FALSE) AS entree,
                 EXISTS (
                     SELECT 1 FROM fact_entry s
                     WHERE s.consolidation_id = ? AND s.level = 'consolidated'
-                      AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
-                      AND s.entity = p.entity
+                      AND s.flow IN (
+                          SELECT df.id FROM sat_flow_scheme_item si
+                          JOIN dim_flow df ON df.code = si.flow
+                          WHERE si.flux_a_nouveau IS NOT NULL
+                      )
+                      AND s.entity = (SELECT de.id FROM dim_entity de WHERE de.code = p.entity)
                 ) AS was_consolidated
          FROM sat_perimeter p
-         WHERE p.perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = ?)
+         WHERE p.perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c
+                                  WHERE c.id = ?)
            AND p.period = ?
          ORDER BY p.entity",
     )?;
@@ -293,15 +302,21 @@ pub fn check_a_nouveau_coherence(
 
     // 2. Orphelins : entités consolidées en N-1 mais absentes du périmètre courant.
     let mut stmt2 = con.prepare(
-        "SELECT DISTINCT s.entity FROM fact_entry s
+        "SELECT DISTINCT de.code AS entity FROM fact_entry s
+         JOIN dim_entity de ON de.id = s.entity
          WHERE s.consolidation_id = ? AND s.level = 'consolidated'
-           AND s.flow IN (SELECT DISTINCT flow FROM sat_flow_scheme_item WHERE flux_a_nouveau IS NOT NULL)
-           AND s.entity NOT IN (
-               SELECT entity FROM sat_perimeter
-               WHERE perimeter_set = (SELECT perimeter_set FROM dim_consolidation WHERE id = ?)
-                 AND period = ?
+           AND s.flow IN (
+               SELECT df.id FROM sat_flow_scheme_item si
+               JOIN dim_flow df ON df.code = si.flow
+               WHERE si.flux_a_nouveau IS NOT NULL
            )
-         ORDER BY s.entity",
+           AND de.code NOT IN (
+                SELECT entity FROM sat_perimeter
+                WHERE perimeter_set = (SELECT c.perimeter_set FROM dim_consolidation c
+                                       WHERE c.id = ?)
+                  AND period = ?
+           )
+         ORDER BY de.code",
     )?;
     let rows2 = stmt2.query_map(
         duckdb::params![a_nouveau_consolidation_id, consolidation_id, exercice],

@@ -5,6 +5,7 @@
 // est fait côté client. Suffisant pour le prototype mono-utilisateur.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
 import {
   type ColumnDef,
   flexRender,
@@ -95,7 +96,7 @@ export function EcrituresPage() {
       });
       setData(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setData([]);
     } finally {
       setLoading(false);

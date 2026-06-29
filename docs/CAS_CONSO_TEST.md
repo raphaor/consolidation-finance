@@ -4,8 +4,14 @@ Source : `Conso rules/Cas de consolidation.xlsx` (3 feuilles de scénarios).
 
 Annexe de [`REGLES_CONSO.md`](./REGLES_CONSO.md). Sert de **cahier de recette**
 pour valider que le moteur de règles + le moteur natif produisent les bons
-chiffres sur des cas représentatifs. Les jeux de données correspondants sont
-dans [`prototype/rust/data/smoke/`](../prototype/rust/data/smoke/).
+chiffres sur des cas représentatifs.
+
+> **Note** (2026-06-28) : les datasets CSV `prototype/rust/data/smoke/` et le
+> script `smoke_test.py` ont été supprimés par le chantier migration CSV→JSON
+> (cf. [`PLAN_MIGRATION_CSV_JSON.md`](./PLAN_MIGRATION_CSV_JSON.md)). Ce document
+> reste valable comme spécification des cas de test ; l'implémentation de
+> référence vit désormais dans `tests/rules.rs`, `tests/golden.rs`,
+> `tests/pipeline.rs`.
 
 ---
 

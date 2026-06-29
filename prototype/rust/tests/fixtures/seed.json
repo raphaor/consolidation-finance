@@ -1,0 +1,4049 @@
+{
+  "_car:1": [
+    {
+      "code": "capitaux_propres",
+      "libelle": "Capitaux propres"
+    }
+  ],
+  "_meta": {
+    "format": "conso-export-v3"
+  },
+  "app_config": [
+    {
+      "key": "pivot_currency",
+      "value": "EUR"
+    }
+  ],
+  "dim_account": [
+    {
+      "classe": "bilan",
+      "code": "1",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 1,
+      "libelle": "COMPTES DE CAPITAUX",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "10",
+      "flow_scheme": null,
+      "groupement": "capitaux_propres",
+      "id": 2,
+      "libelle": "Capital et réserves",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "101",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 3,
+      "libelle": "Capital",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "102",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 4,
+      "libelle": "Fonds fiduciaires",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "104",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 5,
+      "libelle": "Primes liées au capital",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "105",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 6,
+      "libelle": "Écarts de réévaluation",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "106",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 7,
+      "libelle": "Réserves",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "107",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 8,
+      "libelle": "Écart d'équivalence",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "108",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 9,
+      "libelle": "Compte de l'exploitant",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "109",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 10,
+      "libelle": "Actionnaires : capital souscrit - non appelé",
+      "r14": "10",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "11",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 11,
+      "libelle": "Report à nouveau",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "110",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 12,
+      "libelle": "Report à nouveau - solde créditeur",
+      "r14": "11",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "110G",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 13,
+      "libelle": "Report à nouveau - part du Groupe",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "110M",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 14,
+      "libelle": "Report à nouveau - intérêts minoritaires",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "110C",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 15,
+      "libelle": "Report à nouveau - écarts de conversion",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "110CG",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 16,
+      "libelle": "Report à nouveau - écarts de conversion - part du Groupe",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "110CM",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 17,
+      "libelle": "Report à nouveau - écarts de conversion - intérêt minoritaires",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "12",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 18,
+      "libelle": "Résultat de l'exercice",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "120",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 19,
+      "libelle": "Résultat de l'exercice - bénéfice",
+      "r14": "12",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "1209",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 20,
+      "libelle": "Acomptes sur dividendes",
+      "r14": "120",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "120G",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 21,
+      "libelle": "Résultat de l'exercice - part du Groupe",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "120M",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 22,
+      "libelle": "Résultat de l'exercice - intérêts minoritaires",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "120C",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 23,
+      "libelle": "Résultat de l'exercice - écarts de conversion",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "120CG",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 24,
+      "libelle": "Résultat de l'exercice - écarts de conversion - part du Groupe",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "120CM",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 25,
+      "libelle": "Résultat de l'exercice - écarts de conversion - intérêts minoritaires",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "13",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 26,
+      "libelle": "Subventions d'investissement",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "131",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 27,
+      "libelle": "Subventions d'investissement octroyées",
+      "r14": "13",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "139",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 28,
+      "libelle": "Subventions d'investissement inscrites au compte de résultat",
+      "r14": "13",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "14",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 29,
+      "libelle": "Provisions réglementées",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "143",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 30,
+      "libelle": "Provisions réglementées pour hausse de prix",
+      "r14": "14",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "145",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 31,
+      "libelle": "Amortissements dérogatoires",
+      "r14": "14",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "148",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 32,
+      "libelle": "Autres provisions réglementées",
+      "r14": "14",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "15",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 33,
+      "libelle": "Provisions",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "151",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 34,
+      "libelle": "Provisions pour risques",
+      "r14": "15",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "152",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 35,
+      "libelle": "Provisions pour charges",
+      "r14": "15",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "153",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 36,
+      "libelle": "Provisions sur titres consolidés",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "16",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 37,
+      "libelle": "Emprunts et dettes assimilées, fonds non remboursables et avances conditionnées",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "161",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 38,
+      "libelle": "Emprunts obligataires convertibles si non-inscrits dans le compte 167",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "162",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 39,
+      "libelle": "Obligations représentatives de passifs nets remis en fiducie si non-inscrites dans le compte 167",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "163",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 40,
+      "libelle": "Autres emprunts obligataires si non-inscrits dans le compte 167",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "164",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 41,
+      "libelle": "Emprunts auprès des établissements de crédit si non-inscrits dans le compte 167",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "165",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 42,
+      "libelle": "Dépôts et cautionnements reçus",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "166",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 43,
+      "libelle": "Participation des salariés aux résultats",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "167",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 44,
+      "libelle": "Fonds non remboursables et avances conditionnées",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "168",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 45,
+      "libelle": "Autres emprunts et dettes assimilées",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "169",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 46,
+      "libelle": "Primes de remboursement des emprunts",
+      "r14": "16",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "17",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 47,
+      "libelle": "Dettes rattachées à des participations",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "171",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 48,
+      "libelle": "Dettes rattachées à des participations - groupe",
+      "r14": "17",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "174",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 49,
+      "libelle": "Dettes rattachées à des participations - hors groupe",
+      "r14": "17",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "178",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 50,
+      "libelle": "Dettes rattachées à des sociétés en participation",
+      "r14": "17",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "18",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 51,
+      "libelle": "Comptes de liaison des établissements et sociétés en participation",
+      "r14": "1",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "181",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 52,
+      "libelle": "Comptes de liaison des établissements",
+      "r14": "18",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "186",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 53,
+      "libelle": "Biens et prestations de services échangés entre établissements - charges",
+      "r14": "18",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "187",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 54,
+      "libelle": "Biens et prestations de services échangés entre établissements - produits",
+      "r14": "18",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "188",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 55,
+      "libelle": "Comptes de liaison des sociétés en participation",
+      "r14": "18",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "2",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 56,
+      "libelle": "COMPTES D'IMMOBILISATIONS",
+      "r14": null,
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "20",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 57,
+      "libelle": "Immobilisations incorporelles et frais d'établissement",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "201",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 58,
+      "libelle": "Frais d'établissement",
+      "r14": "20",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "203",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 59,
+      "libelle": "Frais de développement",
+      "r14": "20",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "205",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 60,
+      "libelle": "Concessions et droits similaires, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",
+      "r14": "20",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "206",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 61,
+      "libelle": "Droit au bail",
+      "r14": "20",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "207",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 62,
+      "libelle": "Fonds commercial",
+      "r14": "20",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "208",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 63,
+      "libelle": "Autres immobilisations incorporelles",
+      "r14": "20",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "21",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 64,
+      "libelle": "Immobilisations corporelles",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "211",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 65,
+      "libelle": "Terrains",
+      "r14": "21",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "212",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 66,
+      "libelle": "Agencements et aménagements de terrains",
+      "r14": "21",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "213",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 67,
+      "libelle": "Constructions",
+      "r14": "21",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "214",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 68,
+      "libelle": "Constructions sur sol d'autrui",
+      "r14": "21",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "215",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 69,
+      "libelle": "Installations techniques, matériels et outillages industriels",
+      "r14": "21",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "218",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 70,
+      "libelle": "Autres immobilisations corporelles",
+      "r14": "21",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "22",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 71,
+      "libelle": "Immobilisations mises en concession",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "229",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 72,
+      "libelle": "Droits du concédant",
+      "r14": "22",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "23",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 73,
+      "libelle": "Immobilisations en cours, avances et acomptes",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "231",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 74,
+      "libelle": "Immobilisations corporelles en cours",
+      "r14": "23",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "232",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 75,
+      "libelle": "Immobilisations incorporelles en cours",
+      "r14": "23",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "237",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 76,
+      "libelle": "Avances et acomptes versés sur commandes d'immobilisations incorporelles",
+      "r14": "23",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "238",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 77,
+      "libelle": "Avances et acomptes versés sur commandes d'immobilisations corporelles",
+      "r14": "23",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "26",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 78,
+      "libelle": "Participations et créances rattachées à des participations",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "261",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 79,
+      "libelle": "Titres de participation",
+      "r14": "26",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "262",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 80,
+      "libelle": "Titres évalués par équivalence",
+      "r14": "26",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "266",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 81,
+      "libelle": "Autres formes de participation",
+      "r14": "26",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "267",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 82,
+      "libelle": "Créances rattachées à des participations",
+      "r14": "26",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "268",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 83,
+      "libelle": "Créances rattachées à des sociétés en participation",
+      "r14": "26",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "269",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 84,
+      "libelle": "Versements restant à effectuer sur titres de participation non libérés",
+      "r14": "26",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "27",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 85,
+      "libelle": "Autres immobilisations financières",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "271",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 86,
+      "libelle": "Titres immobilisés autres que les titres immobilisés de l'activité de portefeuille",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "272",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 87,
+      "libelle": "Titres immobilisés (droit de créance)",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "273",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 88,
+      "libelle": "Titres immobilisés de l'activité de portefeuille",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "274",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 89,
+      "libelle": "Prêts",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "275",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 90,
+      "libelle": "Dépôts et cautionnements versés",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "276",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 91,
+      "libelle": "Autres créances immobilisées",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "277",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 92,
+      "libelle": "Actions propres ou parts propres",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "278",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 93,
+      "libelle": "Mali de fusion sur actifs financiers",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "279",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 94,
+      "libelle": "Versements restant à effectuer sur titres immobilisés non libérés",
+      "r14": "27",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "28",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 95,
+      "libelle": "Amortissements des immobilisations",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "280",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 96,
+      "libelle": "Amortissements des immobilisations incorporelles et des frais d'établissement",
+      "r14": "28",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "281",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 97,
+      "libelle": "Amortissements des immobilisations corporelles",
+      "r14": "28",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "282",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 98,
+      "libelle": "Amortissements des immobilisations mises en concession",
+      "r14": "28",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "29",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 99,
+      "libelle": "Dépréciations des immobilisations",
+      "r14": "2",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "290",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 100,
+      "libelle": "Dépréciations des immobilisations incorporelles",
+      "r14": "29",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "291",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 101,
+      "libelle": "Dépréciations des immobilisations corporelles",
+      "r14": "29",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "292",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 102,
+      "libelle": "Dépréciations des immobilisations mises en concession",
+      "r14": "29",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "293",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 103,
+      "libelle": "Dépréciations des immobilisations en cours",
+      "r14": "29",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "296",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 104,
+      "libelle": "Dépréciations des participations et créances rattachées à des participations",
+      "r14": "29",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "297",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 105,
+      "libelle": "Dépréciations des autres immobilisations financières",
+      "r14": "29",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "3",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 106,
+      "libelle": "COMPTES DE STOCKS ET EN-COURS",
+      "r14": null,
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "31",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 107,
+      "libelle": "Matières premières et fournitures",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "32",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 108,
+      "libelle": "Autres approvisionnements",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "321",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 109,
+      "libelle": "Matières consommables",
+      "r14": "32",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "322",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 110,
+      "libelle": "Fournitures consommables",
+      "r14": "32",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "326",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 111,
+      "libelle": "Emballages",
+      "r14": "32",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "33",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 112,
+      "libelle": "En-cours de production de biens",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "331",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 113,
+      "libelle": "Produits en cours",
+      "r14": "33",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "335",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 114,
+      "libelle": "Travaux en cours",
+      "r14": "33",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "34",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 115,
+      "libelle": "En-cours de production de services",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "341",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 116,
+      "libelle": "Études en cours",
+      "r14": "34",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "345",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 117,
+      "libelle": "Prestations de services en cours",
+      "r14": "34",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "35",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 118,
+      "libelle": "Stocks de produits",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "351",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 119,
+      "libelle": "Produits intermédiaires",
+      "r14": "35",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "355",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 120,
+      "libelle": "Produits finis",
+      "r14": "35",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "358",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 121,
+      "libelle": "Produits résiduels ou matières de récupération",
+      "r14": "35",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "36",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 122,
+      "libelle": "Stocks provenant d'immobilisations",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "37",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 123,
+      "libelle": "Stocks de marchandises",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "38",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 124,
+      "libelle": "Stocks en voie d'acheminement, mis en dépôt ou donnés en consignation",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "39",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 125,
+      "libelle": "Dépréciations des stocks et en-cours",
+      "r14": "3",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "4P",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 126,
+      "libelle": "COMPTES DE TIERS - PASSIF",
+      "r14": null,
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "4A",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 127,
+      "libelle": "COMPTES DE TIERS - ACTIF",
+      "r14": null,
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "40",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 128,
+      "libelle": "Fournisseurs et comptes rattachés",
+      "r14": "4P",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "401",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 129,
+      "libelle": "Fournisseurs",
+      "r14": "40",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "403",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 130,
+      "libelle": "Fournisseurs - Effets à payer",
+      "r14": "40",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "404",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 131,
+      "libelle": "Fournisseurs d'immobilisations",
+      "r14": "40",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "405",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 132,
+      "libelle": "Fournisseurs d'immobilisations - Effets à payer",
+      "r14": "40",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "408",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 133,
+      "libelle": "Fournisseurs - Factures non parvenues",
+      "r14": "40",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "409",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 134,
+      "libelle": "Fournisseurs débiteurs",
+      "r14": "40",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "41",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 135,
+      "libelle": "Clients et comptes rattachés",
+      "r14": "4A",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "411",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 136,
+      "libelle": "Clients",
+      "r14": "41",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "413",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 137,
+      "libelle": "Clients - Effets à recevoir",
+      "r14": "41",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "416",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 138,
+      "libelle": "Clients douteux ou litigieux",
+      "r14": "41",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "418",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 139,
+      "libelle": "Clients - Produits non encore facturés",
+      "r14": "41",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "419",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 140,
+      "libelle": "Clients créditeurs",
+      "r14": "41",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "42",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 141,
+      "libelle": "Personnel et comptes rattachés",
+      "r14": "4P",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "421",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 142,
+      "libelle": "Personnel - Rémunérations dues",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "422",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 143,
+      "libelle": "Comité social et économique",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "424",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 144,
+      "libelle": "Participation des salariés aux résultats",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "425",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 145,
+      "libelle": "Personnel - Avances et acomptes et autres comptes débiteurs",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "426",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 146,
+      "libelle": "Personnel - Dépôts",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "427",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 147,
+      "libelle": "Personnel - Oppositions",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "428",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 148,
+      "libelle": "Personnel - Charges à payer",
+      "r14": "42",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "43",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 149,
+      "libelle": "Sécurité sociale et autres organismes sociaux",
+      "r14": "4P",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "431",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 150,
+      "libelle": "Sécurité sociale",
+      "r14": "43",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "437",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 151,
+      "libelle": "Autres organismes sociaux",
+      "r14": "43",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "438",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 152,
+      "libelle": "Organismes sociaux - Charges à payer",
+      "r14": "43",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "439",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 153,
+      "libelle": "Organismes sociaux - Produits à recevoir",
+      "r14": "43",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "44",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 154,
+      "libelle": "État et autres collectivités publiques",
+      "r14": "4P",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "441",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 155,
+      "libelle": "État - Subventions et aides à recevoir",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "442",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 156,
+      "libelle": "Contributions, impôts et taxes recouvrés pour le compte de l'État",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "444",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 157,
+      "libelle": "État - Impôts sur les bénéfices",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "445",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 158,
+      "libelle": "État - Taxes sur le chiffre d'affaires",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "446",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 159,
+      "libelle": "Obligations cautionnées",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "447",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 160,
+      "libelle": "Autres impôts, taxes et versements assimilés",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "448",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 161,
+      "libelle": "État - Charges à payer et produits à recevoir",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "449",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 162,
+      "libelle": "Quotas d'émission à acquérir",
+      "r14": "44",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "45",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 163,
+      "libelle": "Groupe et associés",
+      "r14": "4P",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "451",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 164,
+      "libelle": "Groupe",
+      "r14": "45",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "455",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 165,
+      "libelle": "Associés - Comptes courants",
+      "r14": "45",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "456",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 166,
+      "libelle": "Associés - Opérations sur le capital",
+      "r14": "45",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "457",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 167,
+      "libelle": "Associés - Dividendes à payer",
+      "r14": "45",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "458",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 168,
+      "libelle": "Associés - Opérations faites en commun et en GIE",
+      "r14": "45",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "46",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 169,
+      "libelle": "Débiteurs divers et créditeurs divers",
+      "r14": "4A",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "462",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 170,
+      "libelle": "Créances sur cessions d'immobilisations",
+      "r14": "46",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "464",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 171,
+      "libelle": "Dettes sur acquisitions de valeurs mobilières de placement",
+      "r14": "46",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "465",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 172,
+      "libelle": "Créances sur cessions de valeurs mobilières de placement",
+      "r14": "46",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "467",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 173,
+      "libelle": "Divers comptes débiteurs et produits à recevoir",
+      "r14": "46",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "468",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 174,
+      "libelle": "Divers comptes créditeurs et charges à payer",
+      "r14": "46",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "47",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 175,
+      "libelle": "Comptes transitoires ou d'attente",
+      "r14": "4A",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "471",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 176,
+      "libelle": "Comptes d'attente",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "471L",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 177,
+      "libelle": "Compte de Liaison Bilan",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "472",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 178,
+      "libelle": "Comptes d'attente",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "473",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 179,
+      "libelle": "Comptes d'attente",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "474",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 180,
+      "libelle": "Différences d'évaluation – Actif",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "475",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 181,
+      "libelle": "Différences d'évaluation – Passif",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "476",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 182,
+      "libelle": "Différence de conversion - Actif",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "477",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 183,
+      "libelle": "Différences de conversion - Passif",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "478",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 184,
+      "libelle": "Autres comptes transitoires",
+      "r14": "47",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "48",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 185,
+      "libelle": "Comptes de régularisation",
+      "r14": "4A",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "481",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 186,
+      "libelle": "Frais d'émission des emprunts",
+      "r14": "48",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "486",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 187,
+      "libelle": "Charges constatées d'avance",
+      "r14": "48",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "487",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 188,
+      "libelle": "Produits constatés d'avance",
+      "r14": "48",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "488",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 189,
+      "libelle": "Comptes de répartition périodique des charges et des produits",
+      "r14": "48",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "49",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 190,
+      "libelle": "Dépréciations des comptes de tiers",
+      "r14": "4A",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "491",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 191,
+      "libelle": "Dépréciations des comptes de clients",
+      "r14": "49",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "495",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 192,
+      "libelle": "Dépréciations des comptes du groupe et des associés",
+      "r14": "49",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "496",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 193,
+      "libelle": "Dépréciations des comptes de débiteurs divers",
+      "r14": "49",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "5",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 194,
+      "libelle": "COMPTES FINANCIERS",
+      "r14": null,
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "50",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 195,
+      "libelle": "Valeurs mobilières de placement",
+      "r14": "5",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "502",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 196,
+      "libelle": "Actions propres",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "503",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 197,
+      "libelle": "Actions",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "504",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 198,
+      "libelle": "Autres titres conférant un droit de propriété",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "505",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 199,
+      "libelle": "Obligations et bons émis par la société et rachetés par elle",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "506",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 200,
+      "libelle": "Obligations",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "507",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 201,
+      "libelle": "Bons du Trésor et bons de caisse à court terme",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "508",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 202,
+      "libelle": "Autres valeurs mobilières de placement et autres créances assimilées",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "509",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 203,
+      "libelle": "Versements restant à effectuer sur valeurs mobilières de placement non libérées",
+      "r14": "50",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "51",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 204,
+      "libelle": "Banques, établissements financiers et assimilés",
+      "r14": "5",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "511",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 205,
+      "libelle": "Valeurs à l'encaissement",
+      "r14": "51",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "512",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 206,
+      "libelle": "Banques",
+      "r14": "51",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "517",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 207,
+      "libelle": "Autres organismes financiers",
+      "r14": "51",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "518",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 208,
+      "libelle": "Intérêts courus",
+      "r14": "51",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "519",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 209,
+      "libelle": "Concours bancaires courants",
+      "r14": "51",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "52",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 210,
+      "libelle": "Instruments financiers à terme et jetons détenus",
+      "r14": "5",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "521",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 211,
+      "libelle": "Instruments financiers à terme",
+      "r14": "52",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "522",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 212,
+      "libelle": "Jetons détenus",
+      "r14": "52",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "523",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 213,
+      "libelle": "Jetons auto-détenus",
+      "r14": "52",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "524",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 214,
+      "libelle": "Jetons empruntés",
+      "r14": "52",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "53",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 215,
+      "libelle": "Caisse",
+      "r14": "5",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "58",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 216,
+      "libelle": "Virements internes",
+      "r14": "5",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "59",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 217,
+      "libelle": "Dépréciations des comptes financiers",
+      "r14": "5",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "590",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 218,
+      "libelle": "Dépréciations des valeurs mobilières de placement",
+      "r14": "59",
+      "sous_classe": 1
+    },
+    {
+      "classe": "resultat",
+      "code": "6",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 219,
+      "libelle": "COMPTES DE CHARGES",
+      "r14": null,
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "60",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 220,
+      "libelle": "Achats (sauf 603)",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "601",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 221,
+      "libelle": "Achats stockés - Matières premières et fournitures",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "602",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 222,
+      "libelle": "Achats stockés - Autres approvisionnements",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "604",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 223,
+      "libelle": "Achats d'études et prestations de services",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "605",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 224,
+      "libelle": "Achats de matériel, équipements et travaux",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "606",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 225,
+      "libelle": "Achats non stockés de matière et fournitures",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "607",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 226,
+      "libelle": "Achats de marchandises",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "608",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 227,
+      "libelle": "Frais accessoires incorporés aux achats",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "609",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 228,
+      "libelle": "Rabais, remises et ristournes obtenus sur achats",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "603",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 229,
+      "libelle": "Variation des stocks d'approvisionnements et de marchandises",
+      "r14": "60",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "61",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 230,
+      "libelle": "Services extérieurs",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "611",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 231,
+      "libelle": "Sous-traitance générale",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "612",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 232,
+      "libelle": "Redevances de crédit-bail",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "613",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 233,
+      "libelle": "Locations",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "614",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 234,
+      "libelle": "Charges locatives et de copropriété",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "615",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 235,
+      "libelle": "Entretien et réparation",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "616",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 236,
+      "libelle": "Primes d'assurances",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "617",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 237,
+      "libelle": "Études et recherches",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "618",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 238,
+      "libelle": "Divers",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "619",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 239,
+      "libelle": "Rabais, remises et ristournes obtenus sur services extérieurs",
+      "r14": "61",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "62",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 240,
+      "libelle": "Autres services extérieurs",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "621",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 241,
+      "libelle": "Personnel extérieur à l'entité",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "622",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 242,
+      "libelle": "Rémunérations d'intermédiaires et honoraires",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "623",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 243,
+      "libelle": "Publicité, publications, relations publiques",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "624",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 244,
+      "libelle": "Transports de biens et transports collectifs du personnel",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "625",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 245,
+      "libelle": "Déplacements, missions et réceptions",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "626",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 246,
+      "libelle": "Frais postaux et de télécommunications",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "627",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 247,
+      "libelle": "Services bancaires et assimilés",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "628",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 248,
+      "libelle": "Divers",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "629",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 249,
+      "libelle": "Rabais, remises et ristournes obtenus sur autres services extérieurs",
+      "r14": "62",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "63",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 250,
+      "libelle": "Impôts, taxes et versements assimilés",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "631",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 251,
+      "libelle": "Impôts, taxes et versements assimilés sur rémunérations (administrations des impôts)",
+      "r14": "63",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "633",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 252,
+      "libelle": "Impôts, taxes et versements assimilés sur rémunérations (autres organismes)",
+      "r14": "63",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "635",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 253,
+      "libelle": "Autres impôts, taxes et versements assimilés (administrations des impôts)",
+      "r14": "63",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "637",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 254,
+      "libelle": "Autres impôts, taxes et versements assimilés (autres organismes)",
+      "r14": "63",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "638",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 255,
+      "libelle": "Rappel d'impôts (autres qu'impôts sur les bénéfices)",
+      "r14": "63",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "64",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 256,
+      "libelle": "Charges de personnel",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "641",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 257,
+      "libelle": "Rémunérations du personnel",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "644",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 258,
+      "libelle": "Rémunération du travail de l'exploitant",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "645",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 259,
+      "libelle": "Cotisations de sécurité sociale et de prévoyance",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "646",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 260,
+      "libelle": "Cotisations sociales personnelles de l'exploitant",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "647",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 261,
+      "libelle": "Autres cotisations sociales",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "648",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 262,
+      "libelle": "Autres charges de personnel",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "649",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 263,
+      "libelle": "Remboursements de charges de personnel",
+      "r14": "64",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "65",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 264,
+      "libelle": "Autres charges de gestion courante",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "651",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 265,
+      "libelle": "Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "653",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 266,
+      "libelle": "Rémunérations de l'activité des administrateurs et des gérants",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "654",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 267,
+      "libelle": "Pertes sur créances irrécouvrables",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "655",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 268,
+      "libelle": "Quote-part de résultat sur opérations faites en commun",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "656",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 269,
+      "libelle": "Pertes de change sur créances et dettes commerciales",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "657",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 270,
+      "libelle": "Valeurs comptables des immobilisations incorporelles et corporelles cédées",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "658",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 271,
+      "libelle": "Pénalités et autres charges",
+      "r14": "65",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "66",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 272,
+      "libelle": "Charges financières",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "661",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 273,
+      "libelle": "Charges d'intérêts",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "664",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 274,
+      "libelle": "Pertes sur créances liées à des participations",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "665",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 275,
+      "libelle": "Escomptes accordés",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "666",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 276,
+      "libelle": "Pertes de change financières",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "666L",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 277,
+      "libelle": "Compte de liaison Résultat",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "667",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 278,
+      "libelle": "Charges sur cession d'éléments financiers",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "668",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 279,
+      "libelle": "Autres charges financières",
+      "r14": "66",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "67",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 280,
+      "libelle": "Charges exceptionnelles",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "672",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 281,
+      "libelle": "Charges sur exercices antérieurs",
+      "r14": "67",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "678",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 282,
+      "libelle": "Autres charges exceptionnelles",
+      "r14": "67",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "68",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 283,
+      "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "681",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 284,
+      "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges d'exploitation)",
+      "r14": "68",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "686",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 285,
+      "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges financières)",
+      "r14": "68",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "687",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 286,
+      "libelle": "Dotations aux amortissements, aux dépréciations et aux provisions (à inscrire dans les charges exceptionnelles)",
+      "r14": "68",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "69",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 287,
+      "libelle": "Participation des salariés - Impôts sur les bénéfices et assimilés",
+      "r14": "6",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "691",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 288,
+      "libelle": "Participation des salariés aux résultats",
+      "r14": "69",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "695",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 289,
+      "libelle": "Impôts sur les bénéfices",
+      "r14": "69",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "696",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 290,
+      "libelle": "Suppléments d'impôt sur les sociétés liés aux distributions",
+      "r14": "69",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "698",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 291,
+      "libelle": "Intégration fiscale",
+      "r14": "69",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "699",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 292,
+      "libelle": "Produits - Reports en arrière des déficits",
+      "r14": "69",
+      "sous_classe": 3
+    },
+    {
+      "classe": "resultat",
+      "code": "7",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 293,
+      "libelle": "COMPTES DE PRODUITS",
+      "r14": null,
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "70",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 294,
+      "libelle": "Ventes de produits fabriqués, prestations de services, marchandises",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "701",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 295,
+      "libelle": "Ventes de produits finis",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "702",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 296,
+      "libelle": "Ventes de produits intermédiaires",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "703",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 297,
+      "libelle": "Ventes de produits résiduels",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "704",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 298,
+      "libelle": "Travaux",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "705",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 299,
+      "libelle": "Études",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "706",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 300,
+      "libelle": "Prestations de services",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "707",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 301,
+      "libelle": "Ventes de marchandises",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "708",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 302,
+      "libelle": "Produits des activités annexes",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "709",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 303,
+      "libelle": "Rabais, remises et ristournes accordés",
+      "r14": "70",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "71",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 304,
+      "libelle": "Production stockée (ou déstockage)",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "713",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 305,
+      "libelle": "Variation des stocks des en-cours de production et de produits",
+      "r14": "71",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "72",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 306,
+      "libelle": "Production immobilisée",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "721",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 307,
+      "libelle": "Immobilisations incorporelles",
+      "r14": "72",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "722",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 308,
+      "libelle": "Immobilisations corporelles",
+      "r14": "72",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "74",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 309,
+      "libelle": "Subventions",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "741",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 310,
+      "libelle": "Subventions d'exploitation",
+      "r14": "74",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "742",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 311,
+      "libelle": "Subventions d'équilibre",
+      "r14": "74",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "747",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 312,
+      "libelle": "Quote-part des subventions d'investissement virée au résultat de l'exercice",
+      "r14": "74",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "75",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 313,
+      "libelle": "Autres produits de gestion courante",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "751",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 314,
+      "libelle": "Redevances pour concessions, brevets, licences, marques, procédés, solutions informatiques, droits et valeurs similaires",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "752",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 315,
+      "libelle": "Revenus des immeubles non affectés à des activités professionnelles",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "753",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 316,
+      "libelle": "Rémunérations de l'activité des administrateurs et des gérants",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "754",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 317,
+      "libelle": "Ristournes perçues des coopératives provenant des excédents",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "755",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 318,
+      "libelle": "Quote-part de résultat sur opérations faites en commun",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "756",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 319,
+      "libelle": "Gains de change sur créances et dettes commerciales",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "757",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 320,
+      "libelle": "Produits des cessions d'immobilisations incorporelles et corporelles",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "758",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 321,
+      "libelle": "Indemnités et autres produits",
+      "r14": "75",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "76",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 322,
+      "libelle": "Produits financiers",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "761",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 323,
+      "libelle": "Produits de participations",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "762",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 324,
+      "libelle": "Produits des autres immobilisations financières",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "763",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 325,
+      "libelle": "Revenus des autres créances",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "764",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 326,
+      "libelle": "Revenus des valeurs mobilières de placement",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "765",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 327,
+      "libelle": "Escomptes obtenus",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "766",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 328,
+      "libelle": "Gains de change financiers",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "767",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 329,
+      "libelle": "Produits sur cession d'éléments financiers",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "768",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 330,
+      "libelle": "Autres produits financiers",
+      "r14": "76",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "77",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 331,
+      "libelle": "Produits exceptionnels",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "772",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 332,
+      "libelle": "Produits sur exercices antérieurs",
+      "r14": "77",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "778",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 333,
+      "libelle": "Autres produits exceptionnels",
+      "r14": "77",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "78",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 334,
+      "libelle": "Reprises sur amortissements, dépréciations et provisions",
+      "r14": "7",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "781",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 335,
+      "libelle": "Reprises sur amortissements, dépréciations et provisions (à inscrire dans les produits d'exploitation)",
+      "r14": "78",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "786",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 336,
+      "libelle": "Reprises sur dépréciations et provisions (à inscrire dans les produits financiers)",
+      "r14": "78",
+      "sous_classe": 4
+    },
+    {
+      "classe": "resultat",
+      "code": "787",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 337,
+      "libelle": "Reprises sur dépréciations et provisions (à inscrire dans les produits exceptionnels)",
+      "r14": "78",
+      "sous_classe": 4
+    },
+    {
+      "classe": "bilan",
+      "code": "119",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 338,
+      "libelle": "Report à nouveau - solde débiteur",
+      "r14": "11",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "129",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 339,
+      "libelle": "Résultat de l'exercice – perte",
+      "r14": "12",
+      "sous_classe": 2
+    },
+    {
+      "classe": "bilan",
+      "code": "391",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 340,
+      "libelle": "Dépréciations des matières premières et fournitures",
+      "r14": "39",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "392",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 341,
+      "libelle": "Dépréciations des autres approvisionnements",
+      "r14": "39",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "393",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 342,
+      "libelle": "Dépréciations des en-cours de production de biens",
+      "r14": "39",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "394",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 343,
+      "libelle": "Dépréciations des en-cours de production de services",
+      "r14": "39",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "395",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 344,
+      "libelle": "Dépréciations des stocks de produits",
+      "r14": "39",
+      "sous_classe": 1
+    },
+    {
+      "classe": "bilan",
+      "code": "397",
+      "flow_scheme": null,
+      "groupement": null,
+      "id": 345,
+      "libelle": "Dépréciations des stocks de marchandises",
+      "r14": "39",
+      "sous_classe": 1
+    }
+  ],
+  "dim_aggregate": [],
+  "dim_characteristic": [
+    {
+      "base_dimension": "account",
+      "code": "groupement",
+      "id": 1,
+      "libelle": "Groupement technique"
+    }
+  ],
+  "dim_characteristic_attribute": [],
+  "dim_coefficient": [],
+  "dim_consolidation": [
+    {
+      "a_nouveau_consolidation_id": null,
+      "exercice": 2,
+      "id": 1,
+      "libelle": "Réel 2024",
+      "perimeter_period": 2,
+      "perimeter_set": 1,
+      "phase": 1,
+      "presentation_currency": 1,
+      "rate_period": 2,
+      "rate_set": 1,
+      "ruleset_code": null,
+      "statut": "ouvert",
+      "variant": 1
+    }
+  ],
+  "dim_control": [
+    {
+      "code": "CTRL_ACTIF_PASSIF",
+      "definition": "{\n        \"levels\": [\"raw\", \"corporate\", \"converted\", \"consolidated\"],\n        \"grain\": [\"entity\", \"entry_period\"],\n        \"selection\": [\n            {\"dim\": \"account\", \"ref\": \"sous_classe\", \"op\": \"IN\", \"val\": [\"actif\", \"passif\"]}\n        ],\n        \"expression\": \"SUM(IF(r_sous_classe.code = 'actif', amount, -amount))\",\n        \"assertions\": [{\"type\": \"equals\", \"target\": 0}],\n        \"compare\": null\n    }",
+      "id": 1,
+      "libelle": "Équilibre actif = passif (bilan)"
+    },
+    {
+      "code": "CTRL_SOLDE_IC",
+      "definition": "{\n        \"levels\": [\"consolidated\"],\n        \"grain\": [\"entity\", \"entry_period\"],\n        \"selection\": [\n            {\"dim\": \"nature\", \"op\": \"=\", \"val\": \"2ELI\"}\n        ],\n        \"expression\": null,\n        \"assertions\": [{\"type\": \"equals\", \"target\": 0}],\n        \"compare\": null\n    }",
+      "id": 2,
+      "libelle": "Interco soldée (nature 2ELI = 0)"
+    }
+  ],
+  "dim_control_set": [
+    {
+      "code": "CS_BILAN",
+      "id": 1,
+      "libelle": "Contrôles bilan (démo)"
+    }
+  ],
+  "dim_control_set_item": [
+    {
+      "control_code": "CTRL_ACTIF_PASSIF",
+      "ord": 1,
+      "set_code": "CS_BILAN"
+    },
+    {
+      "control_code": "CTRL_SOLDE_IC",
+      "ord": 2,
+      "set_code": "CS_BILAN"
+    }
+  ],
+  "dim_currency": [
+    {
+      "code_iso": "EUR",
+      "decimales": 2,
+      "id": 1,
+      "libelle": "Euro"
+    },
+    {
+      "code_iso": "USD",
+      "decimales": 2,
+      "id": 2,
+      "libelle": "Dollar US"
+    },
+    {
+      "code_iso": "GBP",
+      "decimales": 2,
+      "id": 3,
+      "libelle": "Livre sterling"
+    }
+  ],
+  "dim_custom_dimension": [],
+  "dim_custom_reference": [
+    {
+      "column_name": "phase",
+      "host_dimension": "consolidation",
+      "id": 1,
+      "native": true,
+      "target_dimension": "scenario_category"
+    },
+    {
+      "column_name": "exercice",
+      "host_dimension": "consolidation",
+      "id": 2,
+      "native": true,
+      "target_dimension": "period"
+    },
+    {
+      "column_name": "perimeter_period",
+      "host_dimension": "consolidation",
+      "id": 3,
+      "native": true,
+      "target_dimension": "period"
+    },
+    {
+      "column_name": "rate_period",
+      "host_dimension": "consolidation",
+      "id": 4,
+      "native": true,
+      "target_dimension": "period"
+    },
+    {
+      "column_name": "presentation_currency",
+      "host_dimension": "consolidation",
+      "id": 5,
+      "native": true,
+      "target_dimension": "currency"
+    },
+    {
+      "column_name": "ruleset_code",
+      "host_dimension": "consolidation",
+      "id": 6,
+      "native": true,
+      "target_dimension": "ruleset"
+    },
+    {
+      "column_name": "rate_set",
+      "host_dimension": "consolidation",
+      "id": 7,
+      "native": true,
+      "target_dimension": "rate_set"
+    },
+    {
+      "column_name": "perimeter_set",
+      "host_dimension": "consolidation",
+      "id": 8,
+      "native": true,
+      "target_dimension": "perimeter_set"
+    },
+    {
+      "column_name": "a_nouveau_consolidation_id",
+      "host_dimension": "consolidation",
+      "id": 9,
+      "native": true,
+      "target_dimension": "consolidation"
+    },
+    {
+      "column_name": "devise_fonctionnelle",
+      "host_dimension": "entity",
+      "id": 10,
+      "native": true,
+      "target_dimension": "currency"
+    },
+    {
+      "column_name": "entite_parent",
+      "host_dimension": "entity",
+      "id": 11,
+      "native": true,
+      "target_dimension": "entity"
+    },
+    {
+      "column_name": "sous_classe",
+      "host_dimension": "account",
+      "id": 12,
+      "native": true,
+      "target_dimension": "sous_classe"
+    },
+    {
+      "column_name": "flow_scheme",
+      "host_dimension": "account",
+      "id": 13,
+      "native": true,
+      "target_dimension": "flow_scheme"
+    },
+    {
+      "column_name": "compte_parent",
+      "host_dimension": "account",
+      "id": 14,
+      "native": false,
+      "target_dimension": "account"
+    }
+  ],
+  "dim_entity": [
+    {
+      "code": "M",
+      "devise_fonctionnelle": 1,
+      "entite_parent": null,
+      "id": 1,
+      "libelle": "Mère",
+      "statut": "actif"
+    },
+    {
+      "code": "A",
+      "devise_fonctionnelle": 2,
+      "entite_parent": null,
+      "id": 2,
+      "libelle": "Filiale A",
+      "statut": "actif"
+    },
+    {
+      "code": "B",
+      "devise_fonctionnelle": 3,
+      "entite_parent": null,
+      "id": 3,
+      "libelle": "Filiale B",
+      "statut": "actif"
+    }
+  ],
+  "dim_flow": [
+    {
+      "code": "F00",
+      "id": 1,
+      "libelle": "Ouverture"
+    },
+    {
+      "code": "F01",
+      "id": 2,
+      "libelle": "Entrée périmètre"
+    },
+    {
+      "code": "F20",
+      "id": 3,
+      "libelle": "Variation"
+    },
+    {
+      "code": "F80",
+      "id": 4,
+      "libelle": "Écart conv. ouverture"
+    },
+    {
+      "code": "F81",
+      "id": 5,
+      "libelle": "Écart conv. variation"
+    },
+    {
+      "code": "F98",
+      "id": 6,
+      "libelle": "Sortie périmètre"
+    },
+    {
+      "code": "F99",
+      "id": 7,
+      "libelle": "Clôture"
+    }
+  ],
+  "dim_flow_scheme": [
+    {
+      "code": "BILAN",
+      "id": 1,
+      "libelle": "Schéma bilan (défaut dim_flow)"
+    },
+    {
+      "code": "RESULTAT",
+      "id": 2,
+      "libelle": "Schéma résultat (taux moyen, sans écart)"
+    }
+  ],
+  "dim_indicator": [],
+  "dim_method": [
+    {
+      "code": "globale",
+      "consolidated": true,
+      "id": 1,
+      "libelle": "Globale"
+    },
+    {
+      "code": "proportionnelle",
+      "consolidated": true,
+      "id": 2,
+      "libelle": "Proportionnelle"
+    },
+    {
+      "code": "equivalence",
+      "consolidated": false,
+      "id": 3,
+      "libelle": "Mise en équivalence"
+    }
+  ],
+  "dim_nature": [
+    {
+      "code": "0LIASS",
+      "id": 1,
+      "libelle": "Liasse",
+      "rules": null
+    },
+    {
+      "code": "1AJUST",
+      "id": 2,
+      "libelle": "Ajustement",
+      "rules": null
+    },
+    {
+      "code": "2ELI",
+      "id": 3,
+      "libelle": "Élimination interco",
+      "rules": null
+    }
+  ],
+  "dim_perimeter_set": [
+    {
+      "code": "PERIM_REEL",
+      "id": 1,
+      "libelle": "Périmètre réel 2024"
+    }
+  ],
+  "dim_period": [
+    {
+      "code": "2023",
+      "date_debut": "2023-01-01",
+      "date_fin": "2023-12-31",
+      "id": 1,
+      "libelle": "Exercice 2023",
+      "statut": "clôturé",
+      "type": "exercice"
+    },
+    {
+      "code": "2024",
+      "date_debut": "2024-01-01",
+      "date_fin": "2024-12-31",
+      "id": 2,
+      "libelle": "Exercice 2024",
+      "statut": "ouvert",
+      "type": "exercice"
+    }
+  ],
+  "dim_rate_set": [
+    {
+      "code": "RATES",
+      "id": 1,
+      "libelle": "Taux réels"
+    }
+  ],
+  "dim_rule": [
+    {
+      "code": "ELI_700",
+      "definition": "{\n        \"scope\": [\n            {\"target\": \"entity\",  \"dim\": \"methode\", \"op\": \"=\", \"val\": \"globale\"},\n            {\"target\": \"partner\", \"dim\": \"methode\", \"op\": \"=\", \"val\": \"globale\"}\n        ],\n        \"operations\": [\n            {\n                \"seq\": 1, \"level\": \"consolidated\",\n                \"selection\": [\n                    {\"dim\": \"account\", \"op\": \"=\", \"val\": \"700\"},\n                    {\"dim\": \"partner\", \"op\": \"IS NOT NULL\"}\n                ],\n                \"coefficient\": {\"type\": \"pct_integration\"},\n                \"multiplicateur\": -1,\n                \"destination\": {\n                    \"nature\":  {\"mode\": \"override\", \"value\": \"2ELI\"},\n                    \"partner\": {\"mode\": \"inherit\"}\n                }\n            },\n            {\n                \"seq\": 2, \"level\": \"consolidated\",\n                \"selection\": [\n                    {\"dim\": \"account\", \"op\": \"=\", \"val\": \"700\"},\n                    {\"dim\": \"partner\", \"op\": \"IS NOT NULL\"}\n                ],\n                \"coefficient\": {\"type\": \"pct_integration\"},\n                \"multiplicateur\": 1,\n                \"destination\": {\n                    \"nature\":  {\"mode\": \"override\", \"value\": \"2ELI\"},\n                    \"partner\": {\"mode\": \"null\"}\n                }\n            }\n        ]\n    }",
+      "id": 1,
+      "libelle": "Élimination interco 700"
+    }
+  ],
+  "dim_ruleset": [
+    {
+      "code": "RS_INTERCO",
+      "id": 1,
+      "libelle": "Élimination interco (démo)"
+    }
+  ],
+  "dim_ruleset_item": [
+    {
+      "ordre": 1,
+      "rule_code": "ELI_700",
+      "ruleset_code": 1
+    }
+  ],
+  "dim_scenario_category": [
+    {
+      "code": "REEL",
+      "id": 1,
+      "libelle": "Réel"
+    }
+  ],
+  "dim_sous_classe": [
+    {
+      "classe": "bilan",
+      "code": "actif",
+      "id": 1,
+      "libelle": "Actif",
+      "sens": "D"
+    },
+    {
+      "classe": "bilan",
+      "code": "passif",
+      "id": 2,
+      "libelle": "Passif",
+      "sens": "C"
+    },
+    {
+      "classe": "resultat",
+      "code": "charges",
+      "id": 3,
+      "libelle": "Charges",
+      "sens": "D"
+    },
+    {
+      "classe": "resultat",
+      "code": "produits",
+      "id": 4,
+      "libelle": "Produits",
+      "sens": "C"
+    }
+  ],
+  "dim_value_list": [],
+  "dim_variant": [
+    {
+      "code": "BASE",
+      "id": 1,
+      "libelle": "Base"
+    }
+  ],
+  "sat_exchange_rate": [
+    {
+      "currency_source": "USD",
+      "period": "2023",
+      "rate_set": 1,
+      "taux_close": 0.92,
+      "taux_moyen": null,
+      "taux_ouverture": null
+    },
+    {
+      "currency_source": "USD",
+      "period": "2024",
+      "rate_set": 1,
+      "taux_close": 0.9,
+      "taux_moyen": 0.95,
+      "taux_ouverture": 0.92
+    },
+    {
+      "currency_source": "GBP",
+      "period": "2023",
+      "rate_set": 1,
+      "taux_close": 1.15,
+      "taux_moyen": null,
+      "taux_ouverture": null
+    },
+    {
+      "currency_source": "GBP",
+      "period": "2024",
+      "rate_set": 1,
+      "taux_close": 1.12,
+      "taux_moyen": 1.18,
+      "taux_ouverture": 1.15
+    }
+  ],
+  "sat_flow_scheme_item": [
+    {
+      "flow": "F00",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": "F80",
+      "scheme": 1,
+      "taux_conversion": "close_n1"
+    },
+    {
+      "flow": "F01",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": "F80",
+      "scheme": 1,
+      "taux_conversion": "close_n1"
+    },
+    {
+      "flow": "F20",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": "F81",
+      "scheme": 1,
+      "taux_conversion": "avg"
+    },
+    {
+      "flow": "F80",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 1,
+      "taux_conversion": "close_n"
+    },
+    {
+      "flow": "F81",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 1,
+      "taux_conversion": "close_n"
+    },
+    {
+      "flow": "F98",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 1,
+      "taux_conversion": "close_n"
+    },
+    {
+      "flow": "F99",
+      "flux_a_nouveau": "F00",
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 1,
+      "taux_conversion": "close_n"
+    },
+    {
+      "flow": "F00",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "avg"
+    },
+    {
+      "flow": "F01",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "avg"
+    },
+    {
+      "flow": "F20",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "avg"
+    },
+    {
+      "flow": "F80",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "close_n"
+    },
+    {
+      "flow": "F81",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "close_n"
+    },
+    {
+      "flow": "F98",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "avg"
+    },
+    {
+      "flow": "F99",
+      "flux_a_nouveau": null,
+      "flux_de_report": "F99",
+      "flux_ecart": null,
+      "scheme": 2,
+      "taux_conversion": "avg"
+    }
+  ],
+  "sat_perimeter": [
+    {
+      "entity": "M",
+      "entree": false,
+      "methode": 1,
+      "pct_integration": 1.0,
+      "pct_interet": 1.0,
+      "perimeter_set": 1,
+      "period": "2024",
+      "sortie": false
+    },
+    {
+      "entity": "A",
+      "entree": true,
+      "methode": 1,
+      "pct_integration": 1.0,
+      "pct_interet": 1.0,
+      "perimeter_set": 1,
+      "period": "2024",
+      "sortie": false
+    },
+    {
+      "entity": "B",
+      "entree": false,
+      "methode": 2,
+      "pct_integration": 0.5,
+      "pct_interet": 0.5,
+      "perimeter_set": 1,
+      "period": "2024",
+      "sortie": false
+    }
+  ],
+  "stg_entry": []
+}

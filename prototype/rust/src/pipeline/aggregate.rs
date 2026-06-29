@@ -31,16 +31,15 @@
 //! cette étape.
 
 use super::count_level;
-use crate::dimensions;
+use crate::{dimensions, references};
 use duckdb::{params, Connection};
 
 /// Exécute l'étape A : agrège les écritures brutes au niveau corporate.
 ///
-/// Le SQL est généré dynamiquement depuis le registre des dimensions
-/// (`dimensions::load_all`) : la liste des colonnes propagées définit à la
-/// fois le `SELECT`, l'`INSERT` et le `GROUP BY`. Pour les 12 colonnes
-/// built-in, le SQL produit est identique au SQL statique historique (test
-/// golden inchangé).
+/// Le SQL est généré dynamiquement depuis le registre des dimensions. Pour les
+/// dimensions built-in id-typées (10 colonnes), les codes TEXT de `stg_entry`
+/// sont résolus en INTEGER ids via JOIN avant insertion dans `fact_entry`.
+/// Les dimensions libres (analysis, analysis2, custom) restent TEXT.
 ///
 /// `p` = paramètres du run (`ConvertParams`) : la remontée est sélectionnée par
 /// `(p.phase, p.exercice)`, le périmètre par `(p.perimeter_set, p.perimeter_period)`,
@@ -51,31 +50,56 @@ pub fn step_a(con: &Connection, p: &super::ConvertParams) -> duckdb::Result<usiz
     let dims = dimensions::load_all(con)?;
     let cols = dimensions::propagated_cols(&dims);
     let col_list = cols.join(", ");
-    // Colonnes préfixées `s.` pour lever l'ambiguïté avec la jointure
-    // `sat_perimeter per` (qui porte aussi entity/period).
-    let s_cols = cols
-        .iter()
-        .map(|c| format!("s.{c}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+
+    // Construit les JOINs de résolution code→id et les expressions de la
+    // sous-requête. Pour les dims id-typées : JOIN + `_d{name}.id AS {name}`.
+    // Pour les dims libres : `s.{name}` directement.
+    //
+    // La résolution code→id est isolée dans une sous-requête : l'agrégation
+    // (GROUP BY + SUM) opère ensuite sur des noms de colonnes propres et
+    // non-ambigus (`phase`, `entity`, …). On évite ainsi à la fois
+    // l'ambiguïté `s.entity`/`per.entity` (GROUP BY sur alias) et le GROUP BY
+    // positionnel (rejeté par DuckDB dans un INSERT … SELECT).
+    let mut id_joins = String::new();
+    let mut inner_exprs: Vec<String> = Vec::new();
+    for dim in &dims {
+        let name = &dim.name;
+        if let Some((table, code_col)) = references::dimension_master(name) {
+            let alias = format!("_d{name}");
+            let join_type = if dim.nullable() { "LEFT JOIN" } else { "JOIN" };
+            id_joins.push_str(&format!(
+                "\n{join_type} {table} {alias} ON {alias}.{code_col} = s.{name}"
+            ));
+            inner_exprs.push(format!("{alias}.id AS {name}"));
+        } else {
+            inner_exprs.push(format!("s.{name}"));
+        }
+    }
+    let inner_list = inner_exprs.join(",\n        ");
 
     let sql = format!(
         "INSERT INTO fact_entry\n\
          ({col_list}, consolidation_id, level, amount)\n\
          SELECT\n\
-             {s_cols},\n\
+             {col_list},\n\
              ? AS consolidation_id,\n\
              'corporate' AS level,\n\
-             SUM(s.amount) AS amount\n\
-         FROM stg_entry s\n\
-         JOIN sat_perimeter per\n\
-           ON per.perimeter_set = ?\n\
-          AND per.entity        = s.entity\n\
-          AND per.period        = ?\n\
-         WHERE substr(s.nature, 1, 1) IN ('0', '1')\n\
-           AND s.phase = ?\n\
-           AND s.entry_period = ?\n\
-         GROUP BY {s_cols};"
+             SUM(amount) AS amount\n\
+         FROM (\n\
+           SELECT\n\
+             {inner_list},\n\
+             s.amount AS amount\n\
+           FROM stg_entry s\n\
+           JOIN sat_perimeter per\n\
+             ON per.perimeter_set = ?\n\
+            AND per.entity        = s.entity\n\
+            AND per.period        = ?\n\
+           {id_joins}\n\
+           WHERE substr(s.nature, 1, 1) IN ('0', '1')\n\
+             AND s.phase = ?\n\
+             AND s.entry_period = ?\n\
+         ) t\n\
+         GROUP BY {col_list};"
     );
     con.execute(
         &sql,

@@ -11,9 +11,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
+import { errMsg } from '../utils/errMessage';
 import {
   type ColumnDef as RTColumnDef,
   flexRender,
@@ -22,16 +22,23 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { api } from '../api';
-import { formatOptionLabel, sortForDisplay } from '../utils/format';
+import { compareText, sortForDisplay } from '../utils/format';
 import {
   DIM_TO_TABLE_FALLBACK,
   DimRefContext,
   buildDimToTable,
-  useDimValues,
-  useSelectionValues,
   type DimToTable,
-  type DimValue,
 } from '../hooks/useDimValues';
+import {
+  OpSelect,
+  OverrideValueField,
+  SelectionValueField,
+  TraverseField,
+  ValueField,
+} from '../components/ConditionFields';
+import { NULL_OPS, OP_SYMBOL } from '../components/operators';
+import { parseCondVal } from '../utils/conditionValue';
+import { RenameModal } from '../components/RenameModal';
 import type {
   Characteristic,
   CustomReference,
@@ -50,7 +57,6 @@ import type {
 // Constantes qui ne dépendent pas du registre des dimensions.
 const SCOPE_DIMS = ['methode', 'pct_interet', 'pct_integration', 'entree', 'sortie'];
 const LEVELS_LIST = ['corporate', 'converted', 'consolidated'];
-const OPS = ['=', '!=', '>', '<', '>=', '<=', 'IN', 'IS NULL', 'IS NOT NULL'];
 const COEFF_TYPES = [
   'pct_integration',
   'pct_interet',
@@ -62,7 +68,45 @@ const COEFF_TYPES = [
   'constant',
 ];
 
-const NULL_OPS = new Set(['IS NULL', 'IS NOT NULL']);
+// Dimensions pilotables affichées d'emblée en destination (les plus fréquentes).
+// Les autres dimensions pilotables sont proposées à l'ajout via des chips « + ».
+// (À l'ouverture d'une règle existante, toute dimension déjà pilotée — mode ≠
+// inherit — est aussi révélée automatiquement, cf. `visibleDestDims`.)
+const DEFAULT_DEST_DIMS = ['account', 'flow', 'nature'];
+
+// Dimensions de filtre affichées d'emblée en sélection (mêmes que destination).
+// Les autres sont ajoutables via des chips « + ». Les lignes seedées laissées
+// vides sont filtrées à l'enregistrement (cf. `RuleFormModal.submit`).
+const DEFAULT_SEL_DIMS = ['account', 'flow', 'nature'];
+
+/// Une condition de sélection est-elle « porteuse » (à envoyer au moteur) ? Les
+/// ops unaires (IS NULL / IS NOT NULL) le sont toujours ; sinon il faut une
+/// valeur non vide. Sert à filtrer les lignes de base seedées restées vides.
+function selectionIsMeaningful(s: SelectionCond): boolean {
+  if (NULL_OPS.has(s.op)) return true;
+  if (Array.isArray(s.val)) return s.val.length > 0;
+  return String(s.val ?? '').trim() !== '';
+}
+
+/// Seed les dimensions de base manquantes (account/flow/nature) en tête de la
+/// sélection de chaque opération, sans dupliquer celles déjà présentes ni
+/// toucher aux conditions existantes. Appelé à l'ouverture de la modale.
+function seedBaseSelection(
+  def: RuleDefinition,
+  selectionDims: string[],
+): RuleDefinition {
+  const base = DEFAULT_SEL_DIMS.filter((d) => selectionDims.includes(d));
+  return {
+    ...def,
+    operations: def.operations.map((op) => {
+      const present = new Set(op.selection.map((s) => s.dim));
+      const seeded: SelectionCond[] = base
+        .filter((d) => !present.has(d))
+        .map((d) => ({ dim: d, op: '=', val: '' }));
+      return { ...op, selection: [...seeded, ...op.selection] };
+    }),
+  };
+}
 
 // Fallback des 12 dimensions built-in si l'API /api/meta/dimensions est
 // injoignable (serveur obsolète, réseau en panne). Miroir de
@@ -84,7 +128,6 @@ const BUILTIN_DIMS_FALLBACK: DimensionInfo[] = [
 ];
 
 type Notice = { kind: 'success' | 'error'; text: string } | null;
-type Subtab = 'biblio' | 'jeux' | 'dims';
 type DestMode = 'inherit' | 'override' | 'null' | 'map' | 'map_ref';
 
 interface RuleDraft {
@@ -113,28 +156,6 @@ function deriveDims(dims: DimensionInfo[]) {
   };
 }
 
-/// Parse la valeur d'une condition selon l'opérateur :
-/// - `IN` : la string est éclatée par virgule → tableau (le moteur attend un
-///   tableau JSON pour `push_condition`, cf. `rules.rs:427`).
-/// - autres : retourne la string brute.
-function parseCondVal(op: string, raw: string): unknown {
-  if (op === 'IN') {
-    return raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-  }
-  return raw;
-}
-
-/// Formate la valeur d'une condition pour l'affichage dans un input texte :
-/// - tableau → join par ', ' (réciproque de `parseCondVal`).
-/// - autres → toString.
-function formatCondVal(val: unknown): string {
-  if (Array.isArray(val)) return val.join(', ');
-  return String(val ?? '');
-}
-
 /// Parse un multiplicateur : accepte la virgule ou le point comme séparateur
 /// décimal (la locale fr utilise la virgule, mais JS Number() exige le point).
 /// Retourne NaN si la valeur n'est pas un nombre valide.
@@ -144,324 +165,57 @@ function parseMultiplicateur(raw: string): number {
   return Number(cleaned);
 }
 
-// Le mapping dimension → table master data et le hook `useDimValues` sont
-// désormais fournis par `hooks/useDimValues.tsx` (partagés avec la page Saisie).
-
-/// Champ de saisie pour l'opérateur `IN` (valeurs multiples séparées par des
-/// virgules). Maintient un **buffer texte local** : on ne reformate PAS depuis
-/// la valeur parsée à chaque frappe, car `parseCondVal` filtre les segments
-/// vides → la virgule en cours de saisie (segment vide qui la suit) serait
-/// supprimée immédiatement, rendant impossible la saisie de « a, b ». Le texte
-/// brut tapé est conservé ; le parent reçoit le tableau parsé via `onRawChange`.
-function InValueField({
-  value,
-  onRawChange,
-}: {
-  value: unknown;
-  onRawChange: (raw: string) => void;
-}) {
-  const [text, setText] = useState(() => formatCondVal(value));
-  return (
-    <input
-      type="text"
-      value={text}
-      placeholder="valeurs séparées par virgules"
-      onChange={(e) => {
-        setText(e.target.value);
-        onRawChange(e.target.value);
-      }}
-    />
-  );
-}
-
-/// Champ de saisie de valeur de condition, adaptatif :
-/// - si op = IN → multi-select repliable (checkboxes) si la dimension a une
-///   master data, sinon `<input type="text">` (saisie multi-valeurs séparées
-///   par virgules). Même logique que `SelectionValueField`.
-/// - si la dimension a une liste de valeurs connue (master data) et l'opérateur
-///   n'est pas IN → `<select>` avec les valeurs + option vide.
-/// - sinon → `<input type="text">` (saisie libre).
-function ValueField({
-  dim,
-  op,
-  value,
-  onRawChange,
-}: {
-  dim: string;
-  op: string;
-  value: unknown;
-  onRawChange: (raw: string) => void;
-}) {
-  const { values, loading } = useDimValues(dim);
-
-  // IN : multi-select si on a des valeurs (master data), sinon fallback texte
-  // (dimensions libres type pct_interet / entree / sortie). Buffer local via
-  // InValueField pour préserver les virgules pendant la frappe.
-  if (op === 'IN') {
-    if (values.length > 0) {
-      const arr: string[] = Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === 'string')
-        : typeof value === 'string' && value !== ''
-          ? [value]
-          : [];
-      return (
-        <MultiSelectDropdown
-          options={values}
-          selected={arr}
-          loading={loading}
-          onChange={(newArr) => onRawChange(newArr.join(','))}
-        />
-      );
-    }
-    return <InValueField value={value} onRawChange={onRawChange} />;
-  }
-
-  // Liste déroulante si des valeurs sont disponibles.
-  if (values.length > 0) {
-    const current = formatCondVal(value);
-    const codes = values.map((v) => v.code);
-    return (
-      <select
-        value={codes.includes(current) ? current : ''}
-        onChange={(e) => onRawChange(e.target.value)}
-      >
-        <option value="" disabled>
-          — choisir —
-        </option>
-        {values.map((v) => (
-          <option key={v.code} value={v.code}>
-            {formatOptionLabel(v.code, v.libelle)}
-          </option>
-        ))}
-        {/* Si la valeur actuelle n'est pas dans la liste (ex: règle existante
-            avec une valeur supprimée de la master data), on l'affiche quand même. */}
-        {current && !codes.includes(current) && (
-          <option value={current}>{current} (hors liste)</option>
-        )}
-      </select>
-    );
-  }
-
-  // Saisie libre par défaut.
-  return (
-    <input
-      type="text"
-      value={formatCondVal(value)}
-      onChange={(e) => onRawChange(e.target.value)}
-    />
-  );
-}
-
-/// Champ de valeur d'une destination `override`, adaptatif : si la dimension a
-/// une master data connue (cf. `DIM_TO_TABLE`, ex. `account` → liste des
-/// comptes), on propose un `<select>` ; sinon saisie libre. Même logique que
-/// `ValueField` mais pour une valeur unique (pas d'opérateur).
-function OverrideValueField({
-  dim,
-  value,
-  onChange,
-}: {
-  dim: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const { values } = useDimValues(dim);
-  if (values.length > 0) {
-    const codes = values.map((v) => v.code);
-    return (
-      <select
-        className="rule-dest-input"
-        value={codes.includes(value) ? value : ''}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="" disabled>
-          — choisir —
-        </option>
-        {values.map((v) => (
-          <option key={v.code} value={v.code}>
-            {formatOptionLabel(v.code, v.libelle)}
-          </option>
-        ))}
-        {/* Si la valeur actuelle n'est pas dans la liste, on l'affiche quand même. */}
-        {value && !codes.includes(value) && (
-          <option value={value}>{value} (hors liste)</option>
-        )}
-      </select>
-    );
-  }
-  return (
-    <input
-      type="text"
-      className="rule-dest-input"
-      placeholder={`valeur ${dim}`}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  );
-}
-
-/// Multi-select repliable pour l'opérateur `IN`. Bouton qui ouvre un panel
-/// absolu avec checkboxes ; fermeture au clic extérieur. Affichage fermé :
-/// 0 → placeholder, 1-3 → codes séparés par virgule, >3 → compteur. Pas de
-/// recherche ni de boutons globaux (cf. choix utilisateur).
-function MultiSelectDropdown({
-  options,
-  selected,
-  onChange,
-  loading,
-}: {
-  options: DimValue[];
-  selected: string[];
-  onChange: (newArr: string[]) => void;
-  loading?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  // Fermeture au clic extérieur (listener global tant que le panel est ouvert).
-  useEffect(() => {
-    if (!open) return;
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  const display =
-    selected.length === 0
-      ? '— choisir —'
-      : selected.length <= 3
-        ? selected.join(', ')
-        : `${selected.length} valeurs sélectionnées`;
-
-  const toggle = (code: string) => {
-    if (selected.includes(code)) onChange(selected.filter((c) => c !== code));
-    else onChange([...selected, code]);
+/// Phrase de relecture d'une opération, générée depuis le JSON (aide à valider
+/// sans déchiffrer chaque champ). Volontairement compacte ; pas de prétention
+/// SQL, juste un résumé lisible.
+function summarizeOperation(op: Operation): string {
+  const fmtVal = (o: string, val: unknown): string => {
+    if (NULL_OPS.has(o)) return '';
+    if (Array.isArray(val)) return `{${val.join(', ')}}`;
+    const s = String(val ?? '');
+    return s === '' ? '∅' : s;
   };
-
-  return (
-    <div className="multiselect" ref={ref}>
-      <button
-        type="button"
-        className="multiselect__btn"
-        onClick={() => setOpen((o) => !o)}
-        disabled={loading}
-      >
-        {loading ? '…' : display}
-      </button>
-      {open && (
-        <div className="multiselect__panel">
-          {options.length === 0 && (
-            <div className="multiselect__empty">(aucune valeur)</div>
-          )}
-          {options.map((o) => {
-            const checked = selected.includes(o.code);
-            return (
-              <label key={o.code} className="multiselect__item">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggle(o.code)}
-                />
-                <span>{formatOptionLabel(o.code, o.libelle)}</span>
-              </label>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/// Champ de valeur unifié pour une SelectionCond, adaptatif selon :
-///   - l'opérateur (`IN` → multi-select repliable, ops unaires → `<select>` ou texte) ;
-///   - la source des valeurs, résolue via `useSelectionValues` (`via` N1, `ref`
-///     patron B, `attr` enum natif, ou direct sur la dimension).
-///
-/// Remplace l'ancien chemin `{s.via ? <input> : <ValueField>}` dans la zone
-/// Sélection. La zone Scope continue d'utiliser `ValueField` (pas de traversée).
-function SelectionValueField({
-  sel,
-  customReferences,
-  nativeEnums,
-  op,
-  value,
-  onRawChange,
-}: {
-  sel: SelectionCond;
-  customReferences: CustomReference[];
-  nativeEnums: NativeEnum[];
-  op: string;
-  value: unknown;
-  onRawChange: (raw: string) => void;
-}) {
-  const { values, loading } = useSelectionValues(sel, customReferences, nativeEnums);
-
-  // IN : multi-select si on a des valeurs, sinon fallback texte (dimensions
-  // libres type analysis, qui n'ont pas de master data).
-  if (op === 'IN') {
-    if (values.length > 0) {
-      const arr: string[] = Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === 'string')
-        : typeof value === 'string' && value !== ''
-          ? [value]
-          : [];
-      return (
-        <MultiSelectDropdown
-          options={values}
-          selected={arr}
-          loading={loading}
-          onChange={(newArr) => onRawChange(newArr.join(','))}
-        />
-      );
-    }
-    return <InValueField value={value} onRawChange={onRawChange} />;
-  }
-
-  // Ops unaires : dropdown si valeurs, sinon input texte libre.
-  if (values.length > 0) {
-    const current = formatCondVal(value);
-    const codes = values.map((v) => v.code);
-    return (
-      <select
-        value={codes.includes(current) ? current : ''}
-        onChange={(e) => onRawChange(e.target.value)}
-      >
-        <option value="" disabled>
-          — choisir —
-        </option>
-        {values.map((v) => (
-          <option key={v.code} value={v.code}>
-            {formatOptionLabel(v.code, v.libelle)}
-          </option>
-        ))}
-        {/* Si la valeur actuelle n'est pas dans la liste (ex: règle existante
-            avec une valeur supprimée de la master data), on l'affiche quand même. */}
-        {current && !codes.includes(current) && (
-          <option value={current}>{current} (hors liste)</option>
-        )}
-      </select>
-    );
-  }
-  return (
-    <input
-      type="text"
-      value={formatCondVal(value)}
-      onChange={(e) => onRawChange(e.target.value)}
-    />
-  );
+  const conds = op.selection.filter(selectionIsMeaningful);
+  const sel =
+    conds.length === 0
+      ? 'toutes les écritures'
+      : 'les écritures où ' +
+        conds
+          .map((s) => {
+            const sym = OP_SYMBOL[s.op] ?? s.op;
+            const trav = s.via
+              ? `.${s.via}`
+              : s.ref
+                ? `.${s.ref}`
+                : s.attr
+                  ? `.${s.attr}`
+                  : '';
+            const v = fmtVal(s.op, s.val);
+            return `${s.dim}${trav} ${sym}${v ? ` ${v}` : ''}`.trim();
+          })
+          .join(' et ');
+  const coeffLabel =
+    op.coefficient.type === 'constant'
+      ? String(op.coefficient.value ?? 0)
+      : op.coefficient.type;
+  const mult = Number.isNaN(op.multiplicateur) ? '?' : op.multiplicateur;
+  const overrides = Object.entries(op.destination)
+    .filter(([, d]) => d.mode !== 'inherit')
+    .map(([dim, d]) => {
+      if (d.mode === 'override') return `${dim} → ${d.value ?? '?'}`;
+      if (d.mode === 'null') return `${dim} → ∅`;
+      if (d.mode === 'map') return `${dim} ← ${d.via ?? '?'}.${d.attr ?? '?'}`;
+      if (d.mode === 'map_ref') return `${dim} ← ${d.ref ?? '?'}`;
+      return dim;
+    });
+  const destPart = overrides.length
+    ? `écrit ${overrides.join(', ')}`
+    : 'destination héritée';
+  return `Sur ${op.level}, prend ${sel}, applique ${coeffLabel} × ${mult}, ${destPart}.`;
 }
 
 function emptyScopeCond(): ScopeCond {
   return { target: 'entity', dim: SCOPE_DIMS[0], op: '=', val: '' };
-}
-
-function emptySelectionCond(selectionDims: string[]): SelectionCond {
-  const dim = selectionDims[0] ?? 'account';
-  return { dim, op: '=', val: '' };
 }
 
 function emptyOperation(seq: number, pilotableDims: string[]): Operation {
@@ -472,7 +226,8 @@ function emptyOperation(seq: number, pilotableDims: string[]): Operation {
   return {
     seq,
     level: LEVELS_LIST[0],
-    selection: [],
+    // Dimensions de filtre de base affichées d'emblée (vides → ignorées au save).
+    selection: DEFAULT_SEL_DIMS.map((d) => ({ dim: d, op: '=', val: '' })),
     coefficient: { type: COEFF_TYPES[0] },
     multiplicateur: 1,
     destination,
@@ -530,9 +285,16 @@ function RuleFormModal({
   onSubmit,
   onCancel,
 }: RuleFormModalProps) {
-  const [draft, setDraft] = useState<RuleDraft>(initial);
+  const [draft, setDraft] = useState<RuleDraft>(() => ({
+    ...initial,
+    definition: seedBaseSelection(initial.definition, selectionDims),
+  }));
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Dimensions de destination révélées manuellement par opération (clé = seq).
+  // Les défauts (account/flow/nature) et toute dimension déjà pilotée sont
+  // toujours visibles ; ceci ne couvre que les chips « + » cliqués.
+  const [revealedDest, setRevealedDest] = useState<Record<number, string[]>>({});
   // Caractéristiques N1/N2 disponibles pour les destinations `map` et les
   // sélections `via`.
   const [characteristics, setCharacteristics] = useState<Characteristic[]>([]);
@@ -603,10 +365,24 @@ function RuleFormModal({
       return;
     }
 
+    // Nettoyage avant envoi : on retire les conditions de sélection vides (lignes
+    // de base seedées non renseignées) pour ne pas envoyer de filtre `dim = ''`
+    // au moteur.
+    const cleaned: RuleDraft = {
+      ...draft,
+      definition: {
+        ...draft.definition,
+        operations: draft.definition.operations.map((o) => ({
+          ...o,
+          selection: o.selection.filter(selectionIsMeaningful),
+        })),
+      },
+    };
+
     try {
-      await onSubmit(draft);
+      await onSubmit(cleaned);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'erreur');
+      setFormError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -700,11 +476,12 @@ function RuleFormModal({
       return { ...d, definition: { ...d.definition, operations } };
     });
   }
-  function addSelection(opIdx: number) {
+  // Ajoute une condition de filtre pour une dimension donnée (chips « + »).
+  function addSelectionForDim(opIdx: number, dim: string) {
     setDraft((d) => {
       const operations = d.definition.operations.map((o, i) =>
         i === opIdx
-          ? { ...o, selection: [...o.selection, emptySelectionCond(selectionDims)] }
+          ? { ...o, selection: [...o.selection, { dim, op: '=', val: '' }] }
           : o,
       );
       return { ...d, definition: { ...d.definition, operations } };
@@ -738,6 +515,41 @@ function RuleFormModal({
       });
       return { ...d, definition: { ...d.definition, operations } };
     });
+  }
+
+  // Dimensions de destination à afficher pour une opération : défauts
+  // (account/flow/nature) + toute dimension déjà pilotée (mode ≠ inherit) +
+  // chips révélés manuellement. Défauts en tête, le reste trié.
+  function visibleDestDims(op: Operation): string[] {
+    const defaults = DEFAULT_DEST_DIMS.filter((d) => pilotableDims.includes(d));
+    const active = pilotableDims.filter(
+      (d) => (op.destination[d]?.mode ?? 'inherit') !== 'inherit',
+    );
+    const revealed = (revealedDest[op.seq] ?? []).filter((d) =>
+      pilotableDims.includes(d),
+    );
+    const shown = new Set<string>([...defaults, ...active, ...revealed]);
+    const rest = sortForDisplay(
+      [...shown].filter((d) => !defaults.includes(d)),
+      (d) => d,
+    );
+    return [...defaults, ...rest];
+  }
+
+  // Révèle une dimension de destination (chip « + ») sans la piloter encore
+  // (reste inherit jusqu'à modification du mode).
+  function revealDest(seq: number, dim: string) {
+    setRevealedDest((r) => ({ ...r, [seq]: [...(r[seq] ?? []), dim] }));
+  }
+
+  // Masque une dimension non-défaut : remet son mode à inherit et la retire des
+  // dimensions révélées.
+  function hideDest(opIdx: number, seq: number, dim: string) {
+    updateDestination(opIdx, dim, { mode: 'inherit' });
+    setRevealedDest((r) => ({
+      ...r,
+      [seq]: (r[seq] ?? []).filter((d) => d !== dim),
+    }));
   }
 
   // ---------- Level global (hérité par toutes les opérations) ----------
@@ -842,19 +654,10 @@ function RuleFormModal({
                     ))}
                   </select>
                 </label>
-                <label className="field">
-                  <span>Op</span>
-                  <select
-                    value={c.op}
-                    onChange={(e) => updateScope(idx, { op: e.target.value })}
-                  >
-                    {OPS.map((o) => (
-                      <option key={o} value={o}>
-                        {o}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <OpSelect
+                  value={c.op}
+                  onChange={(op) => updateScope(idx, { op })}
+                />
                 {!NULL_OPS.has(c.op) && (
                   <label className="field">
                     <span>Valeur</span>
@@ -971,78 +774,50 @@ function RuleFormModal({
                   </button>
                 </div>
 
+                <div className="rule-op-grid">
                 {/* Sélection */}
                 <div className="rule-section" style={{ marginTop: 0 }}>
                   <h4 className="rule-section__title">Sélection</h4>
-                  <p className="rule-section__hint">
-                    Conditions combinées par <strong>ET</strong> (toutes doivent être vraies).
-                   {' '}
-                    <em>
-                      Par défaut, le filtre porte sur la valeur directe de la dimension.
-                      Utilisez « Traverser » pour filtrer par <strong>attribut</strong> :
-                      caractéristique N1 (regroupement) ou référence directe
-                      (ex. <code>compte_parent</code>).
-                    </em>
-                  </p>
-                  {op.selection.map((s, sIdx) => {
-                    // Options de traversée pour `s.dim` :
-                    // - caractéristiques N1 dont la dimension de base est `s.dim`
-                    //   (filtre sur la valeur N1 du membre, ex : `comportement = VENTES_IC`).
-                    // - références directes (patron B) portées par `s.dim`
-                    //   (filtre sur la colonne de référence, ex : `compte_parent = 60`).
-                    // - enums natifs `attr` (CHECK du DDL, ex : `account.classe`).
-                    const viaOptions = sortForDisplay(
-                      characteristics.filter((c) => c.base_dimension === s.dim),
-                      (c) => c.code,
-                    );
-                    const refOptions = sortForDisplay(
-                      customReferences.filter((r) => r.host_dimension === s.dim),
-                      (r) => r.column,
-                    );
-                    const attrOptions = sortForDisplay(
-                      nativeEnums.filter((e) => e.host_dimension === s.dim),
-                      (e) => e.column,
-                    );
-                    // Valeur courante du dropdown « Traverser » :
-                    // - '' → direct (pas de traversée)
-                    // - `via:<code>` → caractéristique N1
-                    // - `ref:<column>` → référence directe (custom ou native)
-                    // - `attr:<column>` → enum natif (CHECK du DDL)
-                    const traverseVal = s.via
-                      ? `via:${s.via}`
-                      : s.ref
-                        ? `ref:${s.ref}`
-                        : s.attr
-                          ? `attr:${s.attr}`
-                          : '';
-                    return (
-                      <div key={sIdx} className="rule-condition">
-                        <label className="field">
-                          <span>Dim</span>
-                          <select
-                            value={s.dim}
-                            onChange={(e) =>
-                              updateSelection(opIdx, sIdx, {
-                                dim: e.target.value,
-                                via: undefined,
-                                ref: undefined,
-                                attr: undefined,
-                              })
-                            }
-                          >
-                            {selectionDims.map((d) => (
-                              <option key={d} value={d}>
-                                {d}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>Traverser</span>
-                          <select
+                  {(() => {
+                    const sortedSelection = [...op.selection].sort((a, b) => {
+                      const aIdx = DEFAULT_SEL_DIMS.indexOf(a.dim);
+                      const bIdx = DEFAULT_SEL_DIMS.indexOf(b.dim);
+                      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+                      if (aIdx !== -1) return -1;
+                      if (bIdx !== -1) return 1;
+                      return compareText(a.dim, b.dim);
+                    });
+                    return sortedSelection.map((s) => {
+                      const sIdx = op.selection.indexOf(s);
+                      const viaOptions = sortForDisplay(
+                        characteristics.filter((c) => c.base_dimension === s.dim),
+                        (c) => c.code,
+                      );
+                      const refOptions = sortForDisplay(
+                        customReferences.filter((r) => r.host_dimension === s.dim),
+                        (r) => r.column,
+                      );
+                      const attrOptions = sortForDisplay(
+                        nativeEnums.filter((e) => e.host_dimension === s.dim),
+                        (e) => e.column,
+                      );
+                      const traverseVal = s.via
+                        ? `via:${s.via}`
+                        : s.ref
+                          ? `ref:${s.ref}`
+                          : s.attr
+                            ? `attr:${s.attr}`
+                            : '';
+                      return (
+                        <div key={sIdx} className="rule-condition rule-condition--compact">
+                          <span className="rule-sel-dim">{s.dim}</span>
+                          <TraverseField
                             value={traverseVal}
-                            onChange={(e) => {
-                              const v = e.target.value;
+                            disabled={s.dim === 'level'}
+                            viaOptions={viaOptions}
+                            refOptions={refOptions}
+                            attrOptions={attrOptions}
+                            onSelect={(v) => {
                               if (v === '') {
                                 updateSelection(opIdx, sIdx, {
                                   via: undefined,
@@ -1073,222 +848,295 @@ function RuleFormModal({
                                 });
                               }
                             }}
-                            disabled={
-                              s.dim === 'level' ||
-                              (viaOptions.length === 0 &&
-                                refOptions.length === 0 &&
-                                attrOptions.length === 0)
-                            }
-                          >
-                            <option value="">(direct)</option>
-                            {viaOptions.length > 0 && (
-                              <optgroup label="Caractéristique N1">
-                                {viaOptions.map((c) => (
-                                  <option key={`via:${c.code}`} value={`via:${c.code}`}>
-                                    {c.code}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {refOptions.length > 0 && (
-                              <optgroup label="Référence directe">
-                                {refOptions.map((r) => (
-                                  <option key={`ref:${r.column}`} value={`ref:${r.column}`}>
-                                    {r.column}
-                                    {r.native ? ' (natif)' : ''}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {attrOptions.length > 0 && (
-                              <optgroup label="Attribut natif">
-                                {attrOptions.map((e) => (
-                                  <option key={`attr:${e.column}`} value={`attr:${e.column}`}>
-                                    {e.column}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>Op</span>
-                          <select
+                          />
+                          <OpSelect
                             value={s.op}
-                            onChange={(e) =>
-                              updateSelection(opIdx, sIdx, { op: e.target.value })
-                            }
+                            onChange={(op) => updateSelection(opIdx, sIdx, { op })}
+                          />
+                          {!NULL_OPS.has(s.op) && (
+                            <label className="field field--grow">
+                              <span>Valeur</span>
+                              <SelectionValueField
+                                sel={s}
+                                customReferences={customReferences}
+                                nativeEnums={nativeEnums}
+                                op={s.op}
+                                value={s.val}
+                                onRawChange={(raw) =>
+                                  updateSelection(opIdx, sIdx, {
+                                    val: parseCondVal(s.op, raw),
+                                  })
+                                }
+                              />
+                            </label>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--danger"
+                            onClick={() => removeSelection(opIdx, sIdx)}
                           >
-                            {OPS.map((o) => (
-                              <option key={o} value={o}>
-                                {o}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {!NULL_OPS.has(s.op) && (
-                          <label className="field">
-                            <span>Valeur</span>
-                            <SelectionValueField
-                              sel={s}
-                              customReferences={customReferences}
-                              nativeEnums={nativeEnums}
-                              op={s.op}
-                              value={s.val}
-                              onRawChange={(raw) =>
-                                updateSelection(opIdx, sIdx, {
-                                  val: parseCondVal(s.op, raw),
-                                })
-                              }
-                            />
-                          </label>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--danger"
-                          onClick={() => removeSelection(opIdx, sIdx)}
-                        >
-                          ✕
-                        </button>
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    });
+                  })()}
+                  {(() => {
+                    const presentSel = new Set(op.selection.map((s) => s.dim));
+                    const baseSel = DEFAULT_SEL_DIMS.filter((d) =>
+                      selectionDims.includes(d),
+                    );
+                    const addableSel = [
+                      ...baseSel.filter((d) => !presentSel.has(d)),
+                      ...sortForDisplay(
+                        selectionDims.filter(
+                          (d) => !presentSel.has(d) && !baseSel.includes(d),
+                        ),
+                        (d) => d,
+                      ),
+                    ];
+                    return (
+                      <div className="rule-dest-add">
+                        <span className="rule-dest-add__label">Ajouter un filtre</span>
+                        {addableSel.map((dim) => (
+                          <button
+                            key={dim}
+                            type="button"
+                            className="rule-chip"
+                            onClick={() => addSelectionForDim(opIdx, dim)}
+                          >
+                            + {dim}
+                          </button>
+                        ))}
                       </div>
                     );
-                  })}
-                  <button
-                    type="button"
-                    className="rule-add-btn"
-                    onClick={() => addSelection(opIdx)}
-                  >
-                    + Ajouter une condition
-                  </button>
+                  })()}
                 </div>
 
                 {/* Destination */}
-                <div className="rule-section" style={{ marginTop: 0 }}>
+                <div className="rule-section rule-section--dest" style={{ marginTop: 0 }}>
                   <h4 className="rule-section__title">Destination</h4>
-                  {pilotableDims.map((dim) => {
-                    const dest = op.destination[dim] ?? { mode: 'inherit' as DestMode };
-                    // Mode `map` : seules les caractéristiques ayant un attribut
-                    // ciblant cette dimension sont proposées (compatibilité de
-                    // type imposée par le moteur).
-                    const viaOptions = sortForDisplay(
-                      characteristics.filter((c) =>
-                        c.attributes.some((a) => a.target_dimension === dim),
-                      ),
-                      (c) => c.code,
-                    );
-                    const viaChar = characteristics.find((c) => c.code === dest.via);
-                    const attrOptions = sortForDisplay(
-                      (viaChar?.attributes ?? []).filter((a) => a.target_dimension === dim),
-                      (a) => a.name,
-                    );
-                    // Mode `map_ref` : seules les références directes (patron B)
-                    // auto-référentielles sur `dim` sont proposées (host = target
-                    // = dim, ex : `compte_parent` sur `account`). Le moteur
-                    // exige en effet target = dim (la valeur écrite doit être un
-                    // code valide pour `dim`).
-                    const mapRefOptions = sortForDisplay(
-                      customReferences.filter(
-                        (r) => r.host_dimension === dim && r.target_dimension === dim,
-                      ),
-                      (r) => r.column,
+                  {(() => {
+                    const visible = visibleDestDims(op);
+                    const addable = sortForDisplay(
+                      pilotableDims.filter((d) => !visible.includes(d)),
+                      (d) => d,
                     );
                     return (
-                      <div key={dim} className="rule-dest-row">
-                        <span className="rule-dest-label">{dim}</span>
-                        <select
-                          value={dest.mode}
-                          onChange={(e) =>
-                            updateDestination(opIdx, dim, {
-                              mode: e.target.value as DestMode,
-                            })
-                          }
-                        >
-                          <option value="inherit">inherit</option>
-                          <option value="override">override</option>
-                          <option value="null">null</option>
-                          <option value="map" disabled={viaOptions.length === 0}>
-                            map (caractéristique)
-                          </option>
-                          <option value="map_ref" disabled={mapRefOptions.length === 0}>
-                            map_ref (référence)
-                          </option>
-                        </select>
-                        {dest.mode === 'override' && (
-                          <OverrideValueField
-                            dim={dim}
-                            value={dest.value ?? ''}
-                            onChange={(v) =>
-                              updateDestination(opIdx, dim, { value: v })
-                            }
-                          />
-                        )}
-                        {dest.mode === 'map' && (
-                          <>
-                            <select
-                              className="rule-dest-input"
-                              value={dest.via ?? ''}
-                              onChange={(e) =>
-                                updateDestination(opIdx, dim, {
-                                  via: e.target.value,
-                                  attr: '',
-                                })
-                              }
-                            >
-                              <option value="" disabled>
-                                — caractéristique —
-                              </option>
-                              {viaOptions.map((c) => (
-                                <option key={c.code} value={c.code}>
-                                  {c.code}
+                      <>
+                        {visible.map((dim) => {
+                          const dest =
+                            op.destination[dim] ?? { mode: 'inherit' as DestMode };
+                          // Mode `map` : seules les caractéristiques ayant un
+                          // attribut ciblant cette dimension sont proposées
+                          // (compatibilité de type imposée par le moteur).
+                          const viaOptions = sortForDisplay(
+                            characteristics.filter((c) =>
+                              c.attributes.some((a) => a.target_dimension === dim),
+                            ),
+                            (c) => c.code,
+                          );
+                          const viaChar = characteristics.find(
+                            (c) => c.code === dest.via,
+                          );
+                          const attrOptions = sortForDisplay(
+                            (viaChar?.attributes ?? []).filter(
+                              (a) => a.target_dimension === dim,
+                            ),
+                            (a) => a.name,
+                          );
+                          // Mode `map_ref` : seules les références directes
+                          // (patron B) auto-référentielles sur `dim` (host =
+                          // target = dim, ex : `compte_parent` sur `account`).
+                          const mapRefOptions = sortForDisplay(
+                            customReferences.filter(
+                              (r) =>
+                                r.host_dimension === dim &&
+                                r.target_dimension === dim,
+                            ),
+                            (r) => r.column,
+                          );
+                          const isDefault = DEFAULT_DEST_DIMS.includes(dim);
+                          return (
+                            <div key={dim} className="rule-dest-row">
+                              <span className="rule-dest-label">{dim}</span>
+                              <select
+                                className={`rule-dest-mode rule-dest-mode--${dest.mode}`}
+                                value={dest.mode}
+                                onChange={(e) =>
+                                  updateDestination(opIdx, dim, {
+                                    mode: e.target.value as DestMode,
+                                  })
+                                }
+                              >
+                                <option value="inherit">inherit</option>
+                                <option value="override">override</option>
+                                <option value="null">null</option>
+                                <option value="map" disabled={viaOptions.length === 0}>
+                                  map (caractéristique)
                                 </option>
-                              ))}
-                            </select>
-                            <select
-                              className="rule-dest-input"
-                              value={dest.attr ?? ''}
-                              disabled={!dest.via}
-                              onChange={(e) =>
-                                updateDestination(opIdx, dim, { attr: e.target.value })
-                              }
-                            >
-                              <option value="" disabled>
-                                — attribut —
-                              </option>
-                              {attrOptions.map((a) => (
-                                <option key={a.name} value={a.name}>
-                                  {a.name}
+                                <option
+                                  value="map_ref"
+                                  disabled={mapRefOptions.length === 0}
+                                >
+                                  map_ref (référence)
                                 </option>
-                              ))}
-                            </select>
-                          </>
-                        )}
-                        {dest.mode === 'map_ref' && (
-                          <select
-                            className="rule-dest-input"
-                            value={dest.ref ?? ''}
-                            onChange={(e) =>
-                              updateDestination(opIdx, dim, { ref: e.target.value })
-                            }
-                          >
-                            <option value="" disabled>
-                              — référence —
-                            </option>
-                            {mapRefOptions.map((r) => (
-                              <option key={r.column} value={r.column}>
-                                {r.column}
-                              </option>
+                              </select>
+                              <span className="rule-dest-extra">
+                                {dest.mode === 'inherit' && (
+                                  <span className="rule-dest-muted">
+                                    hérité de la source
+                                  </span>
+                                )}
+                                {dest.mode === 'null' && (
+                                  <span className="rule-dest-muted">
+                                    forcé à vide (∅)
+                                  </span>
+                                )}
+                                {dest.mode === 'override' && (
+                                  <OverrideValueField
+                                    dim={dim}
+                                    value={dest.value ?? ''}
+                                    onChange={(v) =>
+                                      updateDestination(opIdx, dim, { value: v })
+                                    }
+                                  />
+                                )}
+                                {dest.mode === 'map' && (
+                                  <>
+                                    <select
+                                      className="rule-dest-input"
+                                      value={dest.via ?? ''}
+                                      onChange={(e) =>
+                                        updateDestination(opIdx, dim, {
+                                          via: e.target.value,
+                                          attr: '',
+                                        })
+                                      }
+                                    >
+                                      <option value="" disabled>
+                                        — caractéristique —
+                                      </option>
+                                      {viaOptions.map((c) => (
+                                        <option key={c.code} value={c.code}>
+                                          {c.code}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <select
+                                      className="rule-dest-input"
+                                      value={dest.attr ?? ''}
+                                      disabled={!dest.via}
+                                      onChange={(e) =>
+                                        updateDestination(opIdx, dim, {
+                                          attr: e.target.value,
+                                        })
+                                      }
+                                    >
+                                      <option value="" disabled>
+                                        — attribut —
+                                      </option>
+                                      {attrOptions.map((a) => (
+                                        <option key={a.name} value={a.name}>
+                                          {a.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </>
+                                )}
+                                {dest.mode === 'map_ref' && (
+                                  <select
+                                    className="rule-dest-input"
+                                    value={dest.ref ?? ''}
+                                    onChange={(e) =>
+                                      updateDestination(opIdx, dim, {
+                                        ref: e.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="" disabled>
+                                      — référence —
+                                    </option>
+                                    {mapRefOptions.map((r) => (
+                                      <option key={r.column} value={r.column}>
+                                        {r.column}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </span>
+                              {isDefault ? (
+                                <span aria-hidden="true" />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="rule-dest-remove"
+                                  aria-label={`Retirer ${dim}`}
+                                  title="Retirer cette dimension (repasse en inherit)"
+                                  onClick={() => hideDest(opIdx, op.seq, dim)}
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {addable.length > 0 && (
+                          <div className="rule-dest-add">
+                            <span className="rule-dest-add__label">
+                              Autres dimensions
+                            </span>
+                            {addable.map((dim) => (
+                              <button
+                                key={dim}
+                                type="button"
+                                className="rule-chip"
+                                onClick={() => revealDest(op.seq, dim)}
+                              >
+                                + {dim}
+                              </button>
                             ))}
-                          </select>
+                          </div>
                         )}
-                      </div>
+                      </>
                     );
-                  })}
+                  })()}
+                </div>
+                </div>
+
+                <div className="rule-op-summary">
+                  <span className="rule-op-summary__tag">résumé</span>
+                  <span>{summarizeOperation(op)}</span>
                 </div>
               </div>
             ))}
             <button type="button" className="rule-add-btn" onClick={addOp}>
               + Ajouter une opération
             </button>
+
+            {/* Aides consolidées (affichées une seule fois pour toutes les
+                opérations afin de garder le formulaire compact). */}
+            <div className="rule-help">
+              <p className="rule-section__hint rule-op-legend">
+                <strong>Opérateurs :</strong> <code>=</code> égal · <code>≠</code>{' '}
+                différent · <code>&gt;</code> <code>&lt;</code> <code>≥</code>{' '}
+                <code>≤</code> comparaisons · <code>∈</code> dans la liste ·{' '}
+                <code>∅</code> est nul · <code>≠∅</code> non nul
+              </p>
+              <p className="rule-section__hint">
+                <strong>Sélection :</strong> conditions combinées par ET (toutes
+                doivent être vraies). Par défaut le filtre porte sur la valeur directe
+                de la dimension ; l'icône <span className="rule-traverse-glyph">↳</span>{' '}
+                « Traverser » permet de filtrer par attribut (caractéristique N1 ou
+                référence directe, ex. <code>compte_parent</code>).
+              </p>
+              <p className="rule-section__hint">
+                <strong>Destination :</strong> <code>account</code>, <code>flow</code>{' '}
+                et <code>nature</code> sont affichées d'office ; ajoutez les autres
+                dimensions via les boutons <strong>+</strong>. Les dimensions laissées
+                en <code>inherit</code> conservent la valeur de la source.
+              </p>
+            </div>
           </div>
 
           {formError && (
@@ -1318,6 +1166,10 @@ function RuleFormModal({
     </div>
   );
 }
+
+// =================================================================
+// Modal de renommage de code (règle ou jeu de règles)
+// =================================================================
 
 // =================================================================
 // Modal d'édition d'un jeu de règles
@@ -1353,7 +1205,7 @@ function RulesetFormModal({
     try {
       await onSubmit(draft);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'erreur');
+      setFormError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -1542,6 +1394,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
     | { mode: 'duplicate'; draft: RuleDraft }
     | null
   >(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1550,7 +1403,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
       const rows = await api.rules.list();
       setRules(rows);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setRules([]);
     } finally {
       setLoading(false);
@@ -1570,10 +1423,21 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         setNotice({ kind: 'success', text: 'Règle supprimée.' });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [load],
+  );
+
+  const handleRename = useCallback(
+    async (newCode: string) => {
+      if (!renaming) return;
+      await api.masterData.rename('rules', renaming, newCode);
+      setNotice({ kind: 'success', text: `Règle renommée : ${renaming} → ${newCode}.` });
+      setRenaming(null);
+      await load();
+    },
+    [renaming, load],
   );
 
   const openEdit = useCallback(async (code: string) => {
@@ -1588,7 +1452,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         },
       });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
     }
   }, []);
 
@@ -1607,7 +1471,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         },
       });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
     }
   }, []);
 
@@ -1660,6 +1524,13 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
             </button>
             <button
               type="button"
+              className="btn btn--sm"
+              onClick={() => setRenaming(info.row.original.code)}
+            >
+              Renommer
+            </button>
+            <button
+              type="button"
               className="btn btn--sm btn--danger"
               onClick={() => void handleDelete(info.row.original.code)}
             >
@@ -1669,7 +1540,7 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
         ),
       },
     ],
-    [openEdit, openDuplicate, handleDelete],
+    [openEdit, openDuplicate, handleRename, handleDelete],
   );
 
   const table = useReactTable({
@@ -1780,6 +1651,14 @@ function BibliothequeTab({ dims }: BibliothequeTabProps) {
           onCancel={() => setForm(null)}
         />
       )}
+      {renaming !== null && (
+        <RenameModal
+          oldCode={renaming}
+          entityLabel="la règle"
+          onConfirm={handleRename}
+          onCancel={() => setRenaming(null)}
+        />
+      )}
     </>
   );
 }
@@ -1800,6 +1679,7 @@ function JeuxTab() {
     | { mode: 'edit'; draft: RulesetDraft }
     | null
   >(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1815,7 +1695,7 @@ function JeuxTab() {
       setDetails(full);
       setRuleOptions(rules);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setDetails([]);
     } finally {
       setLoading(false);
@@ -1839,7 +1719,7 @@ function JeuxTab() {
         },
       });
     } catch (err) {
-      setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+      setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
     }
   }, []);
 
@@ -1851,10 +1731,21 @@ function JeuxTab() {
         setNotice({ kind: 'success', text: 'Jeu supprimé.' });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [load],
+  );
+
+  const handleRenameRuleset = useCallback(
+    async (newCode: string) => {
+      if (!renaming) return;
+      await api.masterData.rename('rulesets', renaming, newCode);
+      setNotice({ kind: 'success', text: `Jeu renommé : ${renaming} → ${newCode}.` });
+      setRenaming(null);
+      await load();
+    },
+    [renaming, load],
   );
 
   async function handleSubmit(draft: RulesetDraft) {
@@ -1907,6 +1798,13 @@ function JeuxTab() {
               </button>
               <button
                 type="button"
+                className="btn btn--sm"
+                onClick={() => setRenaming(code)}
+              >
+                Renommer
+              </button>
+              <button
+                type="button"
                 className="btn btn--sm btn--danger"
                 onClick={() => void handleDelete(code)}
               >
@@ -1917,7 +1815,7 @@ function JeuxTab() {
         },
       },
     ],
-    [openEdit, handleDelete],
+    [openEdit, handleRenameRuleset, handleDelete],
   );
 
   const table = useReactTable({
@@ -2022,228 +1920,14 @@ function JeuxTab() {
           onCancel={() => setForm(null)}
         />
       )}
-    </>
-  );
-}
-
-// =================================================================
-// Sous-onglet « Dimensions »
-// =================================================================
-
-function DimensionsTab() {
-  const [dims, setDims] = useState<DimensionInfo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<Notice>(null);
-  const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newLabel, setNewLabel] = useState('');
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await api.dimensions.list();
-      setDims(rows);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
-      setDims([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    setNotice(null);
-    void load();
-  }, [load]);
-
-  const handleCreate = useCallback(
-    async (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      setCreating(true);
-      try {
-        await api.dimensions.create({ name: newName, label: newLabel });
-        setNotice({ kind: 'success', text: `Dimension « ${newName} » créée.` });
-        setNewName('');
-        setNewLabel('');
-        await load();
-      } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
-      } finally {
-        setCreating(false);
-      }
-    },
-    [newName, newLabel, load],
-  );
-
-  const handleDelete = useCallback(
-    async (name: string) => {
-      if (!window.confirm(`Supprimer la dimension « ${name} » ?`)) return;
-      try {
-        await api.dimensions.remove(name);
-        setNotice({ kind: 'success', text: `Dimension « ${name} » supprimée.` });
-        await load();
-      } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
-      }
-    },
-    [load],
-  );
-
-  const columns = useMemo<RTColumnDef<DimensionInfo>[]>(
-    () => [
-      { header: 'Nom technique', accessorKey: 'name' },
-      { header: 'Libellé', accessorKey: 'label' },
-      { header: 'Catégorie', accessorKey: 'category' },
-      {
-        header: 'Perso.',
-        accessorKey: 'custom',
-        cell: (info) => (info.getValue() ? 'oui' : 'non'),
-      },
-      {
-        header: 'Pilotable',
-        accessorKey: 'pilotable',
-        cell: (info) => (info.getValue() ? 'oui' : 'non'),
-      },
-      {
-        id: '__actions',
-        header: 'Actions',
-        enableSorting: false,
-        cell: (info) => {
-          const dim = info.row.original;
-          if (!dim.custom) {
-            return <span className="dim-locked" title="Dimension built-in verrouillée">—</span>;
-          }
-          return (
-            <button
-              type="button"
-              className="btn btn--sm btn--danger"
-              onClick={() => void handleDelete(dim.name)}
-            >
-              Supprimer
-            </button>
-          );
-        },
-      },
-    ],
-    [handleDelete],
-  );
-
-  const table = useReactTable({
-    data: dims,
-    columns,
-    state: { sorting },
-    onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
-
-  return (
-    <>
-      <div className="page__actions">
-        <button type="button" className="btn" onClick={load} disabled={loading}>
-          {loading ? 'Chargement…' : 'Rafraîchir'}
-        </button>
-      </div>
-
-      <div className="page__meta">{dims.length} dimension(s)</div>
-
-      {error && <div className="alert alert--error">Erreur : {error}</div>}
-      {notice && <div className={`alert alert--${notice.kind}`}>{notice.text}</div>}
-
-      <div className="table-wrap">
-        <table className="grid">
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
-                {hg.headers.map((header) => {
-                  const canSort = header.column.getCanSort();
-                  const sorted = header.column.getIsSorted();
-                  return (
-                    <th key={header.id}>
-                      {header.isPlaceholder ? null : (
-                        <button
-                          type="button"
-                          className={`th-sort ${canSort ? 'th-sort--sortable' : ''}`}
-                          onClick={header.column.getToggleSortingHandler()}
-                          disabled={!canSort}
-                        >
-                          {flexRender(
-                            header.column.columnDef.header,
-                            header.getContext(),
-                          )}
-                          <span className="th-sort__mark">
-                            {sorted === 'asc'
-                              ? '▲'
-                              : sorted === 'desc'
-                                ? '▼'
-                                : canSort
-                                  ? '↕'
-                                  : ''}
-                          </span>
-                        </button>
-                      )}
-                    </th>
-                  );
-                })}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.length === 0 && (
-              <tr>
-                <td className="grid__empty" colSpan={columns.length}>
-                  {loading ? 'Chargement…' : 'Aucune dimension.'}
-                </td>
-              </tr>
-            )}
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="rule-section" style={{ marginTop: 24 }}>
-        <h3 className="rule-section__title">Ajouter une dimension</h3>
-        <form className="form-grid" onSubmit={handleCreate}>
-          <label className="field">
-            <span>Nom technique •</span>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="ex : segment"
-              pattern="[A-Za-z_][A-Za-z0-9_]{0,49}"
-              title="Lettre ou _ en premier, puis alphanumérique / _ (max 50). Réservés : level, amount, id."
-              required
-            />
-          </label>
-          <label className="field">
-            <span>Libellé</span>
-            <input
-              type="text"
-              value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              placeholder="ex : Segment produit"
-              required
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" className="btn btn--primary" disabled={creating}>
-              {creating ? 'Création…' : 'Créer la dimension'}
-            </button>
-          </div>
-        </form>
-      </div>
+      {renaming !== null && (
+        <RenameModal
+          oldCode={renaming}
+          entityLabel="le jeu de règles"
+          onConfirm={handleRenameRuleset}
+          onCancel={() => setRenaming(null)}
+        />
+      )}
     </>
   );
 }
@@ -2253,11 +1937,8 @@ function DimensionsTab() {
 // =================================================================
 
 export function RulesPage() {
-  const [subtab, setSubtab] = useState<Subtab>('biblio');
   const [dims, setDims] = useState<DimensionInfo[]>([]);
   const [dimsError, setDimsError] = useState<string | null>(null);
-  // Mapping dimension → table master data, dérivé du graphe de références
-  // serveur (`GET /api/meta/references`). Fallback codé en dur si injoignable.
   const [dimToTable, setDimToTable] = useState<DimToTable>(DIM_TO_TABLE_FALLBACK);
 
   useEffect(() => {
@@ -2267,8 +1948,6 @@ export function RulesPage() {
         const refs = await api.references();
         if (!cancelled) setDimToTable(buildDimToTable(refs));
       } catch {
-        // Mode dégradé : on conserve le fallback (les dropdowns restent
-        // fonctionnels sur les dimensions built-in).
         if (!cancelled) setDimToTable(DIM_TO_TABLE_FALLBACK);
       }
     })();
@@ -2277,11 +1956,6 @@ export function RulesPage() {
     };
   }, []);
 
-  // Charge les dimensions une fois pour toutes (Bibliothèque en a besoin pour
-  // construire les listes dynamiques pilotableDims / selectionDims).
-  // En cas d'échec (serveur obsolète, /api/meta/dimensions absent), on bascule
-  // sur le fallback builtin pour que l'éditeur reste utilisable, et on signale
-  // le mode dégradé via dimsError.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2320,34 +1994,21 @@ export function RulesPage() {
         </div>
       )}
 
-      <div className="subtabs">
-        <button
-          type="button"
-          className={`subtab ${subtab === 'biblio' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('biblio')}
-        >
-          Bibliothèque
-        </button>
-        <button
-          type="button"
-          className={`subtab ${subtab === 'jeux' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('jeux')}
-        >
-          Jeux de règles
-        </button>
-        <button
-          type="button"
-          className={`subtab ${subtab === 'dims' ? 'subtab--active' : ''}`}
-          onClick={() => setSubtab('dims')}
-        >
-          Dimensions
-        </button>
-      </div>
-
-      {subtab === 'biblio' && <BibliothequeTab dims={dims} />}
-      {subtab === 'jeux' && <JeuxTab />}
-      {subtab === 'dims' && <DimensionsTab />}
+      <BibliothequeTab dims={dims} />
     </section>
+    </DimRefContext.Provider>
+  );
+}
+
+export function JeuxReglesPage() {
+  return (
+    <DimRefContext.Provider value={DIM_TO_TABLE_FALLBACK}>
+      <section className="page">
+        <div className="page__header">
+          <h1 className="page__title">Jeux de règles</h1>
+        </div>
+        <JeuxTab />
+      </section>
     </DimRefContext.Provider>
   );
 }

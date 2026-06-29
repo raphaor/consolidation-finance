@@ -19,6 +19,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { errMsg } from '../utils/errMessage';
 import {
   type ColumnDef as RTColumnDef,
   flexRender,
@@ -40,10 +41,38 @@ import { MASTER_TABLES } from '../types';
 import { FieldInput } from '../components/FieldInput';
 import { coerceValue, renderCell, toFormValue } from '../components/masterFields';
 import { findReferenceDrift } from '../utils/referenceCheck';
+import { RenameModal } from '../components/RenameModal';
 
 type Row = Record<string, unknown>;
 type FormState = { mode: 'create' } | { mode: 'edit'; row: Row } | null;
 type Notice = { kind: 'success' | 'error'; text: string } | null;
+
+// Tables natives qui sont des **dimensions de la table de faits** (axes de
+// `fact_entry`), par opposition aux **référentiels de paramétrage**. La source de
+// vérité est le registre des dimensions (engine `dimensions.rs`) + leurs tables de
+// référence (`references.rs`) ; on la reflète ici côté front car le menu Master
+// data mêle des concepts purement UI (certaines tables ont une page dédiée).
+// Cf. typologie « Dimensions / Attributs / Paramétrage ». Tout ce qui est natif et
+// hors de cet ensemble est rangé sous « Référentiels de paramétrage ».
+const DIMENSION_TABLES = new Set<string>([
+  'scenario_categories', // phase
+  'entities', //            entity (+ partner, share)
+  'periods', //             period, entry_period
+  'accounts', //            account
+  'flows', //               flow
+  'currencies', //          currency
+  'natures', //             nature
+]);
+
+// Dimensions empruntant les valeurs d'une autre dimension (pas de table propre) :
+// `partner` / `share` partagent le référentiel `entities`. On les expose ici comme
+// **vues en lecture** sur la table empruntée, pour les retrouver dans Master data ;
+// leur édition se fait dans la table cible (Entités). `table` est l'identifiant de
+// vue (distinct), `resolves` la table master data réellement chargée.
+const DIMENSION_VIEWS: Record<string, { label: string; resolves: string }> = {
+  partner: { label: 'Partenaire (→ Entités)', resolves: 'entities' },
+  share: { label: 'Titre (→ Entités)', resolves: 'entities' },
+};
 
 // ───────────── Construction runtime d'un TableDef depuis le schéma ─────────────
 
@@ -86,7 +115,7 @@ function columnSchemaToColumnDef(cs: ColumnSchema): ColumnDef {
 // - les colonnes dynamiques du schéma (caractéristiques N1, références directes
 //   patron B, attributs N2 des `car_*`) non déjà présentes dans la définition
 //   statique.
-export function buildTableDef(
+function buildTableDef(
   schema: TableSchema,
   staticDef: TableDef | undefined,
 ): TableDef {
@@ -183,7 +212,7 @@ function RowForm({
     try {
       await onSubmit(values);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'erreur');
+      setFormError(errMsg(err, 'erreur'));
     } finally {
       setSubmitting(false);
     }
@@ -240,8 +269,22 @@ function RowForm({
   );
 }
 
-export function MasterDataPage() {
-  const [table, setTable] = useState<MasterTable>('accounts');
+interface MasterDataPageProps {
+  // Verrouille l'éditeur sur une seule table (dropdown masqué). Sert la page
+  // « Définitions » pointée sur `consolidations`.
+  fixedTable?: MasterTable;
+  // Tables retirées du sélecteur (ex. `consolidations`, éditée ailleurs).
+  hideTables?: string[];
+  // Titre de page (défaut « Master data »).
+  title?: string;
+}
+
+export function MasterDataPage({
+  fixedTable,
+  hideTables,
+  title,
+}: MasterDataPageProps = {}) {
+  const [table, setTable] = useState<MasterTable>(fixedTable ?? 'accounts');
   // Liste des tables navigables servie par `GET /api/md` (natives + car_* + lst_*).
   // Tant qu'elle n'est pas chargée, on retombe sur MASTER_TABLES (labels statiques).
   const [tableList, setTableList] = useState<TableSummary[]>([]);
@@ -258,6 +301,7 @@ export function MasterDataPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [formState, setFormState] = useState<FormState>(null);
+  const [renameTarget, setRenameTarget] = useState<Row | null>(null);
   const [sorting, setSorting] = useState<{ id: string; desc: boolean }[]>([]);
   // Cohérence des optionsFrom front vs graphe de références serveur (autoritaire).
   const [refDrift, setRefDrift] = useState<string[]>([]);
@@ -273,7 +317,7 @@ export function MasterDataPage() {
     } catch (err) {
       setNotice({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'erreur',
+        text: errMsg(err, 'erreur'),
       });
     } finally {
       setHealthLoading(false);
@@ -335,14 +379,17 @@ export function MasterDataPage() {
     setLoading(true);
     setError(null);
     try {
+      // Vue de dimension empruntée (partner/share) : on charge la table cible
+      // (entities) tout en gardant `table` comme identifiant de vue.
+      const sqlTable = DIMENSION_VIEWS[table]?.resolves ?? table;
       // Schéma runtime + données en parallèle. Le schéma apporte les colonnes
       // dynamiques (caractéristiques + patron B) absentes de MASTER_TABLES.
       const [schemaResult, rows] = await Promise.all([
-        api.masterData.schema(table),
-        api.masterData.list(table),
+        api.masterData.schema(sqlTable),
+        api.masterData.list(sqlTable),
       ]);
       setSchema(schemaResult);
-      const staticDef = MASTER_TABLES.find((t) => t.table === table);
+      const staticDef = MASTER_TABLES.find((t) => t.table === sqlTable);
       const def = buildTableDef(schemaResult, staticDef);
       setTableDef(def);
 
@@ -381,7 +428,7 @@ export function MasterDataPage() {
       if (needsRulesets) opts['rulesets'] = rulesets as unknown as Row[];
       setOptionsData(opts);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'erreur');
+      setError(errMsg(err, 'erreur'));
       setData([]);
       setOptionsData({});
       setTableDef(null);
@@ -411,10 +458,35 @@ export function MasterDataPage() {
         setNotice({ kind: 'success', text: 'Ligne supprimée.' });
         await load();
       } catch (err) {
-        setNotice({ kind: 'error', text: err instanceof Error ? err.message : 'erreur' });
+        setNotice({ kind: 'error', text: errMsg(err, 'erreur') });
       }
     },
     [table, tableDef, load],
+  );
+
+  // Vue en lecture seule (dimension empruntée : partner/share → entities) :
+  // pas d'ajout / édition / suppression ici — l'édition se fait dans la table cible.
+  const view = DIMENSION_VIEWS[table];
+  const isView = view !== undefined;
+
+  // Colonne « code » renommable : la PK non auto-générée (ex. `code`,
+  // `code_iso`). Absente pour les tables à PK technique auto (ex. consolidations
+  // dont l'identité est l'id) → pas de renommage proposé.
+  const codeCol = useMemo(
+    () => tableDef?.columns.find((c) => c.pk && !c.auto)?.name ?? null,
+    [tableDef],
+  );
+
+  const handleRenameConfirm = useCallback(
+    async (newCode: string) => {
+      if (codeCol === null || renameTarget === null) return;
+      const oldCode = String(renameTarget[codeCol] ?? '');
+      await api.masterData.rename(table, oldCode, newCode);
+      setNotice({ kind: 'success', text: `Code renommé : ${oldCode} → ${newCode}` });
+      setRenameTarget(null);
+      await load();
+    },
+    [table, codeCol, renameTarget, load],
   );
 
   const columns = useMemo<RTColumnDef<Row>[]>(() => {
@@ -424,10 +496,13 @@ export function MasterDataPage() {
       accessorKey: col.name,
       cell: (info) => renderCell(col, info.getValue()),
     }));
+    // Vue en lecture seule : pas de colonne d'actions (édition dans la table cible).
+    if (isView) return cols;
     cols.push({
       id: '__actions',
       header: 'Actions',
       enableSorting: false,
+      meta: { pinned: 'right' } as any,
       cell: (info) => (
         <div className="row-actions">
           <button
@@ -437,6 +512,16 @@ export function MasterDataPage() {
           >
             Éditer
           </button>
+          {codeCol !== null && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              title="Changer le code de cet objet (si plus aucune référence ne le cite)"
+              onClick={() => setRenameTarget(info.row.original)}
+            >
+              Renommer
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--sm btn--danger"
@@ -448,7 +533,7 @@ export function MasterDataPage() {
       ),
     });
     return cols;
-  }, [tableDef, handleDelete]);
+  }, [tableDef, handleDelete, codeCol, isView]);
 
   const tableState = useReactTable({
     data,
@@ -457,6 +542,7 @@ export function MasterDataPage() {
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    enableColumnPinning: true,
   });
 
   async function handleSubmit(values: Record<string, string>) {
@@ -479,57 +565,72 @@ export function MasterDataPage() {
     await load();
   }
 
-  // Tables groupées par kind pour le dropdown. Si l'endpoint /api/md n'a rien
-  // renvoyé (serveur obsolète), tableList contient les natives via MASTER_TABLES.
+  // Tables groupées pour le dropdown, selon la typologie : « Dimensions » (axes de
+  // faits) puis « Référentiels de paramétrage » (le reste des natives). Les tables
+  // dynamiques `car_*` / `lst_*` (kind characteristic/value_list) ne sont plus
+  // listées ici : leur foyer unique est la page « Attributs de dimension ». Si
+  // l'endpoint /api/md n'a rien renvoyé (serveur obsolète), tableList contient les
+  // natives via MASTER_TABLES.
   const groupedTables = useMemo(() => {
+    const natives = tableList.filter((t) => t.kind === 'native');
+    const dims = natives.filter((t) => DIMENSION_TABLES.has(t.table));
+    const refs = natives.filter((t) => !DIMENSION_TABLES.has(t.table));
+    // Vues des dimensions empruntées (partner/share) rattachées au groupe Dimensions.
+    const views: TableSummary[] = Object.entries(DIMENSION_VIEWS).map(([t, v]) => ({
+      table: t,
+      label: v.label,
+      kind: 'native' as const,
+    }));
+    const dimItems = [...dims, ...views];
     const groups: { label: string; items: TableSummary[] }[] = [];
-    const byKind: Record<string, TableSummary[]> = {};
-    for (const t of tableList) {
-      (byKind[t.kind] ??= []).push(t);
+    if (dimItems.length > 0) groups.push({ label: 'Dimensions', items: dimItems });
+    if (refs.length > 0) {
+      groups.push({ label: 'Référentiels de paramétrage', items: refs });
     }
-    if (byKind['native']) {
-      groups.push({ label: 'Référentiels', items: byKind['native'] });
-    }
-    if (byKind['characteristic']) {
-      groups.push({ label: 'Caractéristiques', items: byKind['characteristic'] });
-    }
-    if (byKind['value_list']) {
-      groups.push({ label: 'Listes de valeurs', items: byKind['value_list'] });
+    if (hideTables && hideTables.length > 0) {
+      const hidden = new Set(hideTables);
+      return groups
+        .map((g) => ({ ...g, items: g.items.filter((t) => !hidden.has(t.table)) }))
+        .filter((g) => g.items.length > 0);
     }
     return groups;
-  }, [tableList]);
+  }, [tableList, hideTables]);
 
   return (
     <section className="page">
       <div className="page__header">
-        <h1 className="page__title">Master data</h1>
+        <h1 className="page__title">{title ?? 'Master data'}</h1>
         <div className="page__actions">
-          <label className="field">
-            <span>Table</span>
-            <select
-              value={table}
-              onChange={(e) => setTable(e.target.value)}
-              disabled={loading || schemaLoading}
+          {fixedTable === undefined && (
+            <label className="field">
+              <span>Table</span>
+              <select
+                value={table}
+                onChange={(e) => setTable(e.target.value)}
+                disabled={loading || schemaLoading}
+              >
+                {groupedTables.map((g) => (
+                  <optgroup key={g.label} label={g.label}>
+                    {g.items.map((t) => (
+                      <option key={t.table} value={t.table}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+          )}
+          {!isView && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setFormState({ mode: 'create' })}
+              disabled={loading || schemaLoading || tableDef === null}
             >
-              {groupedTables.map((g) => (
-                <optgroup key={g.label} label={g.label}>
-                  {g.items.map((t) => (
-                    <option key={t.table} value={t.table}>
-                      {t.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => setFormState({ mode: 'create' })}
-            disabled={loading || schemaLoading || tableDef === null}
-          >
-            Ajouter
-          </button>
+              Ajouter
+            </button>
+          )}
           <button
             type="button"
             className="btn"
@@ -561,6 +662,13 @@ export function MasterDataPage() {
           <span className="muted"> (table SQL : {schema.sql_name})</span>
         )}
       </div>
+
+      {view && (
+        <div className="alert alert--warning" role="status">
+          Vue en lecture seule : « {view.label.split(' (')[0]} » emprunte les valeurs de cette
+          table. Pour les modifier, éditez la table cible directement.
+        </div>
+      )}
 
       {error && <div className="alert alert--error">Erreur : {error}</div>}
       {notice && (
@@ -614,8 +722,9 @@ export function MasterDataPage() {
                 {hg.headers.map((header) => {
                   const canSort = header.column.getCanSort();
                   const sorted = header.column.getIsSorted();
+                  const pinned = (header.column.columnDef.meta as any)?.pinned;
                   return (
-                    <th key={header.id}>
+                    <th key={header.id} data-pinned={pinned}>
                       {header.isPlaceholder ? null : (
                         <button
                           type="button"
@@ -656,11 +765,14 @@ export function MasterDataPage() {
             )}
             {tableState.getRowModel().rows.map((row) => (
               <tr key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
+                {row.getVisibleCells().map((cell) => {
+                  const pinned = (cell.column.columnDef.meta as any)?.pinned;
+                  return (
+                    <td key={cell.id} data-pinned={pinned}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -674,6 +786,14 @@ export function MasterDataPage() {
           optionsData={optionsData}
           onSubmit={handleSubmit}
           onCancel={() => setFormState(null)}
+        />
+      )}
+      {renameTarget !== null && codeCol !== null && (
+        <RenameModal
+          oldCode={String(renameTarget[codeCol] ?? '')}
+          entityLabel={tableDef?.label ?? table}
+          onConfirm={handleRenameConfirm}
+          onCancel={() => setRenameTarget(null)}
         />
       )}
     </section>

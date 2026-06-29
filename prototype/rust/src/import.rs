@@ -86,6 +86,10 @@ fn validate_csv_references(
         if !header.iter().any(|h| h == r.column) {
             continue;
         }
+        // Colonne de **contrat** : pour une FK migrée en clé technique (ri()),
+        // le CSV porte des codes → on valide contre la colonne code de la cible
+        // (target_display_column), pas contre l'id de stockage.
+        let tcol = r.target_display_column.unwrap_or(r.target_column);
         let sql = format!(
             "SELECT DISTINCT CAST(\"{col}\" AS VARCHAR) \
              FROM read_csv_auto('{path}', header=true, null_padding=true) \
@@ -94,7 +98,6 @@ fn validate_csv_references(
              LIMIT 6",
             col = r.column,
             path = csv_path,
-            tcol = r.target_column,
             ttab = r.target_table,
         );
         let err = |e: duckdb::Error| {
@@ -251,10 +254,13 @@ async fn import_rates(
     // `taux_ouverture` est optionnel dans le CSV importé (rétro-compat) : on
     // l'inclut dans l'INSERT/SELECT seulement s'il est présent, sinon NULL.
     let has_ouverture = header.iter().any(|c| c == "taux_ouverture");
+    // `rate_set` est stocké en id (B1) : le CSV porte des codes, résolus par
+    // sous-requête corrélée. Le reader est aliasé `src` (cf. loader::build_insert_sql).
     let (cols, select_cols, conflict_set) = if has_ouverture {
         (
             "rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture",
-            "rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture",
+            "(SELECT id FROM dim_rate_set WHERE code = src.rate_set), \
+             src.currency_source, src.period, src.taux_close, src.taux_moyen, src.taux_ouverture",
             "taux_close = excluded.taux_close, \
              taux_moyen = excluded.taux_moyen, \
              taux_ouverture = excluded.taux_ouverture",
@@ -262,14 +268,15 @@ async fn import_rates(
     } else {
         (
             "rate_set, currency_source, period, taux_close, taux_moyen",
-            "rate_set, currency_source, period, taux_close, taux_moyen, NULL",
+            "(SELECT id FROM dim_rate_set WHERE code = src.rate_set), \
+             src.currency_source, src.period, src.taux_close, src.taux_moyen, NULL",
             "taux_close = excluded.taux_close, taux_moyen = excluded.taux_moyen",
         )
     };
     let sql = format!(
         "INSERT INTO sat_exchange_rate ({cols}) \
          SELECT {select_cols} \
-         FROM read_csv_auto('{path}', header=true) \
+         FROM read_csv_auto('{path}', header=true) AS src \
          ON CONFLICT(rate_set, currency_source, period) DO UPDATE SET {conflict_set}"
     );
 
@@ -321,12 +328,17 @@ async fn import_perimeter(
     std::fs::write(&tmp, &bytes)
         .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
+    // `perimeter_set` et `methode` sont stockés en id (B1) : le CSV porte des codes,
+    // résolus par sous-requête corrélée.
     let sql = format!(
         "INSERT INTO sat_perimeter \
          (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-         SELECT perimeter_set, entity, period, methode, pct_interet, pct_integration, \
-                CAST(entree AS BOOLEAN), CAST(sortie AS BOOLEAN) \
-         FROM read_csv_auto('{path}', header=true) \
+         SELECT (SELECT id FROM dim_perimeter_set WHERE code = src.perimeter_set), \
+                src.entity, src.period, \
+                (SELECT id FROM dim_method WHERE code = src.methode), \
+                src.pct_interet, src.pct_integration, \
+                CAST(src.entree AS BOOLEAN), CAST(src.sortie AS BOOLEAN) \
+         FROM read_csv_auto('{path}', header=true) AS src \
          ON CONFLICT(perimeter_set, entity, period) DO UPDATE SET \
             methode = excluded.methode, \
             pct_interet = excluded.pct_interet, \

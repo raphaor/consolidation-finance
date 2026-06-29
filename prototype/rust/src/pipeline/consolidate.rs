@@ -18,7 +18,7 @@
 //! depuis les constituants consolidés (même valeur, mais autoritaire).
 
 use super::count_level;
-use crate::dimensions;
+use crate::{dimensions, references};
 use duckdb::{params, Connection};
 
 /// Exécute l'étape D : applique la méthode d'intégration de chaque entité.
@@ -44,6 +44,24 @@ pub fn step_d(con: &Connection, p: &super::ConvertParams) -> duckdb::Result<usiz
         .join(", ");
     let col_list = cols.join(", ");
 
+    // Résolution code→id pour le UNION stg_entry (préfixe 3).
+    let mut stg_id_joins = String::new();
+    let mut stg_select_exprs: Vec<String> = Vec::new();
+    for dim in &dims {
+        let name = &dim.name;
+        if let Some((table, code_col)) = references::dimension_master(name) {
+            let alias = format!("_ds{name}");
+            let join_type = if dim.nullable() { "LEFT JOIN" } else { "JOIN" };
+            stg_id_joins.push_str(&format!(
+                "\n    {join_type} {table} {alias} ON {alias}.{code_col} = s.{name}"
+            ));
+            stg_select_exprs.push(format!("{alias}.id"));
+        } else {
+            stg_select_exprs.push(format!("s.{name}"));
+        }
+    }
+    let stg_select_list = stg_select_exprs.join(", ");
+
     let sql = format!(
         "\
 INSERT INTO fact_entry\n\
@@ -57,18 +75,21 @@ FROM (\n\
     SELECT {col_list}, consolidation_id, amount FROM fact_entry\n\
     WHERE level = 'converted' AND consolidation_id = ?\n\
     UNION ALL\n\
-    -- Staging préfixe 3 : écritures injectées au consolidé AVANT la mécanique de\n\
-    -- taux → elles subissent le × pct_integration (via le JOIN sat_perimeter),\n\
-    -- comme les flux convertis. Cf. docs/A_NOUVEAU.md §4 bis.\n\
-    SELECT {col_list}, ? AS consolidation_id, amount FROM stg_entry\n\
-    WHERE substr(nature, 1, 1) = '3' AND phase = ? AND entry_period = ?\n\
+    -- Staging préfixe 3 : stg_entry code→id pour correspondre aux colonnes\n\
+    -- INTEGER de fact_entry. Subit le × pct_integration comme les flux convertis.\n\
+    SELECT {stg_select_list}, ? AS consolidation_id, amount\n\
+    FROM stg_entry s\n\
+    {stg_id_joins}\n\
+    WHERE substr(s.nature, 1, 1) = '3' AND s.phase = ? AND s.entry_period = ?\n\
 ) f\n\
+-- Bridge fact_entry.entity (INTEGER) → sat_perimeter.entity (TEXT).\n\
+JOIN dim_entity _de ON _de.id = f.entity\n\
 JOIN sat_perimeter per\n\
   ON per.perimeter_set = ?\n\
- AND per.entity = f.entity\n\
+ AND per.entity = _de.code\n\
  AND per.period = ?\n\
 JOIN dim_method m\n\
-  ON m.code = per.methode\n\
+  ON m.id = per.methode\n\
 WHERE m.consolidated = true;  -- équivalence et méthodes futures exclues par flag"
     );
     con.execute(

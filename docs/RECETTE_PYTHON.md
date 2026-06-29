@@ -1,7 +1,17 @@
 # Recette Python (tests boîte noire)
 
-> Trois scripts Python dans [`../prototype/rust/`](../prototype/rust/) démarent le
-> serveur Rust et valident son comportement par HTTP. Stdlib Python seule
+> **OBSOLÈTE** (2026-06-28) — les scripts Python `golden_test.py`,
+> `rules_test.py`, `smoke_test.py` et les datasets CSV associés
+> (`data_golden/`, `data/smoke/`) ont été supprimés par le chantier
+> migration CSV→JSON (cf. [`PLAN_MIGRATION_CSV_JSON.md`](./PLAN_MIGRATION_CSV_JSON.md)).
+> La couverture équivalente (non-régression, élimination interco, conversion
+> multi-devises) est assurée par les tests Rust : `tests/golden.rs`,
+> `tests/rules.rs`, `tests/pipeline.rs`, `tests/a_nouveau.rs`, plus
+> `tests/loader.rs` (qui valide désormais `export::import_bundle`). Ce document
+> est conservé pour référence historique.
+
+> Trois scripts Python dans [`../prototype/rust/`](../prototype/rust/) démarrant le
+> serveur Rust et validaient son comportement par HTTP. Stdlib Python seule
 > (`urllib`, `subprocess`, `argparse`, `json`) — pas de dépendance à installer.
 
 ## Pré-requis

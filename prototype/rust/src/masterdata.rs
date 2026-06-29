@@ -19,7 +19,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use duckdb::{params_from_iter, types::Value as DbValue, types::ValueRef, Row};
@@ -27,7 +27,87 @@ use serde_json::{Map, Value as JsonValue};
 use std::sync::Arc;
 
 use crate::references;
+use crate::resolve;
 use crate::state::{db_err, lock_con, AppError, AppState};
+
+// ─────────── FK à contrat code (option A, chantier B1) — traduction code↔id ──────
+//
+// Une FK migrée en clé technique stocke un `id` mais expose un **code** à l'API
+// (cf. `references::Reference::target_display_column`). Ces helpers traduisent
+// code→id à l'écriture (create/update/loader) et id→code à la lecture (list/fetch),
+// pour que l'UI et les CSV restent inchangés (ils manipulent des codes).
+
+/// Cible `(table, colonne_code)` si `(sql_name, col)` est une FK à contrat code.
+fn code_contract_fk(
+    con: &duckdb::Connection,
+    sql_name: &str,
+    col: &str,
+) -> Option<(String, String)> {
+    references::all_references(con)
+        .into_iter()
+        .find(|r| r.table == sql_name && r.column == col && r.target_display_column.is_some())
+        .map(|r| (r.target_table, r.target_display_column.unwrap()))
+}
+
+/// Valeur à **écrire** pour une colonne : pour une FK à contrat code, résout le
+/// code entrant en `id` (et le rejette s'il n'existe pas) ; sinon, conversion
+/// JSON→DB directe. Vide/NULL ⇒ `NULL`.
+fn write_db_value(
+    con: &duckdb::Connection,
+    sql_name: &str,
+    col: &str,
+    v: &JsonValue,
+) -> Result<DbValue, AppError> {
+    if let Some((target, _display)) = code_contract_fk(con, sql_name, col) {
+        return match v {
+            JsonValue::String(s) if !s.is_empty() => {
+                let id = resolve::resolve_id(con, &target, s)
+                    .map_err(db_err)?
+                    .ok_or_else(|| {
+                        AppError::bad_request(format!(
+                            "référence invalide : {col} = '{s}' (absent de {target})"
+                        ))
+                    })?;
+                Ok(DbValue::BigInt(id))
+            }
+            _ => Ok(DbValue::Null),
+        };
+    }
+    Ok(json_to_db_value(v))
+}
+
+/// Re-projette les colonnes FK à contrat code des lignes lues : `id` (stocké) →
+/// `code` (affiché). L'API renvoie donc des codes, l'UI reste inchangée.
+fn translate_rows_out(
+    con: &duckdb::Connection,
+    sql_name: &str,
+    rows: Vec<JsonValue>,
+) -> Result<Vec<JsonValue>, AppError> {
+    let fks: Vec<(String, String)> = references::all_references(con)
+        .into_iter()
+        .filter(|r| r.table == sql_name && r.target_display_column.is_some())
+        .map(|r| (r.column, r.target_table))
+        .collect();
+    if fks.is_empty() {
+        return Ok(rows);
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for mut row in rows {
+        if let Some(obj) = row.as_object_mut() {
+            for (col, target) in &fks {
+                if let Some(id) = obj.get(col).and_then(JsonValue::as_i64) {
+                    let code = resolve::code_of(con, target, id).map_err(db_err)?;
+                    obj.insert(
+                        col.clone(),
+                        code.map(JsonValue::String).unwrap_or(JsonValue::Null),
+                    );
+                }
+            }
+        }
+        out.push(row);
+    }
+    Ok(out)
+}
 
 struct TableDef {
     api_name: &'static str,
@@ -71,6 +151,36 @@ const TABLES: &[TableDef] = &[
         api_name: "perimeter_sets",
         label: "Jeux de périmètre",
         sql_name: "dim_perimeter_set",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+        auto_pk: false,
+    },
+    // Règles et jeux de règles : exposées uniquement pour le renommage de code
+    // (POST /api/md/{table}/rename). Le CRUD complet passe par /api/rules* et
+    // /api/rulesets* (routes dédiées qui gèrent le JSON de définition).
+    TableDef {
+        api_name: "rules",
+        label: "Règles",
+        sql_name: "dim_rule",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+        auto_pk: false,
+    },
+    TableDef {
+        api_name: "rulesets",
+        label: "Jeux de règles",
+        sql_name: "dim_ruleset",
+        columns: &["code", "libelle"],
+        pk: &["code"],
+        auto_pk: false,
+    },
+    // Coefficients : exposés uniquement pour le renommage de code
+    // (POST /api/md/coefficients/rename). Le CRUD complet passe par
+    // /api/coefficients (route dédiée qui gère l'expression et le kind).
+    TableDef {
+        api_name: "coefficients",
+        label: "Coefficients",
+        sql_name: "dim_coefficient",
         columns: &["code", "libelle"],
         pk: &["code"],
         auto_pk: false,
@@ -134,7 +244,8 @@ const TABLES: &[TableDef] = &[
         // (caractéristique) ne sont pas des colonnes en dur : ils sont gérés via
         // la page « Attributs de dimension » (characteristics / custom_references)
         // et **découverts dynamiquement** par [`resolve_table`].
-        // `flow_scheme` (nullable) sélectionne le schéma de flux du compte (Q32).
+        // `flow_scheme` (nullable, Q45 : 100 % user-driven) sélectionne le schéma
+        // de flux du compte (Q32). NULL = exclu de la conversion/clôture (option b).
         columns: &["code", "libelle", "classe", "sous_classe", "flow_scheme"],
         pk: &["code"],
         auto_pk: false,
@@ -143,7 +254,7 @@ const TABLES: &[TableDef] = &[
         api_name: "sous_classes",
         label: "Sous-classes",
         sql_name: "dim_sous_classe",
-        columns: &["code", "libelle", "classe"],
+        columns: &["code", "libelle", "classe", "sens"],
         pk: &["code"],
         auto_pk: false,
     },
@@ -244,12 +355,38 @@ fn find_table(api: &str) -> Option<&'static TableDef> {
 }
 
 /// Nom d'API (master data) correspondant à une table SQL, s'il en existe un.
-/// Sert à traduire les cibles du graphe de références (`references.rs` raisonne
-/// en noms SQL) vers les identifiants que le front consomme (`/api/md/{table}`).
-/// Pour les tables dynamiques (`car_<code>`, `lst_<code>`), le nom SQL est aussi
-/// le nom d'API — on le renvoie tel quel.
-fn sql_to_api(sql: &str) -> String {
-    api_name_for_sql(sql).unwrap_or(sql).to_string()
+/// Traduit un nom de table SQL vers le nom d'API consommé par le frontend
+/// (`/api/md/{table}`). Pour les tables statiques, délègue à `api_name_for_sql`.
+/// Pour les tables dynamiques (`car_<id>` / `lst_<id>` après B1 étape 5),
+/// résout l'id → code depuis les registres pour produire `car_<code>` /
+/// `lst_<code>`.
+fn sql_to_api_dyn(con: &duckdb::Connection, sql: &str) -> String {
+    if let Some(api) = api_name_for_sql(sql) {
+        return api.to_string();
+    }
+    if let Some(id_str) = sql.strip_prefix("car_") {
+        if let Ok(id) = id_str.parse::<i64>() {
+            if let Ok(code) = con.query_row(
+                "SELECT code FROM dim_characteristic WHERE id = ?",
+                [id],
+                |r| r.get::<_, String>(0),
+            ) {
+                return format!("car_{code}");
+            }
+        }
+    }
+    if let Some(id_str) = sql.strip_prefix("lst_") {
+        if let Ok(id) = id_str.parse::<i64>() {
+            if let Ok(code) = con.query_row(
+                "SELECT code FROM dim_value_list WHERE id = ?",
+                [id],
+                |r| r.get::<_, String>(0),
+            ) {
+                return format!("lst_{code}");
+            }
+        }
+    }
+    sql.to_string()
 }
 
 /// Variante stricte (tables natives uniquement) — utilisée par les endpoints
@@ -370,11 +507,52 @@ struct OwnedTableDef {
     api_name: String,
     label: String,
     sql_name: String,
+    /// Noms de colonnes dans le contrat API (utilisés pour la validation et les
+    /// clés JSON retournées). Toujours identiques à `sql_columns` sauf pour les
+    /// tables de valeurs N1 (`car_<id>`) après B1 étape 9, où le nom physique
+    /// est `c<attr_id>` mais le nom API est le code de l'attribut.
     columns: Vec<String>,
+    /// Noms physiques dans la DB (utilisés pour construire les expressions SQL).
+    /// `sql_columns[i]` correspond à `columns[i]`.
+    sql_columns: Vec<String>,
     pk: Vec<String>,
     /// `true` si la PK est auto-générée (colonne omise de l'INSERT, id récupéré
     /// via `RETURNING`). Porté depuis la [`TableDef`] native.
     auto_pk: bool,
+}
+
+impl OwnedTableDef {
+    /// Expression SELECT pour la colonne `i` : `"c1" AS "api_name"` si physique ≠ API,
+    /// sinon `"api_name"` (pas d'alias superflu).
+    fn select_expr(&self, i: usize) -> String {
+        let api = &self.columns[i];
+        let sql = &self.sql_columns[i];
+        if sql != api {
+            format!("{} AS {}", quote_ident(sql), quote_ident(api))
+        } else {
+            quote_ident(api)
+        }
+    }
+
+    /// Nom physique correspondant à un nom de colonne API. Retourne `api_col` si non trouvé.
+    fn sql_col<'a>(&'a self, api_col: &'a str) -> &'a str {
+        self.columns
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.as_str() == api_col)
+            .map(|(i, _)| self.sql_columns[i].as_str())
+            .unwrap_or(api_col)
+    }
+
+    /// Nom API correspondant à un nom de colonne physique. Retourne `sql_col` si non trouvé.
+    fn api_col<'a>(&'a self, sql_col: &'a str) -> &'a str {
+        self.sql_columns
+            .iter()
+            .enumerate()
+            .find(|(_, c)| c.as_str() == sql_col)
+            .map(|(i, _)| self.columns[i].as_str())
+            .unwrap_or(sql_col)
+    }
 }
 
 /// Résout une table demandée par son nom d'API (`/api/md/{table}`) en une
@@ -392,39 +570,70 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
     // 1. Table native (whitelist statique) étendue des colonnes dynamiques.
     if let Some(def) = find_table(api) {
         let native: Vec<String> = def.columns.iter().map(|s| s.to_string()).collect();
-        // On complète avec toute colonne dynamique référencée sur cette table et
-        // absente de la whitelist native (caractéristiques N1 + références
-        // directes patron B). On s'appuie sur le graphe de références, déjà
-        // construit par `references::dynamic_references` à partir des registres.
-        let mut cols = native.clone();
+        // B1 étape 11 : les refs custom ont col physique r{id} ≠ nom API.
+        // On construit les deux listes séparément : `api_cols` = noms utilisateur
+        // (pour validation JSON et clés retournées), `sql_cols` = noms physiques.
+        // Les car_<id> (N1) utilisent `r.column` (car `dynamic_references` retourne
+        // le nom physique pour les caractéristiques, qui est déjà le nom API).
+        // Pour les refs custom, on résout via `custom_references::load_all`.
+        let cust_refs: Vec<crate::custom_references::CustomReferenceDef> =
+            crate::custom_references::load_all(con).unwrap_or_default();
+        let mut api_cols = native.clone();
+        let mut sql_cols = native.clone();
         for r in references::all_references(con) {
-            if r.table == def.sql_name && !cols.contains(&r.column) {
-                cols.push(r.column);
+            if r.table != def.sql_name {
+                continue;
+            }
+            // Chercher si c'est une ref custom (col physique ≠ API name).
+            let api_name = cust_refs
+                .iter()
+                .find(|cr| {
+                    let host_table = references::dimension_master(&cr.host_dimension)
+                        .map(|(t, _)| t)
+                        .unwrap_or("");
+                    host_table == def.sql_name && cr.col == r.column
+                })
+                .map(|cr| cr.column.clone())
+                .unwrap_or_else(|| r.column.clone());
+            if !api_cols.contains(&api_name) {
+                api_cols.push(api_name);
+                sql_cols.push(r.column.clone());
             }
         }
         return Ok(Some(OwnedTableDef {
             api_name: def.api_name.to_string(),
             label: def.label.to_string(),
             sql_name: def.sql_name.to_string(),
-            columns: cols,
+            sql_columns: sql_cols,
+            columns: api_cols,
             pk: def.pk.iter().map(|s| s.to_string()).collect(),
             auto_pk: def.auto_pk,
         }));
     }
 
-    // 2. Table de valeurs d'une caractéristique : car_<code>.
+    // 2. Table de valeurs d'une caractéristique : api = car_<code>,
+    //    sql_name = car_<id> (B1 étape 5).
     if let Some(code) = api.strip_prefix("car_") {
         // `load_all` filtre déjà l'absence éventuelle des registres (premier
         // démarrage). On recherche la caractéristique demandée.
         let chars = crate::characteristics::load_all(con).map_err(db_err)?;
         if let Some(c) = chars.into_iter().find(|c| c.code == code) {
-            let mut cols = vec!["code".to_string(), "libelle".to_string()];
-            cols.extend(c.attributes.iter().map(|a| a.name.clone()));
+            // Contrat API : noms d'attributs (muables, servent à la validation).
+            let mut api_cols = vec!["code".to_string(), "libelle".to_string()];
+            api_cols.extend(c.attributes.iter().map(|a| a.name.clone()));
+            // Noms physiques : c{attr_id} pour les attributs N2 (B1 étape 9).
+            let mut sql_cols = vec!["code".to_string(), "libelle".to_string()];
+            sql_cols.extend(
+                c.attributes
+                    .iter()
+                    .map(|a| crate::characteristics::attr_col(a.id)),
+            );
             return Ok(Some(OwnedTableDef {
                 api_name: format!("car_{code}"),
                 label: c.libelle,
-                sql_name: format!("car_{code}"),
-                columns: cols,
+                sql_name: c.value_table, // car_<id>
+                columns: api_cols,
+                sql_columns: sql_cols,
                 pk: vec!["code".to_string()],
                 auto_pk: false,
             }));
@@ -432,15 +641,17 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
         return Ok(None);
     }
 
-    // 3. Table de valeurs d'une liste : lst_<code>.
+    // 3. Table de valeurs d'une liste : api = lst_<code>, sql_name = lst_<id>.
     if let Some(code) = api.strip_prefix("lst_") {
         let lists = crate::value_lists::load_all(con).map_err(db_err)?;
         if let Some(l) = lists.into_iter().find(|l| l.code == code) {
+            let cols = vec!["code".to_string(), "libelle".to_string()];
             return Ok(Some(OwnedTableDef {
                 api_name: format!("lst_{code}"),
                 label: l.libelle,
-                sql_name: format!("lst_{code}"),
-                columns: vec!["code".to_string(), "libelle".to_string()],
+                sql_name: l.value_table, // lst_<id>
+                sql_columns: cols.clone(),
+                columns: cols,
                 pk: vec!["code".to_string()],
                 auto_pk: false,
             }));
@@ -452,14 +663,13 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
 }
 
 fn select_all(def: &OwnedTableDef, con: &duckdb::Connection) -> Result<Vec<JsonValue>, AppError> {
-    let cols = def
-        .columns
-        .iter()
-        .map(|c| quote_ident(c))
+    let cols = (0..def.columns.len())
+        .map(|i| def.select_expr(i))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!("SELECT {cols} FROM {}", def.sql_name);
-    run_query(con, &sql, Vec::new())
+    let rows = run_query(con, &sql, Vec::new())?;
+    translate_rows_out(con, &def.sql_name, rows)
 }
 
 fn fetch_one(
@@ -467,21 +677,20 @@ fn fetch_one(
     pk_vals: &[(String, JsonValue)],
     con: &duckdb::Connection,
 ) -> Result<Option<JsonValue>, AppError> {
-    let cols = def
-        .columns
-        .iter()
-        .map(|c| quote_ident(c))
+    let cols = (0..def.columns.len())
+        .map(|i| def.select_expr(i))
         .collect::<Vec<_>>()
         .join(", ");
     let where_clause = def
         .pk
         .iter()
-        .map(|c| format!("{} = ?", quote_ident(c)))
+        .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
         .collect::<Vec<_>>()
         .join(" AND ");
     let sql = format!("SELECT {cols} FROM {} WHERE {where_clause}", def.sql_name);
     let params: Vec<DbValue> = pk_vals.iter().map(|(_, v)| json_to_db_value(v)).collect();
     let rows = run_query(con, &sql, params)?;
+    let rows = translate_rows_out(con, &def.sql_name, rows)?;
     Ok(rows.into_iter().next())
 }
 
@@ -525,7 +734,10 @@ fn validate_references(
         // Une valeur est « vide » si la colonne est absente, JSON null, ou chaîne
         // vide. Sur une référence obligatoire (non-nullable), c'est rejeté ;
         // sinon (nullable) c'est toléré (= NULL).
-        let s = match obj.get(r.column.as_str()) {
+        // Cherche la valeur dans obj via le nom API (peut différer du nom physique
+        // pour les attributs N2 de caractéristiques, après B1 étape 9).
+        let api_key = def.api_col(r.column.as_str());
+        let s = match obj.get(api_key) {
             Some(JsonValue::String(s)) if !s.is_empty() => s.as_str(),
             None | Some(JsonValue::Null) | Some(JsonValue::String(_)) => {
                 if r.required {
@@ -545,10 +757,13 @@ fn validate_references(
                 }
             }
         }
-        if !references::value_exists(con, &r.target_table, &r.target_column, s).map_err(db_err)? {
+        // FK à contrat code : on valide le **code** entrant contre la colonne
+        // d'affichage (code) de la cible, même si le stockage est en `id`.
+        let check_col = r.code_contract().unwrap_or(r.target_column.as_str());
+        if !references::value_exists(con, &r.target_table, check_col, s).map_err(db_err)? {
             bad.push(format!(
                 "{} = '{}' (absent de {}.{})",
-                r.column, s, r.target_table, r.target_column
+                r.column, s, r.target_table, check_col
             ));
         }
     }
@@ -635,8 +850,9 @@ async fn create(
                     continue; // PK auto : générée par la base, omise de l'INSERT.
                 }
                 if let Some(v) = obj.get(col.as_str()) {
-                    cols.push(quote_ident(col));
-                    vals.push(json_to_db_value(v));
+                    let phys = def.sql_col(col);
+                    cols.push(quote_ident(phys));
+                    vals.push(write_db_value(&con, &def.sql_name, phys, v)?);
                 }
             }
             if cols.is_empty() {
@@ -664,8 +880,9 @@ async fn create(
             let mut vals: Vec<DbValue> = Vec::new();
             for col in &def.columns {
                 if let Some(v) = obj.get(col.as_str()) {
-                    cols.push(quote_ident(col));
-                    vals.push(json_to_db_value(v));
+                    let phys = def.sql_col(col);
+                    cols.push(quote_ident(phys));
+                    vals.push(write_db_value(&con, &def.sql_name, phys, v)?);
                 }
             }
             if cols.is_empty() {
@@ -718,15 +935,16 @@ async fn update(
                 continue;
             }
             if let Some(v) = obj.get(col.as_str()) {
-                sets.push(format!("{} = ?", quote_ident(col)));
-                vals.push(json_to_db_value(v));
+                let phys = def.sql_col(col);
+                sets.push(format!("{} = ?", quote_ident(phys)));
+                vals.push(write_db_value(&con, &def.sql_name, phys, v)?);
             }
         }
         if !sets.is_empty() {
             let where_clause = def
                 .pk
                 .iter()
-                .map(|c| format!("{} = ?", quote_ident(c)))
+                .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
                 .collect::<Vec<_>>()
                 .join(" AND ");
             let sql = format!(
@@ -795,7 +1013,7 @@ async fn remove(
         let where_clause = def
             .pk
             .iter()
-            .map(|c| format!("{} = ?", quote_ident(c)))
+            .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
             .collect::<Vec<_>>()
             .join(" AND ");
         let sql = format!("DELETE FROM {} WHERE {}", def.sql_name, where_clause);
@@ -807,6 +1025,333 @@ async fn remove(
     };
     let _ = def; // définition déjà consommée pour la PK
     Ok(Json(serde_json::json!({ "deleted": deleted })))
+}
+
+// ─────────────────────────── Renommage de code (B1, étape 7) ────────────────────
+
+// ─────────── Rôle 3 — garde JSON/expressions (chantier B1) ──────────────────
+//
+// Les codes peuvent être enfouis dans des champs JSON (`dim_rule.definition`,
+// `dim_aggregate.definition`, `dim_indicator.expression`) ou dans `app_config`.
+// État B1 étape 8 :
+//
+// La plupart des valeurs JSON ont été migrées en ids entiers (étape 6).
+// Les gardes ci-dessous qui testent des strings via `as_str()` retournent
+// systématiquement false pour ces champs (un integer.as_str() = None) — elles
+// restent en place comme filet de sécurité pour d'éventuelles bases non migrées.
+//
+// Encore actif (garde rôle 3 — scan JSON pour codes non migrés) :
+//   • `dim_rule.definition`  operations[*].coefficient.type  (dim_coefficient — étape 12)
+//
+// Retiré en étape 8 :
+//   • `app_config.pivot_currency`  — remplacé par `pivot_currency_id` (INTEGER),
+//     immunisé au renommage. La dim_currency est désormais pleinement renommable.
+//
+// Non couvert (sans risque, dimension non encore renommable) :
+//   • `ref` dans selections (codes de `dim_custom_reference`) — colonne non renommable.
+
+/// Noms de colonnes `fact_entry` / `stg_entry` qui correspondent à `sql_table`.
+/// Utilisés pour repérer `selection.dim` et `destination.<key>` dans les JSON.
+fn fact_dims_for(sql_table: &str) -> &'static [&'static str] {
+    match sql_table {
+        "dim_entity" => &["entity", "partner", "share"],
+        "dim_account" => &["account"],
+        "dim_flow" => &["flow"],
+        "dim_currency" => &["currency"],
+        "dim_nature" => &["nature"],
+        "dim_period" => &["period", "entry_period"],
+        "dim_phase" => &["phase"],
+        _ => &[],
+    }
+}
+
+/// Colonne de `sat_perimeter` dont les **valeurs** proviennent de `sql_table`.
+/// `None` pour les dims qui n'ont pas d'équivalent direct dans sat_perimeter.
+fn scope_col_for(sql_table: &str) -> Option<&'static str> {
+    match sql_table {
+        "dim_method" => Some("methode"),
+        _ => None,
+    }
+}
+
+/// Requête tous les couples `(code, texte)` d'une table, pour un seul champ.
+fn fetch_str_pairs(
+    con: &duckdb::Connection,
+    sql: &str,
+) -> Result<Vec<(String, String)>, AppError> {
+    let mut stmt = con.prepare(sql).map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(db_err)?;
+    rows.map(|r| r.map_err(db_err)).collect()
+}
+
+/// `true` si `scope[*].val = old` pour les conditions où `scope[*].dim = scope_col`.
+fn scope_has_val(json: &JsonValue, scope_col: &str, old: &str) -> bool {
+    json.get("scope")
+        .and_then(|v| v.as_array())
+        .map_or(false, |arr| {
+            arr.iter().any(|c| {
+                c.get("dim").and_then(|x| x.as_str()) == Some(scope_col)
+                    && c.get("val").and_then(|x| x.as_str()) == Some(old)
+            })
+        })
+}
+
+/// `true` si l'une des conditions `selection[*]` (dans `operations[*]` ou au
+/// niveau racine pour les postes) a `dim = dim_name` et `val = old`.
+fn selection_has_val(json: &JsonValue, dim_name: &str, old: &str) -> bool {
+    let check = |sel: &JsonValue| {
+        sel.as_array().map_or(false, |conds| {
+            conds.iter().any(|c| {
+                c.get("dim").and_then(|x| x.as_str()) == Some(dim_name)
+                    && c.get("val").and_then(|x| x.as_str()) == Some(old)
+            })
+        })
+    };
+    // Postes (dim_aggregate) : selection au niveau racine.
+    if check(&json["selection"]) {
+        return true;
+    }
+    // Règles (dim_rule) : selection dans chaque opération.
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| ops.iter().any(|op| check(&op["selection"])))
+}
+
+/// `true` si l'une des destinations `mode=override` a `dim_name.value = old`.
+fn destination_has_override(json: &JsonValue, dim_name: &str, old: &str) -> bool {
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| {
+            ops.iter().any(|op| {
+                op.get("destination")
+                    .and_then(|d| d.as_object())
+                    .and_then(|d| d.get(dim_name))
+                    .map_or(false, |entry| {
+                        entry.get("mode").and_then(|x| x.as_str()) == Some("override")
+                            && entry.get("value").and_then(|x| x.as_str()) == Some(old)
+                    })
+            })
+        })
+}
+
+/// `true` si l'une des opérations a `coefficient.type = old` (code de dim_coefficient).
+/// Le JSON stocke `{"type": "<code>"}` (Named) ou `{"type": "constant", "value": …}`.
+fn operations_have_coeff(json: &JsonValue, old: &str) -> bool {
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| {
+            ops.iter().any(|op| {
+                op.get("coefficient")
+                    .and_then(|c| c.get("type"))
+                    .and_then(|t| t.as_str())
+                    == Some(old)
+            })
+        })
+}
+
+/// `true` si l'une des conditions de selection (règle ou poste) a `via = old`
+/// (code de dim_characteristic).
+fn selection_has_via(json: &JsonValue, old: &str) -> bool {
+    let check = |sel: &JsonValue| {
+        sel.as_array().map_or(false, |conds| {
+            conds.iter().any(|c| c.get("via").and_then(|x| x.as_str()) == Some(old))
+        })
+    };
+    if check(&json["selection"]) {
+        return true;
+    }
+    json.get("operations")
+        .and_then(|v| v.as_array())
+        .map_or(false, |ops| ops.iter().any(|op| check(&op["selection"])))
+}
+
+/// Scan des occurrences du code `old` dans les contenus JSON/texte (rôle 3).
+///
+/// Retourne une liste de descriptions humaines (table[code].champ) des blocages.
+/// Liste vide = aucun blocage JSON détecté.
+fn scan_json_blockers(
+    con: &duckdb::Connection,
+    sql_table: &str,
+    old: &str,
+) -> Result<Vec<String>, AppError> {
+    let mut blockers = Vec::new();
+
+    // `pivot_currency` retiré en B1 étape 8 : stocké en `pivot_currency_id` (INTEGER),
+    // l'id ne change pas lors d'un renommage de code → aucun blocage pour dim_currency.
+
+    let json_dims = fact_dims_for(sql_table);
+    let scope_col = scope_col_for(sql_table);
+    let is_coeff = sql_table == "dim_coefficient";
+    let is_char = sql_table == "dim_characteristic";
+
+    // 2. dim_rule.definition
+    if !json_dims.is_empty() || scope_col.is_some() || is_coeff || is_char {
+        let rules = fetch_str_pairs(
+            con,
+            "SELECT code, definition FROM dim_rule WHERE definition IS NOT NULL",
+        )?;
+        for (rule_code, def) in &rules {
+            let Ok(json) = serde_json::from_str::<JsonValue>(def) else {
+                continue;
+            };
+            if let Some(sc) = scope_col {
+                if scope_has_val(&json, sc, old) {
+                    blockers.push(format!("dim_rule[{rule_code}].scope(dim={sc})"));
+                }
+            }
+            for &dim in json_dims {
+                if selection_has_val(&json, dim, old) {
+                    blockers.push(format!("dim_rule[{rule_code}].selection(dim={dim})"));
+                }
+                if destination_has_override(&json, dim, old) {
+                    blockers.push(format!("dim_rule[{rule_code}].destination(dim={dim})"));
+                }
+            }
+            if is_coeff && operations_have_coeff(&json, old) {
+                blockers.push(format!("dim_rule[{rule_code}].coefficient"));
+            }
+            if is_char && selection_has_via(&json, old) {
+                blockers.push(format!("dim_rule[{rule_code}].via"));
+            }
+        }
+    }
+
+    // 3. dim_aggregate.definition
+    if !json_dims.is_empty() || is_char {
+        let aggs = fetch_str_pairs(
+            con,
+            "SELECT code, definition FROM dim_aggregate WHERE definition IS NOT NULL",
+        )?;
+        for (agg_code, def) in &aggs {
+            let Ok(json) = serde_json::from_str::<JsonValue>(def) else {
+                continue;
+            };
+            for &dim in json_dims {
+                if selection_has_val(&json, dim, old) {
+                    blockers.push(format!("dim_aggregate[{agg_code}].selection(dim={dim})"));
+                }
+            }
+            if is_char && selection_has_via(&json, old) {
+                blockers.push(format!("dim_aggregate[{agg_code}].via"));
+            }
+        }
+    }
+
+    // 4. dim_indicator.expression — codes de dim_aggregate encadrés par [].
+    if sql_table == "dim_aggregate" {
+        let pattern = format!("[{old}]");
+        let inds = fetch_str_pairs(
+            con,
+            "SELECT code, expression FROM dim_indicator WHERE expression IS NOT NULL",
+        )?;
+        for (ind_code, expr) in &inds {
+            if expr.contains(&pattern) {
+                blockers.push(format!("dim_indicator[{ind_code}].expression"));
+            }
+        }
+    }
+
+    Ok(blockers)
+}
+
+/// Renomme le `code` d'un membre d'une dimension à clé technique.
+///
+/// Cœur du chantier « codes renommables » : possible **uniquement** si plus
+/// aucune référence ne pointe vers le code de cette dimension (toutes ses FK
+/// entrantes ont été migrées en clé technique `id`). Sinon le renommage
+/// orphelinerait des données → refus avec la liste des blocages.
+///
+/// Garde renforcée (rôle 3) : scan des codes enfouis dans les JSON de règles /
+/// postes / indicateurs et dans `app_config` (cf. `scan_json_blockers`).
+pub fn rename_code(
+    con: &duckdb::Connection,
+    api_table: &str,
+    old: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    let def = resolve_table(con, api_table)?
+        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {api_table}")))?;
+    // Seules les dimensions à clé technique (registre SURROGATE_DIMS) ont un code
+    // renommable ; `master_of` fournit (table SQL, colonne code) de façon sûre.
+    let (sql_table, code_col) = resolve::master_of(&def.sql_name).ok_or_else(|| {
+        AppError::bad_request(format!("{api_table} n'est pas une dimension à code renommable"))
+    })?;
+
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(()); // no-op
+    }
+
+    // Garde rôle 3 en premier : codes enfouis dans JSON/expressions → bloquant.
+    let json_blockers = scan_json_blockers(con, sql_table, old)?;
+    if !json_blockers.is_empty() {
+        return Err(AppError::conflict(format!(
+            "code non renommable : encore présent dans {}",
+            json_blockers.join(", ")
+        )));
+    }
+
+    if !references::value_exists(con, sql_table, code_col, old).map_err(db_err)? {
+        return Err(AppError::not_found(format!("code introuvable : {old}")));
+    }
+    if references::value_exists(con, sql_table, code_col, new).map_err(db_err)? {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+
+    // Tables code-keyed qui référencent encore ce code (stg_entry, car_*, patron B).
+    // Les FK migrées en ri() ont target_column = "id" → exclues : l'id ne change pas.
+    // On cascade le rename plutôt que de bloquer : ces tables sont des zones de données
+    // (staging brut, attributs de caractéristiques, hiérarchies), pas des configs.
+    let cascade_refs: Vec<_> = references::all_references(con)
+        .into_iter()
+        .filter(|r| {
+            r.target_table == sql_table
+                && r.target_column == code_col
+                && r.target_display_column.is_none()
+        })
+        .collect();
+    for r in &cascade_refs {
+        con.execute(
+            &format!(
+                "UPDATE {} SET \"{}\" = ? WHERE \"{}\" = ?",
+                r.table, r.column, r.column
+            ),
+            [new, old],
+        )
+        .map_err(db_err)?;
+    }
+
+    con.execute(
+        &format!("UPDATE {sql_table} SET \"{code_col}\" = ? WHERE \"{code_col}\" = ?"),
+        [new, old],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct RenameBody {
+    old: String,
+    new: String,
+}
+
+/// POST /api/md/{table}/rename — renomme le code d'un membre (cf. [`rename_code`]).
+async fn rename_handler(
+    Path(table): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RenameBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    {
+        let con = lock_con(&state)?;
+        rename_code(&con, &table, &body.old, &body.new)?;
+        // Durabilité : flushe l'UPDATE (cf. CHECKPOINT au démarrage de server.rs).
+        let _ = con.execute("CHECKPOINT", []);
+    }
+    Ok(Json(serde_json::json!({ "renamed": { "old": body.old, "new": body.new } })))
 }
 
 // ─────────────────────── HTTP — Schéma et liste des tables ─────────────────────
@@ -913,8 +1458,14 @@ async fn table_schema(
         .map(|name| {
             let pk = def.pk.iter().any(|p| p == name);
             let fk = refs.iter().find(|r| r.column == *name).map(|r| FkTarget {
-                table: sql_to_api(&r.target_table),
-                column: r.target_column.clone(),
+                table: sql_to_api_dyn(&con, &r.target_table),
+                // FK à contrat code : on expose la colonne d'affichage (code) afin
+                // que le dropdown propose/soumette des codes, même si le stockage
+                // est en `id` (traduit côté serveur).
+                column: r
+                    .code_contract()
+                    .map(String::from)
+                    .unwrap_or_else(|| r.target_column.clone()),
                 required: r.required,
             });
             ColumnSchema {
@@ -963,10 +1514,15 @@ async fn get_references(
     let out = references::all_references(&con)
         .into_iter()
         .map(|r| ReferenceDto {
-            table: sql_to_api(&r.table),
-            column: r.column,
-            target_table: sql_to_api(&r.target_table),
-            target_column: r.target_column,
+            table: sql_to_api_dyn(&con, &r.table),
+            column: r.column.clone(),
+            target_table: sql_to_api_dyn(&con, &r.target_table),
+            // FK à contrat code : on expose la colonne **code** (et non `id`), pour
+            // que le front (qui manipule des codes) reste aligné — cf. table_schema.
+            target_column: r
+                .code_contract()
+                .map(String::from)
+                .unwrap_or(r.target_column),
             required: r.required,
         })
         .collect();
@@ -1041,8 +1597,16 @@ async fn get_data_health(
         let tt = r.target_table.as_str();
         let tc = r.target_column.as_str();
         let tbl = r.table.as_str();
+        // Cibles en clé technique (`id` entier) : pas de comparaison `<> ''`
+        // (la colonne source est un entier, pas du texte). La jointure se fait
+        // entier↔entier. Pour les cibles code (texte), on garde le filtre vide.
+        let empty_filter = if tc == "id" {
+            String::new()
+        } else {
+            format!("AND e.\"{col}\" <> '' ")
+        };
         let where_orphan = format!(
-            "e.\"{col}\" IS NOT NULL AND e.\"{col}\" <> '' \
+            "e.\"{col}\" IS NOT NULL {empty_filter} \
              AND NOT EXISTS (SELECT 1 FROM {tt} t WHERE t.\"{tc}\" = e.\"{col}\")"
         );
         let count_sql =
@@ -1068,9 +1632,9 @@ async fn get_data_health(
         }
         total += count;
         checks.push(OrphanCheck {
-            table: sql_to_api(tbl),
+            table: sql_to_api_dyn(&con, tbl),
             column: col.to_string(),
-            target_table: sql_to_api(tt),
+            target_table: sql_to_api_dyn(&con, tt),
             target_column: tc.to_string(),
             count,
             sample,
@@ -1090,6 +1654,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/api/md/{table}",
             get(list).post(create).put(update).delete(remove),
         )
+        .route("/api/md/{table}/rename", post(rename_handler))
         .route("/api/md/{table}/schema", get(table_schema))
         .route("/api/meta/references", get(get_references))
         .route("/api/meta/native-enums", get(get_native_enums))
@@ -1107,6 +1672,264 @@ mod tests {
         let con = Connection::open_in_memory().expect("open in-memory");
         crate::schema::create_schema(&con).expect("create_schema");
         con
+    }
+
+    /// Renommage de code (B1, étapes 7-8) : autorisé pour les dimensions
+    /// entièrement basculées en clé technique (`variant`, `currency` après étape 8).
+    /// Vérifie propagation et conflits.
+    #[test]
+    fn rename_code_variant_ok_currency_ok_apres_etape8() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // variant : entièrement flippée → renommage autorisé et propagé.
+        let cons_variant_before: i64 = con
+            .query_row("SELECT variant FROM dim_consolidation LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        rename_code(&con, "variants", "BASE", "STANDARD").expect("variant renommable");
+        // Le code a changé ; l'id (donc la FK dim_consolidation.variant) est intact.
+        assert!(
+            resolve::resolve_id(&con, "dim_variant", "BASE").unwrap().is_none(),
+            "ancien code disparu"
+        );
+        let new_id = resolve::resolve_id(&con, "dim_variant", "STANDARD")
+            .unwrap()
+            .expect("nouveau code présent");
+        assert_eq!(new_id, cons_variant_before, "la FK (id) pointe toujours la même ligne");
+
+        // currency : B1 étape 8 — pivot_currency_id remplace la clé code dans
+        // app_config ; plus de bloquant JSON. La devise doit être renommable.
+        // (sat_exchange_rate.currency_source et stg_entry.currency sont cascadés.)
+        rename_code(&con, "currencies", "EUR", "EURO").expect("currency renommable après étape 8");
+        // Vérifier que le code a bien changé.
+        assert!(
+            resolve::resolve_id(&con, "dim_currency", "EUR").unwrap().is_none(),
+            "ancien code EUR disparu"
+        );
+        assert!(
+            resolve::resolve_id(&con, "dim_currency", "EURO").unwrap().is_some(),
+            "nouveau code EURO présent"
+        );
+
+        // Conflit : renommer vers un code existant est rejeté.
+        con.execute("INSERT INTO dim_variant (code, libelle) VALUES ('OPT','Option')", [])
+            .unwrap();
+        assert!(rename_code(&con, "variants", "STANDARD", "OPT").is_err());
+    }
+
+    /// FK migrée en clé technique (option A, chantier B1) : `dim_consolidation.variant`
+    /// est **stockée en id** mais le contrat reste le **code**. On vérifie le
+    /// round-trip aux frontières : écriture code→id et lecture id→code.
+    #[test]
+    fn fk_contrat_code_variant_round_trip() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // Stockage : la colonne `variant` contient bien un entier (id), pas 'BASE'.
+        let stored_is_int: bool = con
+            .query_row(
+                "SELECT typeof(variant) IN ('INTEGER','BIGINT','HUGEINT') \
+                 FROM dim_consolidation LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored_is_int, "variant doit être stockée en entier (id)");
+
+        // Écriture : write_db_value résout le code 'BASE' en son id.
+        let variant_id = resolve::resolve_id(&con, "dim_variant", "BASE")
+            .unwrap()
+            .expect("BASE existe");
+        let written =
+            write_db_value(&con, "dim_consolidation", "variant", &JsonValue::String("BASE".into()))
+                .unwrap();
+        assert!(
+            matches!(written, DbValue::BigInt(id) if id == variant_id),
+            "write_db_value('BASE') doit donner l'id de variant"
+        );
+        // Code inconnu : rejeté.
+        assert!(write_db_value(
+            &con,
+            "dim_consolidation",
+            "variant",
+            &JsonValue::String("ZZZ".into())
+        )
+        .is_err());
+
+        // Lecture : translate_rows_out re-projette l'id en code 'BASE'.
+        let rows = run_query(&con, "SELECT variant FROM dim_consolidation", Vec::new()).unwrap();
+        let out = translate_rows_out(&con, "dim_consolidation", rows).unwrap();
+        assert_eq!(out[0]["variant"], JsonValue::String("BASE".into()));
+    }
+
+    /// `rate_set` est désormais entièrement flippée en clé technique
+    /// (`sat_exchange_rate.rate_set` incluse) → renommage autorisé, et l'intégrité
+    /// de `sat_exchange_rate` (qui stocke l'id, pas le code) est préservée.
+    /// (Chantier B1 — flip `sat_exchange_rate.rate_set`.)
+    #[test]
+    fn rename_code_rate_set_ok_integrite_sat() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        let rate_id: i64 = con
+            .query_row("SELECT id FROM dim_rate_set WHERE code='RATES'", [], |r| r.get(0))
+            .unwrap();
+        let rates_before: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_exchange_rate WHERE rate_set = ?",
+                [rate_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(rates_before > 0, "sat_exchange_rate peuplée par le seed");
+
+        // rate_set entièrement flippée → renommage autorisé (plus aucun bloquer).
+        rename_code(&con, "rate_sets", "RATES", "TAUX").expect("rate_set renommable");
+
+        // Le code a changé ; l'id est intact → aucune ligne orpheline.
+        assert!(resolve::resolve_id(&con, "dim_rate_set", "RATES").unwrap().is_none());
+        assert_eq!(
+            resolve::resolve_id(&con, "dim_rate_set", "TAUX").unwrap().unwrap(),
+            rate_id,
+            "même id après renommage"
+        );
+        let rates_after: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_exchange_rate WHERE rate_set = ?",
+                [rate_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rates_after, rates_before, "aucune ligne orpheline après renommage");
+    }
+
+    /// `sat_exchange_rate.rate_set` (FK migrée en clé technique) : round-trip
+    /// code↔id aux frontières du CRUD master data. (Chantier B1.)
+    #[test]
+    fn sat_exchange_rate_rate_set_round_trip() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        // Stockage : la colonne contient un entier (id), pas le code 'RATES'.
+        let stored_is_int: bool = con
+            .query_row(
+                "SELECT typeof(rate_set) IN ('INTEGER','BIGINT','HUGEINT') \
+                 FROM sat_exchange_rate LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored_is_int, "rate_set doit être stockée en entier (id)");
+
+        // Écriture : write_db_value résout le code 'RATES' en son id.
+        let rate_id = resolve::resolve_id(&con, "dim_rate_set", "RATES")
+            .unwrap()
+            .expect("RATES existe");
+        let written =
+            write_db_value(&con, "sat_exchange_rate", "rate_set", &JsonValue::String("RATES".into()))
+                .unwrap();
+        assert!(
+            matches!(written, DbValue::BigInt(id) if id == rate_id),
+            "write_db_value('RATES') doit donner l'id de rate_set"
+        );
+        // Code inconnu : rejeté.
+        assert!(write_db_value(
+            &con,
+            "sat_exchange_rate",
+            "rate_set",
+            &JsonValue::String("NOPE".into())
+        )
+        .is_err());
+
+        // Lecture : translate_rows_out re-projette l'id en code 'RATES'.
+        let rows = run_query(&con, "SELECT rate_set FROM sat_exchange_rate", Vec::new()).unwrap();
+        let out = translate_rows_out(&con, "sat_exchange_rate", rows).unwrap();
+        assert_eq!(out[0]["rate_set"], JsonValue::String("RATES".into()));
+    }
+
+    /// `perimeter_set` entièrement flippée (`sat_perimeter.perimeter_set` incluse)
+    /// → renommage autorisé, intégrité de `sat_perimeter` préservée. (Chantier B1.)
+    #[test]
+    fn rename_code_perimeter_set_ok_integrite_sat() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        let perim_code: String = con
+            .query_row("SELECT code FROM dim_perimeter_set LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        let perim_id: i64 = con
+            .query_row("SELECT id FROM dim_perimeter_set LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        let before: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_perimeter WHERE perimeter_set = ?",
+                [perim_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(before > 0, "sat_perimeter peuplée par le seed");
+
+        rename_code(&con, "perimeter_sets", &perim_code, "PERIM_X").expect("perimeter_set renommable");
+
+        assert!(resolve::resolve_id(&con, "dim_perimeter_set", &perim_code)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            resolve::resolve_id(&con, "dim_perimeter_set", "PERIM_X")
+                .unwrap()
+                .unwrap(),
+            perim_id,
+            "même id après renommage"
+        );
+        let after: i64 = con
+            .query_row(
+                "SELECT COUNT(*) FROM sat_perimeter WHERE perimeter_set = ?",
+                [perim_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, before, "aucune ligne orpheline après renommage");
+    }
+
+    /// `sat_perimeter.perimeter_set` (FK migrée en clé technique) : round-trip
+    /// code↔id aux frontières du CRUD master data. (Chantier B1.)
+    #[test]
+    fn sat_perimeter_perimeter_set_round_trip() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+
+        let stored_is_int: bool = con
+            .query_row(
+                "SELECT typeof(perimeter_set) IN ('INTEGER','BIGINT','HUGEINT') \
+                 FROM sat_perimeter LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored_is_int, "perimeter_set stocké en entier (id)");
+
+        let (perim_code, perim_id): (String, i64) = con
+            .query_row(
+                "SELECT code, id FROM dim_perimeter_set LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let written = write_db_value(
+            &con,
+            "sat_perimeter",
+            "perimeter_set",
+            &JsonValue::String(perim_code.clone()),
+        )
+        .unwrap();
+        assert!(
+            matches!(written, DbValue::BigInt(id) if id == perim_id),
+            "write_db_value('{perim_code}') doit donner l'id"
+        );
+
+        let rows = run_query(&con, "SELECT perimeter_set FROM sat_perimeter", Vec::new()).unwrap();
+        let out = translate_rows_out(&con, "sat_perimeter", rows).unwrap();
+        assert_eq!(out[0]["perimeter_set"], JsonValue::String(perim_code.into()));
     }
 
     /// `true` si `api` apparaît dans la liste des tables navigables.
@@ -1191,10 +2014,11 @@ mod tests {
         )
         .unwrap();
 
+        let char_id = crate::characteristics::id_of(&con, "comportement").unwrap();
         let def = resolve_table(&con, "car_comportement")
             .unwrap()
             .expect("car_comportement résolvable");
-        assert_eq!(def.sql_name, "car_comportement");
+        assert_eq!(def.sql_name, crate::characteristics::value_table(char_id));
         assert_eq!(def.label, "Comportement");
         assert_eq!(def.pk, vec!["code".to_string()]);
         // code, libelle + l'attribut N2.
@@ -1212,10 +2036,11 @@ mod tests {
     fn resolve_table_lst_code() {
         let con = setup();
         crate::value_lists::create_list(&con, "incoterm", "Incoterms").unwrap();
+        let list_id = crate::value_lists::id_of(&con, "incoterm").unwrap();
         let def = resolve_table(&con, "lst_incoterm")
             .unwrap()
             .expect("lst_incoterm résolvable");
-        assert_eq!(def.sql_name, "lst_incoterm");
+        assert_eq!(def.sql_name, crate::value_lists::value_table(list_id));
         assert_eq!(def.label, "Incoterms");
         assert_eq!(def.columns, vec!["code".to_string(), "libelle".to_string()]);
         assert_eq!(def.pk, vec!["code".to_string()]);
@@ -1284,11 +2109,13 @@ mod tests {
         reject_unknown_fields(&def, &obj).unwrap();
         validate_references(&def, &obj, &con).unwrap();
 
+        // INSERT avec les noms physiques (sql_columns), valeurs via les clés API.
         let mut cols = Vec::new();
         let mut vals: Vec<DbValue> = Vec::new();
-        for col in &def.columns {
-            if let Some(v) = obj.get(col.as_str()) {
-                cols.push(quote_ident(col));
+        for api_col in &def.columns {
+            if let Some(v) = obj.get(api_col.as_str()) {
+                let phys = def.sql_col(api_col);
+                cols.push(quote_ident(phys));
                 vals.push(json_to_db_value(v));
             }
         }
@@ -1354,5 +2181,144 @@ mod tests {
         bad.insert("code".into(), JsonValue::String("700".into()));
         bad.insert("comportement".into(), JsonValue::String("NOPE".into()));
         assert!(validate_references(&def, &bad, &con).is_err());
+    }
+
+    // ── Rôle 3 : garde JSON/expressions ─────────────────────────────────────
+
+    fn seed_rule(con: &Connection, code: &str, definition: &str) {
+        con.execute(
+            "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
+            [code, code, definition],
+        )
+        .unwrap();
+    }
+
+    /// `scan_json_blockers` détecte un code de méthode dans le scope d'une règle.
+    /// Note : `rename_code` pour `dim_method` est encore bloqué par la garde graphe
+    /// (`sat_perimeter.methode` non encore flippée) ; ce test vérifie le scan JSON
+    /// directement — il deviendra le chemin réel une fois `sat_perimeter.methode`
+    /// migré en clé technique (flip prévu à l'étape suivante du chantier B1).
+    #[test]
+    fn role3_method_bloque_si_dans_scope_rule() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // seed_all ne peuple pas dim_rule — on l'insère ici pour le test.
+        seed_rule(
+            &con,
+            "ELIM_IC",
+            r#"{"scope":[{"target":"entity","dim":"methode","op":"=","val":"globale"},{"target":"partner","dim":"methode","op":"=","val":"globale"}],"operations":[]}"#,
+        );
+        let blockers = scan_json_blockers(&con, "dim_method", "globale").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("dim_rule") && b.contains("scope")),
+            "doit détecter 'globale' dans le scope d'une règle : {blockers:?}"
+        );
+    }
+
+    /// Aucun bloquer JSON pour un code de méthode absent des règles.
+    #[test]
+    fn role3_method_ok_si_absent_des_regles() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // Insérer une méthode qui n'apparaît dans aucune règle.
+        con.execute(
+            "INSERT INTO dim_method (code, libelle) VALUES ('PROP_TEST', 'Test')",
+            [],
+        )
+        .unwrap();
+        let blockers = scan_json_blockers(&con, "dim_method", "PROP_TEST").unwrap();
+        assert!(
+            blockers.is_empty(),
+            "aucun bloquer JSON pour une méthode non référencée : {blockers:?}"
+        );
+    }
+
+    /// Un code de compte présent dans la selection d'une règle bloque le renommage.
+    #[test]
+    fn role3_account_bloque_si_dans_selection_rule() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        seed_rule(
+            &con,
+            "TEST_ACCOUNT",
+            r#"{"scope":[],"operations":[{"selection":[{"dim":"account","op":"=","val":"700"}],"destination":{}}]}"#,
+        );
+        // dim_account n'est pas encore flipable par graphe (stg_entry/fact_entry en codes),
+        // donc la garde graphe prend le dessus — le test valide juste que scan_json_blockers
+        // détecte bien le blocage JSON indépendamment.
+        let blockers = scan_json_blockers(&con, "dim_account", "700").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("TEST_ACCOUNT") && b.contains("selection")),
+            "doit détecter 700 dans selection de TEST_ACCOUNT : {blockers:?}"
+        );
+    }
+
+    /// Un code de poste dans l'expression d'un indicateur bloque le renommage.
+    #[test]
+    fn role3_aggregate_bloque_si_dans_expression_indicator() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // Insérer un poste et un indicateur qui le référence.
+        con.execute(
+            "INSERT INTO dim_aggregate (code, libelle, level, definition) VALUES ('CA','CA','corporate','{\"level\":\"corporate\",\"selection\":[]}')",
+            [],
+        )
+        .unwrap();
+        con.execute(
+            "INSERT INTO dim_indicator (code, libelle, expression, grain, format) VALUES ('KPI_CA','KPI CA','[CA]','[]','number')",
+            [],
+        )
+        .unwrap();
+        let blockers = scan_json_blockers(&con, "dim_aggregate", "CA").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("KPI_CA")),
+            "doit détecter [CA] dans l'expression de KPI_CA : {blockers:?}"
+        );
+    }
+
+    /// B1 étape 8 : la garde JSON ne bloque plus la devise.
+    /// `pivot_currency` est remplacé par `pivot_currency_id` (INTEGER, immunisé
+    /// au renommage) → `scan_json_blockers` retourne une liste vide pour dim_currency.
+    #[test]
+    fn role3_currency_non_bloquee_apres_etape8() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        // app_config.pivot_currency = 'EUR' est encore présent (seed),
+        // mais la garde a été retirée en étape 8 → aucun bloquant JSON.
+        let blockers = scan_json_blockers(&con, "dim_currency", "EUR").unwrap();
+        assert!(
+            blockers.is_empty(),
+            "aucun bloquant JSON attendu pour dim_currency après étape 8 : {blockers:?}"
+        );
+    }
+
+    /// B1 étape 12 : un coefficient utilisé dans une règle bloque le renommage.
+    /// `operations_have_coeff` inspecte `op["coefficient"]["type"]`.
+    #[test]
+    fn role3_coefficient_bloque_si_dans_rule() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        seed_rule(
+            &con,
+            "TEST_COEFF",
+            r#"{"scope":[],"operations":[{"seq":1,"level":"corporate","coefficient":{"type":"pct_integration"},"selection":[]}]}"#,
+        );
+        let blockers = scan_json_blockers(&con, "dim_coefficient", "pct_integration").unwrap();
+        assert!(
+            blockers.iter().any(|b| b.contains("TEST_COEFF") && b.contains("coefficient")),
+            "doit détecter pct_integration dans coefficient de TEST_COEFF : {blockers:?}"
+        );
+    }
+
+    /// B1 étape 12 : un coefficient non utilisé dans les règles ne bloque pas.
+    #[test]
+    fn role3_coefficient_ok_si_absent_des_regles() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        let blockers = scan_json_blockers(&con, "dim_coefficient", "non_existent_coeff").unwrap();
+        assert!(
+            blockers.is_empty(),
+            "aucun bloquant JSON pour un coefficient non référencé : {blockers:?}"
+        );
     }
 }

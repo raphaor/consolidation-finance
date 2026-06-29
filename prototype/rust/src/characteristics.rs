@@ -40,9 +40,31 @@ use crate::dimensions::is_valid_custom_name;
 use crate::state::{db_err, lock_con, AppError, AppState};
 use crate::{masterdata, references};
 
-/// Nom de la table de valeurs d'une caractéristique N1.
-fn value_table(code: &str) -> String {
-    format!("car_{code}")
+/// Nom physique de la table de valeurs d'une caractéristique N1 (B1 étape 5 :
+/// nommée par `id` technique, pas par `code`).
+pub fn value_table(id: i64) -> String {
+    format!("car_{id}")
+}
+
+/// `id` technique d'une caractéristique N1, ou `None` si elle n'existe pas.
+pub fn id_of(con: &duckdb::Connection, code: &str) -> Option<i64> {
+    con.query_row(
+        "SELECT id FROM dim_characteristic WHERE code = ?",
+        [code],
+        |r| r.get(0),
+    )
+    .ok()
+}
+
+/// Nom physique de la table de valeurs pour un code N1 (lookup id).
+/// Retourne une erreur si la caractéristique n'existe pas.
+fn vtable_for(con: &duckdb::Connection, char_code: &str) -> duckdb::Result<String> {
+    let id: i64 = con.query_row(
+        "SELECT id FROM dim_characteristic WHERE code = ?",
+        [char_code],
+        |r| r.get(0),
+    )?;
+    Ok(value_table(id))
 }
 
 // ───────────────────────────── Modèle / chargement ─────────────────────────────
@@ -50,14 +72,38 @@ fn value_table(code: &str) -> String {
 /// Un attribut N2 (colonne typée sur la table de valeurs d'une N1).
 #[derive(Serialize)]
 pub struct AttributeDef {
-    pub name: String,
+    pub id: i64,      // clé technique B1 ; nom physique = c{id} sur car_<char_id>
+    pub name: String, // code mutable (contrat API/JSON)
     pub libelle: String,
     pub target_dimension: String,
+}
+
+/// Nom physique d'une colonne N2 sur `car_<char_id>`.
+pub fn attr_col(attr_id: i64) -> String {
+    format!("c{attr_id}")
+}
+
+/// Résout `(char_code, attr_name)` → nom de colonne physique (`c<attr_id>`).
+/// Retourne `None` si l'attribut n'existe pas.
+pub fn attr_col_for(
+    con: &duckdb::Connection,
+    char_code: &str,
+    attr_name: &str,
+) -> Option<String> {
+    con.query_row(
+        "SELECT id FROM dim_characteristic_attribute \
+         WHERE characteristic_code = ? AND name = ?",
+        [char_code, attr_name],
+        |r| r.get::<_, i64>(0),
+    )
+    .ok()
+    .map(attr_col)
 }
 
 /// Une caractéristique N1 avec ses attributs N2.
 #[derive(Serialize)]
 pub struct CharacteristicDef {
+    pub id: i64,
     pub code: String,
     pub libelle: String,
     pub base_dimension: String,
@@ -82,24 +128,26 @@ pub fn load_all(con: &duckdb::Connection) -> duckdb::Result<Vec<CharacteristicDe
     if !registries_exist(con) {
         return Ok(Vec::new());
     }
-    let chars: Vec<(String, String, String)> = {
+    let chars: Vec<(i64, String, String, String)> = {
         let mut stmt = con.prepare(
-            "SELECT code, libelle, base_dimension FROM dim_characteristic ORDER BY code",
+            "SELECT id, code, libelle, base_dimension FROM dim_characteristic ORDER BY code",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                row.get::<_, String>(2)?,
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                row.get::<_, String>(3)?,
             ))
         })?;
         rows.collect::<duckdb::Result<_>>()?
     };
     let mut out = Vec::with_capacity(chars.len());
-    for (code, libelle, base_dimension) in chars {
+    for (id, code, libelle, base_dimension) in chars {
         let attributes = load_attributes(con, &code)?;
         out.push(CharacteristicDef {
-            value_table: value_table(&code),
+            id,
+            value_table: value_table(id),
             code,
             libelle,
             base_dimension,
@@ -145,14 +193,15 @@ pub fn attribute_target(
 
 fn load_attributes(con: &duckdb::Connection, char_code: &str) -> duckdb::Result<Vec<AttributeDef>> {
     let mut stmt = con.prepare(
-        "SELECT name, libelle, target_dimension FROM dim_characteristic_attribute \
+        "SELECT id, name, libelle, target_dimension FROM dim_characteristic_attribute \
          WHERE characteristic_code = ? ORDER BY name",
     )?;
     let rows = stmt.query_map([char_code], |row| {
         Ok(AttributeDef {
-            name: row.get::<_, String>(0)?,
-            libelle: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-            target_dimension: row.get::<_, String>(2)?,
+            id: row.get::<_, i64>(0)?,
+            name: row.get::<_, String>(1)?,
+            libelle: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            target_dimension: row.get::<_, String>(3)?,
         })
     })?;
     rows.collect()
@@ -216,7 +265,20 @@ pub fn create_characteristic(
             "caractéristique déjà existante : {code}"
         )));
     }
-    let vtable = value_table(code);
+    // INSERT en premier pour récupérer l'id technique (séquence auto).
+    con.execute(
+        "INSERT INTO dim_characteristic (code, libelle, base_dimension) VALUES (?, ?, ?)",
+        &[&code, &libelle, &base_dimension],
+    )
+    .map_err(db_err)?;
+    let id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_characteristic WHERE code = ?",
+            [code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    let vtable = value_table(id);
     con.execute(
         &format!("CREATE TABLE {vtable} (code TEXT PRIMARY KEY, libelle TEXT)"),
         [],
@@ -227,11 +289,6 @@ pub fn create_characteristic(
         [],
     )
     .map_err(db_err)?;
-    con.execute(
-        "INSERT INTO dim_characteristic (code, libelle, base_dimension) VALUES (?, ?, ?)",
-        &[&code, &libelle, &base_dimension],
-    )
-    .map_err(db_err)?;
     Ok(())
 }
 
@@ -239,14 +296,14 @@ pub fn create_characteristic(
 /// + attributs N2 + registre.
 pub fn delete_characteristic(con: &duckdb::Connection, code: &str) -> Result<(), AppError> {
     ensure_valid_ident("code de caractéristique", code)?;
-    let base_dimension: String = con
+    let (id, base_dimension): (i64, String) = con
         .query_row(
-            "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+            "SELECT id, base_dimension FROM dim_characteristic WHERE code = ?",
             [code],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|_| AppError::not_found(format!("caractéristique inexistante : {code}")))?;
-    let vtable = value_table(code);
+    let vtable = value_table(id);
     con.execute(&format!("DROP TABLE IF EXISTS {vtable}"), [])
         .map_err(db_err)?;
     if let Some((base_table, _)) = references::dimension_master(&base_dimension) {
@@ -305,15 +362,25 @@ pub fn add_attribute(
             "attribut déjà existant : {name}"
         )));
     }
-    let vtable = value_table(char_code);
-    con.execute(&format!("ALTER TABLE {vtable} ADD COLUMN {name} TEXT"), [])
-        .map_err(db_err)?;
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
+    // INSERT d'abord pour obtenir l'id technique → le nom physique sera c{id}.
     con.execute(
         "INSERT INTO dim_characteristic_attribute \
          (characteristic_code, name, libelle, target_dimension) VALUES (?, ?, ?, ?)",
         &[&char_code, &name, &libelle, &target_dimension],
     )
     .map_err(db_err)?;
+    let attr_id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_characteristic_attribute \
+             WHERE characteristic_code = ? AND name = ?",
+            [char_code, name],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    let col = attr_col(attr_id);
+    con.execute(&format!("ALTER TABLE {vtable} ADD COLUMN \"{col}\" TEXT"), [])
+        .map_err(db_err)?;
     Ok(())
 }
 
@@ -337,8 +404,17 @@ pub fn delete_attribute(
             "attribut inexistant : {char_code}.{name}"
         )));
     }
-    let vtable = value_table(char_code);
-    con.execute(&format!("ALTER TABLE {vtable} DROP COLUMN {name}"), [])
+    let attr_id: i64 = con
+        .query_row(
+            "SELECT id FROM dim_characteristic_attribute \
+             WHERE characteristic_code = ? AND name = ?",
+            [char_code, name],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    let col = attr_col(attr_id);
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
+    con.execute(&format!("ALTER TABLE {vtable} DROP COLUMN \"{col}\""), [])
         .map_err(db_err)?;
     con.execute(
         "DELETE FROM dim_characteristic_attribute WHERE characteristic_code = ? AND name = ?",
@@ -350,11 +426,37 @@ pub fn delete_attribute(
 
 // ─────────────────────── Valeurs N1 (lignes de car_<code>) ──────────────────────
 
-/// Colonnes d'une valeur N1 : `code`, `libelle` + les attributs N2.
-fn value_columns(attrs: &[AttributeDef]) -> Vec<String> {
+/// Clés API/JSON d'une valeur N1 : `code`, `libelle` + les noms d'attributs.
+/// Utilisé pour valider et lire les corps de requête.
+fn value_api_keys(attrs: &[AttributeDef]) -> Vec<String> {
     let mut cols = vec!["code".to_string(), "libelle".to_string()];
     cols.extend(attrs.iter().map(|a| a.name.clone()));
     cols
+}
+
+/// Expression SELECT pour une valeur N1 : alias physique → clé API.
+/// `"c{id}" AS "{name}"` pour les attributs N2, colonnes nues pour code/libelle.
+fn select_clause(attrs: &[AttributeDef]) -> String {
+    let mut parts = vec!["\"code\"".to_string(), "\"libelle\"".to_string()];
+    parts.extend(
+        attrs
+            .iter()
+            .map(|a| format!("\"{}\" AS \"{}\"", attr_col(a.id), a.name)),
+    );
+    parts.join(", ")
+}
+
+/// Traduit une clé JSON d'attribut (nom) en nom de colonne physique (`c{id}`).
+/// Retourne le nom physique si trouvé, sinon le nom tel quel (fallback base fraîche).
+fn physical_col(attrs: &[AttributeDef], api_key: &str) -> String {
+    if api_key == "code" || api_key == "libelle" {
+        return api_key.to_string();
+    }
+    attrs
+        .iter()
+        .find(|a| a.name == api_key)
+        .map(|a| attr_col(a.id))
+        .unwrap_or_else(|| api_key.to_string())
 }
 
 /// Confirme l'existence de la caractéristique et renvoie ses attributs N2.
@@ -382,7 +484,7 @@ fn reject_unknown_value_fields(
     attrs: &[AttributeDef],
     obj: &Map<String, JsonValue>,
 ) -> Result<(), AppError> {
-    let allowed: HashSet<String> = value_columns(attrs).into_iter().collect();
+    let allowed: HashSet<String> = value_api_keys(attrs).into_iter().collect();
     if let Some(k) = obj.keys().find(|k| !allowed.contains(k.as_str())) {
         return Err(AppError::bad_request(format!(
             "champ inconnu pour une valeur de caractéristique : {k}"
@@ -419,12 +521,8 @@ fn validate_attribute_values(
 /// Liste les valeurs (lignes) d'une caractéristique N1.
 pub fn list_values(con: &duckdb::Connection, char_code: &str) -> Result<Vec<JsonValue>, AppError> {
     let attrs = require_characteristic(con, char_code)?;
-    let cols = value_columns(&attrs)
-        .iter()
-        .map(|c| format!("\"{c}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let vtable = value_table(char_code);
+    let cols = select_clause(&attrs);
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
     masterdata::run_query(
         con,
         &format!("SELECT {cols} FROM {vtable} ORDER BY code"),
@@ -432,7 +530,7 @@ pub fn list_values(con: &duckdb::Connection, char_code: &str) -> Result<Vec<Json
     )
 }
 
-/// Crée une valeur N1 (ligne de `car_<code>`). `code` requis ; attributs N2
+/// Crée une valeur N1 (ligne de `car_<id>`). `code` requis ; attributs N2
 /// validés contre leur dimension cible.
 pub fn create_value(
     con: &duckdb::Connection,
@@ -446,7 +544,7 @@ pub fn create_value(
         .and_then(JsonValue::as_str)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| AppError::bad_request("code de valeur requis"))?;
-    let vtable = value_table(char_code);
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
     let exists: bool = con
         .query_row(
             &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
@@ -463,7 +561,8 @@ pub fn create_value(
     let mut cols = Vec::new();
     let mut vals: Vec<DbValue> = Vec::new();
     for (k, v) in obj {
-        cols.push(format!("\"{k}\""));
+        // Traduire la clé API (nom) en nom de colonne physique (c{id} pour les N2).
+        cols.push(format!("\"{}\"", physical_col(&attrs, k)));
         vals.push(masterdata::json_to_db_value(v));
     }
     let placeholders = vals.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
@@ -485,7 +584,7 @@ pub fn update_value(
 ) -> Result<(), AppError> {
     let attrs = require_characteristic(con, char_code)?;
     reject_unknown_value_fields(&attrs, obj)?;
-    let vtable = value_table(char_code);
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
     let exists: bool = con
         .query_row(
             &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
@@ -505,7 +604,7 @@ pub fn update_value(
         if k == "code" {
             continue; // PK immuable
         }
-        sets.push(format!("\"{k}\" = ?"));
+        sets.push(format!("\"{}\" = ?", physical_col(&attrs, k)));
         vals.push(masterdata::json_to_db_value(v));
     }
     if sets.is_empty() {
@@ -524,7 +623,7 @@ pub fn delete_value(
     value_code: &str,
 ) -> Result<(), AppError> {
     require_characteristic(con, char_code)?;
-    let vtable = value_table(char_code);
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
     let n = con
         .execute(
             &format!("DELETE FROM {vtable} WHERE code = ?"),
@@ -535,6 +634,181 @@ pub fn delete_value(
         return Err(AppError::not_found(format!(
             "valeur inexistante : {value_code}"
         )));
+    }
+    Ok(())
+}
+
+/// Renomme le code d'une valeur N1 dans `car_<id>` + cascade.
+///
+/// Cascade :
+/// 1. `car_<id>.code` (PK) — mise à jour directe.
+/// 2. Colonne de la caractéristique sur la master data de la dimension de base
+///    (ex. `dim_account."comportement"`) — toutes les lignes assignées.
+/// 3. JSON de règles/agrégats : `selection[].val` quand `via` pointe vers cette
+///    caractéristique (via déjà migré en id).
+pub fn rename_value_code(
+    con: &duckdb::Connection,
+    char_code: &str,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    if new_value.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new_value == old_value {
+        return Ok(());
+    }
+    // Vérifier que la caractéristique existe.
+    require_characteristic(con, char_code)?;
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
+
+    // Vérifier existence de l'ancien code.
+    let exists: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [old_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !exists {
+        return Err(AppError::not_found(format!("valeur inexistante : {old_value}")));
+    }
+    // Vérifier unicité du nouveau code.
+    let taken: bool = con
+        .query_row(
+            &format!("SELECT COUNT(*) > 0 FROM {vtable} WHERE code = ?"),
+            [new_value],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if taken {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new_value}")));
+    }
+
+    // 1. Renommer dans car_<id>.
+    con.execute(
+        &format!("UPDATE {vtable} SET code = ? WHERE code = ?"),
+        [new_value, old_value],
+    )
+    .map_err(db_err)?;
+
+    // 2. Cascade sur la colonne de la dimension de base.
+    let base_dim: String = con
+        .query_row(
+            "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+            [char_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if let Some((base_table, _)) = references::dimension_master(&base_dim) {
+        con.execute(
+            &format!(
+                "UPDATE {base_table} SET \"{char_code}\" = ? WHERE \"{char_code}\" = ?"
+            ),
+            [new_value, old_value],
+        )
+        .map_err(db_err)?;
+    }
+
+    // 3. Cascade dans les JSON de règles et agrégats (selection[].val quand via
+    //    pointe vers cette caractéristique).
+    if let Some(char_id) = id_of(con, char_code) {
+        cascade_value_in_rules(con, char_id, old_value, new_value)?;
+        cascade_value_in_aggregates(con, char_id, old_value, new_value)?;
+    }
+
+    Ok(())
+}
+
+/// Remplace `val = old_value` par `new_value` dans les règles où `via` pointe
+/// vers la caractéristique `char_id`.
+fn cascade_value_in_rules(
+    con: &duckdb::Connection,
+    char_id: i64,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    let rules: Vec<(String, String)> = {
+        let mut stmt = con
+            .prepare("SELECT code, definition FROM dim_rule WHERE definition IS NOT NULL")
+            .map_err(db_err)?;
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(db_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    for (rule_code, def) in &rules {
+        let Ok(mut json) = serde_json::from_str::<JsonValue>(def) else {
+            continue;
+        };
+        let mut changed = false;
+        if let Some(ops) = json.get_mut("operations").and_then(|o| o.as_array_mut()) {
+            for op in ops {
+                if let Some(sel) = op.get_mut("selection").and_then(|s| s.as_array_mut()) {
+                    for cond in sel.iter_mut() {
+                        // via est un id (migré étape 6b). Vérifier si c'est notre caractéristique.
+                        let via_id = cond.get("via").and_then(|v| v.as_i64());
+                        if via_id == Some(char_id) {
+                            if cond.get("val").and_then(|v| v.as_str()) == Some(old_value) {
+                                cond["val"] = JsonValue::String(new_value.to_string());
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if changed {
+            con.execute(
+                "UPDATE dim_rule SET definition = ? WHERE code = ?",
+                [json.to_string().as_str(), rule_code],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    Ok(())
+}
+
+/// Remplace `val = old_value` par `new_value` dans les agrégats où `via` pointe
+/// vers la caractéristique `char_id`.
+fn cascade_value_in_aggregates(
+    con: &duckdb::Connection,
+    char_id: i64,
+    old_value: &str,
+    new_value: &str,
+) -> Result<(), AppError> {
+    let aggs: Vec<(String, String)> = {
+        let mut stmt = con
+            .prepare("SELECT code, definition FROM dim_aggregate WHERE definition IS NOT NULL")
+            .map_err(db_err)?;
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(db_err)?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    for (agg_code, def) in &aggs {
+        let Ok(mut json) = serde_json::from_str::<JsonValue>(def) else {
+            continue;
+        };
+        let mut changed = false;
+        if let Some(sel) = json.get_mut("selection").and_then(|s| s.as_array_mut()) {
+            for cond in sel.iter_mut() {
+                let via_id = cond.get("via").and_then(|v| v.as_i64());
+                if via_id == Some(char_id) {
+                    if cond.get("val").and_then(|v| v.as_str()) == Some(old_value) {
+                        cond["val"] = JsonValue::String(new_value.to_string());
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            con.execute(
+                "UPDATE dim_aggregate SET definition = ? WHERE code = ?",
+                [json.to_string().as_str(), agg_code],
+            )
+            .map_err(db_err)?;
+        }
     }
     Ok(())
 }
@@ -565,7 +839,7 @@ pub fn assign(
             "membre inexistant : {base_table}.{base_key} = {member}"
         )));
     }
-    let vtable = value_table(char_code);
+    let vtable = vtable_for(con, char_code).map_err(db_err)?;
     let dbval = match value {
         Some(v) if !v.is_empty() => {
             if !references::value_exists(con, &vtable, "code", v).map_err(db_err)? {
@@ -586,7 +860,106 @@ pub fn assign(
     Ok(())
 }
 
+/// Met à jour le libellé d'une caractéristique N1.
+pub fn update_characteristic(
+    con: &duckdb::Connection,
+    char_code: &str,
+    libelle: &str,
+) -> Result<(), AppError> {
+    let n: i64 = con
+        .query_row(
+            "SELECT COUNT(*) FROM dim_characteristic WHERE code = ?",
+            [char_code],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if n == 0 {
+        return Err(AppError::not_found(format!(
+            "caractéristique inconnue : {char_code}"
+        )));
+    }
+    con.execute(
+        "UPDATE dim_characteristic SET libelle = ? WHERE code = ?",
+        [libelle, char_code],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Renomme le code d'une caractéristique N1.
+///
+/// Cascade :
+/// - colonne `{old}` sur la master data de la dimension de base → renommée `{new}` ;
+/// - `dim_characteristic_attribute.characteristic_code` : mise à jour en place.
+/// La table physique `car_<id>` n'est **pas** touchée — c'est le gain B1.
+pub fn rename_characteristic_code(
+    con: &duckdb::Connection,
+    old: &str,
+    new: &str,
+) -> Result<(), AppError> {
+    if new.is_empty() {
+        return Err(AppError::bad_request("nouveau code vide"));
+    }
+    if new == old {
+        return Ok(());
+    }
+    if !is_valid_custom_name(new) {
+        return Err(AppError::bad_request(format!(
+            "code invalide : {new:?} (alphanumérique + underscore, \
+             premier caractère lettre ou underscore, non réservé)"
+        )));
+    }
+    // Résoudre l'ancien code : on a besoin de la dimension de base pour renommer la colonne.
+    let base_dim: Option<String> = con
+        .query_row(
+            "SELECT base_dimension FROM dim_characteristic WHERE code = ?",
+            [old],
+            |r| r.get(0),
+        )
+        .ok();
+    let base_dim = base_dim
+        .ok_or_else(|| AppError::not_found(format!("caractéristique inconnue : {old}")))?;
+    // Conflit : le nouveau code existe déjà.
+    let conflict: bool = con
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM dim_characteristic WHERE code = ?",
+            [new],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if conflict {
+        return Err(AppError::conflict(format!("code déjà utilisé : {new}")));
+    }
+    // Renommer la colonne sur la master data de la dimension de base.
+    if let Some((base_table, _)) = references::dimension_master(&base_dim) {
+        con.execute(
+            &format!("ALTER TABLE {base_table} RENAME COLUMN \"{old}\" TO \"{new}\""),
+            [],
+        )
+        .map_err(db_err)?;
+    }
+    // Mettre à jour le registre.
+    con.execute(
+        "UPDATE dim_characteristic SET code = ? WHERE code = ?",
+        [new, old],
+    )
+    .map_err(db_err)?;
+    // Cascade FK dans dim_characteristic_attribute.
+    con.execute(
+        "UPDATE dim_characteristic_attribute \
+         SET characteristic_code = ? WHERE characteristic_code = ?",
+        [new, old],
+    )
+    .map_err(db_err)?;
+    Ok(())
+}
+
 // ───────────────────────────────── HTTP ─────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RenameCharBody {
+    new_code: String,
+}
 
 #[derive(Deserialize)]
 struct CreateCharacteristicBody {
@@ -594,6 +967,11 @@ struct CreateCharacteristicBody {
     #[serde(default)]
     libelle: String,
     base_dimension: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateCharacteristicBody {
+    libelle: String,
 }
 
 #[derive(Deserialize)]
@@ -620,6 +998,17 @@ async fn create(
     let con = lock_con(&state)?;
     create_characteristic(&con, &body.code, &body.libelle, &body.base_dimension)?;
     Ok((StatusCode::CREATED, Json(json!({ "code": body.code }))))
+}
+
+/// PUT /api/meta/characteristics/{code} — modifie le libellé d'une N1.
+async fn update(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<UpdateCharacteristicBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    update_characteristic(&con, &code, &body.libelle)?;
+    Ok(Json(json!({ "code": code, "libelle": body.libelle })))
 }
 
 /// DELETE /api/meta/characteristics/{code} — supprime une N1 (et ses N2).
@@ -716,6 +1105,35 @@ async fn values_delete(
     Ok(Json(json!({ "deleted": value })))
 }
 
+/// POST /api/meta/characteristics/{code}/rename — renomme le code d'une N1.
+async fn rename_char_handler(
+    State(state): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Json(body): Json<RenameCharBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_characteristic_code(&con, &code, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": code, "new": body.new_code } })))
+}
+
+#[derive(Deserialize)]
+struct RenameValueBody {
+    new_code: String,
+}
+
+/// POST /api/meta/characteristics/{code}/values/{value}/rename — renomme une valeur N1.
+async fn values_rename(
+    State(state): State<Arc<AppState>>,
+    Path((code, value)): Path<(String, String)>,
+    Json(body): Json<RenameValueBody>,
+) -> Result<Json<JsonValue>, AppError> {
+    let con = lock_con(&state)?;
+    rename_value_code(&con, &code, &value, &body.new_code)?;
+    let _ = con.execute("CHECKPOINT", []);
+    Ok(Json(json!({ "renamed": { "old": value, "new": body.new_code } })))
+}
+
 /// PUT /api/meta/characteristics/{code}/assign — classe (ou déclasse) un membre.
 async fn assign_handler(
     State(state): State<Arc<AppState>>,
@@ -730,7 +1148,7 @@ async fn assign_handler(
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/meta/characteristics", get(list).post(create))
-        .route("/api/meta/characteristics/{code}", delete(remove))
+        .route("/api/meta/characteristics/{code}", put(update).delete(remove))
         .route(
             "/api/meta/characteristics/{code}/attributes",
             post(add_attr),
@@ -748,8 +1166,16 @@ pub fn router() -> Router<Arc<AppState>> {
             put(values_update).delete(values_delete),
         )
         .route(
+            "/api/meta/characteristics/{code}/values/{value}/rename",
+            post(values_rename),
+        )
+        .route(
             "/api/meta/characteristics/{code}/assign",
             put(assign_handler),
+        )
+        .route(
+            "/api/meta/characteristics/{code}/rename",
+            post(rename_char_handler),
         )
 }
 
@@ -789,10 +1215,9 @@ mod tests {
     fn cree_n1_et_n2_avec_artefacts_physiques() {
         let con = setup();
         create_characteristic(&con, "comportement", "Comportement", "account").unwrap();
-        assert!(
-            table_exists(&con, "car_comportement"),
-            "table de valeurs créée"
-        );
+        let cid = id_of(&con, "comportement").unwrap();
+        let vtable = value_table(cid);
+        assert!(table_exists(&con, &vtable), "table de valeurs créée");
         assert!(
             col_exists(&con, "dim_account", "comportement"),
             "colonne de rattachement sur dim_account"
@@ -806,9 +1231,12 @@ mod tests {
             "account",
         )
         .unwrap();
+        // Après étape 9 B1, la colonne physique est c{attr_id}, pas le nom de l'attribut.
+        let phys_col = attr_col_for(&con, "comportement", "compte_destination")
+            .expect("attr_col_for doit trouver la colonne");
         assert!(
-            col_exists(&con, "car_comportement", "compte_destination"),
-            "colonne d'attribut N2 sur car_comportement"
+            col_exists(&con, &vtable, &phys_col),
+            "colonne d'attribut N2 sur car_<id>"
         );
 
         let all = load_all(&con).unwrap();
@@ -825,22 +1253,32 @@ mod tests {
         add_attribute(&con, "comportement", "compte_destination", "L", "account").unwrap();
         add_attribute(&con, "comportement", "nat", "Nature d'élim", "nature").unwrap();
 
+        let cid = id_of(&con, "comportement").unwrap();
+        let vtable = value_table(cid); // "car_1"
+
         let refs = references::dynamic_references(&con);
-        // N1 : dim_account.comportement → car_comportement.code
+        // N1 : dim_account.comportement → car_<id>.code
         assert!(refs.iter().any(|r| r.table == "dim_account"
             && r.column == "comportement"
-            && r.target_table == "car_comportement"
+            && r.target_table == vtable
             && r.target_column == "code"));
-        // N2 : car_comportement.compte_destination → dim_account.code
-        assert!(refs.iter().any(|r| r.table == "car_comportement"
-            && r.column == "compte_destination"
-            && r.target_table == "dim_account"
-            && r.target_column == "code"));
-        // N2 typée vers une autre dimension : nat → dim_nature.code
-        assert!(refs.iter().any(|r| r.table == "car_comportement"
-            && r.column == "nat"
-            && r.target_table == "dim_nature"
-            && r.target_column == "code"));
+        // N2 : car_<id>.c{attr_id} → dim_account.code (colonne physique B1 étape 9)
+        let col_cd = attr_col_for(&con, "comportement", "compte_destination").unwrap();
+        assert!(
+            refs.iter().any(|r| r.table == vtable
+                && r.column == col_cd
+                && r.target_table == "dim_account"
+                && r.target_column == "code"),
+            "N2 compte_destination ({col_cd}) dans le graphe"
+        );
+        let col_nat = attr_col_for(&con, "comportement", "nat").unwrap();
+        assert!(
+            refs.iter().any(|r| r.table == vtable
+                && r.column == col_nat
+                && r.target_table == "dim_nature"
+                && r.target_column == "code"),
+            "N2 nat ({col_nat}) dans le graphe"
+        );
     }
 
     #[test]
@@ -862,6 +1300,8 @@ mod tests {
         let con = setup();
         create_characteristic(&con, "comportement", "C", "account").unwrap();
         add_attribute(&con, "comportement", "compte_destination", "L", "account").unwrap();
+        let cid = id_of(&con, "comportement").unwrap();
+        let vtable = value_table(cid);
 
         // Reset complet du schéma.
         crate::schema::create_schema(&con).expect("re-create_schema");
@@ -875,11 +1315,12 @@ mod tests {
             "colonne de rattachement réappliquée après reset"
         );
         assert!(
-            table_exists(&con, "car_comportement"),
+            table_exists(&con, &vtable),
             "table de valeurs survit au reset"
         );
+        let phys_col = attr_col_for(&con, "comportement", "compte_destination").unwrap();
         assert!(
-            col_exists(&con, "car_comportement", "compte_destination"),
+            col_exists(&con, &vtable, &phys_col),
             "colonne d'attribut survit au reset"
         );
     }
@@ -958,9 +1399,11 @@ mod tests {
         let con = setup();
         create_characteristic(&con, "comportement", "C", "account").unwrap();
         add_attribute(&con, "comportement", "compte_destination", "L", "account").unwrap();
+        let cid = id_of(&con, "comportement").unwrap();
+        let vtable = value_table(cid);
 
         delete_characteristic(&con, "comportement").unwrap();
-        assert!(!table_exists(&con, "car_comportement"), "table supprimée");
+        assert!(!table_exists(&con, &vtable), "table supprimée");
         assert!(
             !col_exists(&con, "dim_account", "comportement"),
             "colonne de rattachement retirée"
@@ -973,5 +1416,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 0, "attributs N2 supprimés avec la N1");
+    }
+
+    // ── Renommage de valeur (§12) ─────────────────────────────────────
+
+    #[test]
+    fn rename_value_code_ok() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "VENTES", "libelle": "Ventes"}).as_object().unwrap(),
+        )
+        .unwrap();
+        rename_value_code(&con, "comportement", "VENTES", "VENTES_IC").unwrap();
+        // Vérifier que le nouveau code existe.
+        let code: String = con
+            .query_row(
+                &format!(
+                    "SELECT code FROM car_{} WHERE code = 'VENTES_IC'",
+                    id_of(&con, "comportement").unwrap()
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(code, "VENTES_IC");
+    }
+
+    #[test]
+    fn rename_value_code_cascade_master_data() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "VENTES", "libelle": "Ventes"}).as_object().unwrap(),
+        )
+        .unwrap();
+        // Insérer un compte de test.
+        con.execute(
+            "INSERT INTO dim_account (code, libelle) VALUES ('700', 'Test')",
+            [],
+        )
+        .unwrap();
+        // Assigner la valeur à un compte.
+        assign(&con, "comportement", "700", Some("VENTES")).unwrap();
+        // Renommer la valeur.
+        rename_value_code(&con, "comportement", "VENTES", "VENTES_IC").unwrap();
+        // Vérifier que la master data a été mise à jour.
+        let val: Option<String> = con
+            .query_row(
+                "SELECT \"comportement\" FROM dim_account WHERE code = '700'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(val.as_deref(), Some("VENTES_IC"), "master data cascade");
+    }
+
+    #[test]
+    fn rename_value_code_inexistant_erreur() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        let err = rename_value_code(&con, "comportement", "NOPE", "NEW").unwrap_err();
+        assert!(err.1.contains("inexistante"));
+    }
+
+    #[test]
+    fn rename_value_code_deja_utilise_erreur() {
+        let con = setup();
+        create_characteristic(&con, "comportement", "C", "account").unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "A", "libelle": "A"}).as_object().unwrap(),
+        )
+        .unwrap();
+        create_value(
+            &con,
+            "comportement",
+            &serde_json::json!({"code": "B", "libelle": "B"}).as_object().unwrap(),
+        )
+        .unwrap();
+        let err = rename_value_code(&con, "comportement", "A", "B").unwrap_err();
+        assert!(err.1.contains("déjà utilisé"));
     }
 }

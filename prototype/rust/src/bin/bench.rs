@@ -21,7 +21,8 @@
 //! ```
 
 use conso_engine::{
-    create_schema, pipeline::run_pipeline, validate::validate_consolidated, ConvertParams,
+    create_schema, pipeline::{run_pipeline, run_pipeline_with_hook}, rules::run_ruleset_at_level,
+    validate::validate_consolidated, ConvertParams,
 };
 use duckdb::Connection;
 use std::time::{Duration, Instant};
@@ -53,11 +54,16 @@ fn main() {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(1_000_000);
     let db_path = arg_value(&args, "--db").unwrap_or_else(default_db_path);
+    // `--no-rules` désactive le hook règles pour comparer natif vs règles. Par
+    // défaut le ruleset `RS_BENCH_INTERCO` est exécuté (référencé par la
+    // consolidation) — c'est le cas production.
+    let no_rules = args.iter().any(|a| a == "--no-rules");
 
     println!();
     println!("╔══ CONSO-BENCH — Pipeline de consolidation (gros volumes) ══╗");
     println!("║  fichier DuckDB : {:<41}║", truncate(&db_path, 41));
     println!("║  écritures cible : {:<40} ║", format!("{rows} lignes"));
+    println!("║  hook règles    : {:<40} ║", if no_rules { "désactivé (--no-rules)" } else { "activé (RS_BENCH_INTERCO)" });
     println!("╚════════════════════════════════════════════════════════════╝");
 
     // --- Nettoyage du fichier existant (run propre) ---
@@ -71,6 +77,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // PRAGMA d'accélération des INSERT : DuckDB n'a plus à maintenir l'ordre
+    // physique d'insertion (columnar layout). Sans incidence sur les requêtes
+    // triées (PK `id` remain deterministic via la séquence).
+    if let Err(e) = con.execute_batch("PRAGMA preserve_insertion_order=false;") {
+        eprintln!("\n⚠ PRAGMA preserve_insertion_order=false ignoré : {e}");
+    }
 
     if let Err(e) = create_schema(&con) {
         eprintln!("\n✗ ERREUR DDL : {e}");
@@ -120,11 +133,29 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let report = match run_pipeline(&con, &params) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("\n✗ ERREUR pipeline : {e}");
-            std::process::exit(1);
+    let report = if no_rules {
+        match run_pipeline(&con, &params) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("\n✗ ERREUR pipeline : {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Hook règles : `run_ruleset_at_level` est appelé après chaque étape du
+        // pipeline. La règle ELI_BENCH cible le niveau `consolidated` — le hook
+        // ne fait rien pour `corporate` et `converted` (la recherche des règles
+        // du niveau est sans retour). Le coût mesuré est donc réaliste.
+        let mut hook = |c: &Connection, level: &str| -> duckdb::Result<()> {
+            let _ = run_ruleset_at_level(c, "RS_BENCH_INTERCO", level, Some(1))?;
+            Ok(())
+        };
+        match run_pipeline_with_hook(&con, &params, &mut hook) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("\n✗ ERREUR pipeline (avec hook règles) : {e}");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -159,61 +190,111 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
         -- Config applicative + nouvelles dimensions référentielles (SPEC v2).
         INSERT INTO app_config VALUES ('pivot_currency', 'EUR');
 
-        INSERT INTO dim_scenario_category VALUES
+        INSERT INTO dim_scenario_category (code, libelle) VALUES
             ('REEL', 'Réel'),
             ('BUDGET', 'Budget'),
             ('PREV', 'Prévision');
 
-        INSERT INTO dim_variant VALUES ('BASE', 'Base');
+        INSERT INTO dim_variant (code, libelle) VALUES ('BASE', 'Base');
 
-        INSERT INTO dim_rate_set VALUES ('RATES', 'Taux réels');
+        INSERT INTO dim_rate_set (code, libelle) VALUES ('RATES', 'Taux réels');
 
-        INSERT INTO dim_perimeter_set VALUES ('PERIM_REEL', 'Périmètre réel 2024');
+        INSERT INTO dim_perimeter_set (code, libelle) VALUES ('PERIM_REEL', 'Périmètre réel 2024');
+
+        -- Méthodes de consolidation (Q33 : pilotables, flag `consolidated`).
+        -- Sans cet insert, sat_perimeter.methode reste NULL et l'étape D ne
+        -- produit aucune ligne consolidated.
+        INSERT INTO dim_method (code, libelle, consolidated) VALUES
+            ('globale', 'Intégration globale', TRUE),
+            ('proportionnelle', 'Intégration proportionnelle', TRUE),
+            ('MERE', 'Société mère (consolidante)', TRUE);
+
+        -- dim_period et dim_currency avant dim_consolidation (B1 : exercice /
+        -- presentation_currency / perimeter_period / rate_period sont des FK id).
+        INSERT INTO dim_period (code, libelle, type, date_debut, date_fin, statut) VALUES
+            ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
+            ('2024','Exercice 2024','exercice','2024-01-01','2024-12-31','ouvert');
+
+        INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES
+            ('EUR','Euro',2),
+            ('USD','Dollar US',2),
+            ('GBP','Livre sterling',2),
+            ('CHF','Franc suisse',2),
+            ('JPY','Yen',0);
 
         -- dim_consolidation : objet composite (PK technique auto `id`). L'id est
         -- alloué par nextval (déterministe 1 sur base fraîche) — `load_params(&con, 1)`
-        -- pointe donc sur cette consolidation. Les colonnes `perimeter_period` et
-        -- `rate_period` valent l'exercice ('2024').
+        -- pointe donc sur cette consolidation. B1 : toutes les FK sont en id.
+        -- Le ruleset `RS_BENCH_INTERCO` est référencé pour mesurer le hook règles.
         INSERT INTO dim_consolidation
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut)
         VALUES
-            (nextval('seq_consolidation'), 'Réel', 'REEL', '2024', 'PERIM_REEL', 'BASE', 'EUR',
-             '2024', 'RATES', '2024', NULL, NULL, 'ouvert');
+            (nextval('seq_consolidation'), 'Réel',
+             (SELECT id FROM dim_scenario_category WHERE code = 'REEL'),
+             (SELECT id FROM dim_period WHERE code = '2024'),
+             (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL'),
+             (SELECT id FROM dim_variant WHERE code = 'BASE'),
+             (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+             (SELECT id FROM dim_period WHERE code = '2024'),
+             (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
+             (SELECT id FROM dim_period WHERE code = '2024'),
+             (SELECT id FROM dim_ruleset WHERE code = 'RS_BENCH_INTERCO'),
+             NULL, 'ouvert');
 
-        INSERT INTO dim_period VALUES
-            ('2023','Exercice 2023','exercice','2023-01-01','2023-12-31','clôturé'),
-            ('2024','Exercice 2024','exercice','2024-01-01','2024-12-31','ouvert');
-
-        -- Entités : M (mère, EUR) + filiales réparties sur 5 devises.
+        -- Entités : M (mère) insérée en premier, puis les filiales.
+        -- B1 : devise_fonctionnelle → dim_currency.id, entite_parent → dim_entity.id.
+        -- Deux passes : la 1ʳᵉ insère M (entite_parent NULL) ; la 2ᵉ insère les
+        -- filiales et peut résoudre l'id de M par sous-requête.
+        INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut)
+        VALUES ('M', 'Entite 0',
+                (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+                NULL, 'actif');
         INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut)
         SELECT
-            CASE WHEN i = 0 THEN 'M' ELSE 'E' || LPAD(CAST(i AS VARCHAR), 02, '0') END,
+            'E' || LPAD(CAST(i AS VARCHAR), 02, '0'),
             'Entite ' || CAST(i AS VARCHAR),
-            CASE (i % 5)
-                WHEN 0 THEN 'EUR'
-                WHEN 1 THEN 'USD'
-                WHEN 2 THEN 'GBP'
-                WHEN 3 THEN 'CHF'
-                ELSE        'JPY'
-            END,
-            CASE WHEN i = 0 THEN NULL ELSE 'M' END,
+            (SELECT id FROM dim_currency WHERE code_iso =
+                CASE (i % 5)
+                    WHEN 0 THEN 'EUR'
+                    WHEN 1 THEN 'USD'
+                    WHEN 2 THEN 'GBP'
+                    WHEN 3 THEN 'CHF'
+                    ELSE        'JPY'
+                END),
+            (SELECT id FROM dim_entity WHERE code = 'M'),
             'actif'
-        FROM range(0, {N_ENTITIES}) t(i);
+        FROM range(1, {N_ENTITIES}) t(i);
+
+        -- Schémas de flux (doit précéder dim_account : flow_scheme B1 résout le
+        -- code du schéma vers son id par sous-requête à l'insertion).
+        INSERT INTO dim_flow_scheme (code, libelle) VALUES
+            ('BILAN','Schéma bilan'),
+            ('RESULTAT','Schéma résultat');
 
         -- Plan de compte : mix bilan / resultat / flux (sous_classe NULLABLE,
-        -- laissée à NULL pour les comptes synthétiques).
-        INSERT INTO dim_account (code, libelle, classe, sous_classe)
+        -- laissée à NULL pour les comptes synthétiques). Q45 : `flow_scheme` est
+        -- peuplé explicitement (bilan/flux → BILAN, resultat → RESULTAT), plus de
+        -- défaut dérivé de la classe dans la vue. B1 : résolu en id.
+        INSERT INTO dim_account (code, libelle, classe, sous_classe, flow_scheme)
         SELECT
-            'ACC_' || LPAD(CAST(i AS VARCHAR), 04, '0'),
-            'Compte ' || CAST(i AS VARCHAR),
-            CASE
-                WHEN i % 5 IN (0,1) THEN 'bilan'
-                WHEN i % 5 IN (2,3) THEN 'resultat'
-                ELSE                     'flux'
-            END,
-            NULL
-        FROM range(0, {N_ACCOUNTS}) t(i);
+            code,
+            libelle,
+            classe,
+            NULL,
+            (SELECT fs.id FROM dim_flow_scheme fs
+             WHERE fs.code = (CASE classe WHEN 'resultat' THEN 'RESULTAT' ELSE 'BILAN' END))
+        FROM (
+            SELECT
+                'ACC_' || LPAD(CAST(i AS VARCHAR), 04, '0') AS code,
+                'Compte ' || CAST(i AS VARCHAR)             AS libelle,
+                CASE
+                    WHEN i % 5 IN (0,1) THEN 'bilan'
+                    WHEN i % 5 IN (2,3) THEN 'resultat'
+                    ELSE                     'flux'
+                END AS classe
+            FROM range(0, {N_ACCOUNTS}) t(i)
+        );
 
         INSERT INTO dim_flow (code, libelle) VALUES
             ('F00','Ouverture'),
@@ -224,40 +305,79 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
             ('F98','Sortie périmètre'),
             ('F99','Clôture');
 
-        INSERT INTO dim_flow_scheme VALUES
-            ('BILAN','Schéma bilan'),
-            ('RESULTAT','Schéma résultat');
-
-        -- Articulation complète par schéma (cf. Q32 / v_flow_behavior).
+        -- Articulation complète par schéma (cf. Q32 / v_flow_behavior). B1 :
+        -- `scheme` résolu en id (PK composite reconstruite).
         INSERT INTO sat_flow_scheme_item
             (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) VALUES
-            ('BILAN','F00','close_n1','F80','F99',NULL),
-            ('BILAN','F01','close_n1','F80','F99',NULL),
-            ('BILAN','F20','avg','F81','F99',NULL),
-            ('BILAN','F80','close_n',NULL,'F99',NULL),
-            ('BILAN','F81','close_n',NULL,'F99',NULL),
-            ('BILAN','F98','close_n',NULL,'F99',NULL),
-            ('BILAN','F99','close_n',NULL,'F99',NULL),
-            ('RESULTAT','F00','avg',NULL,'F99',NULL),
-            ('RESULTAT','F01','avg',NULL,'F99',NULL),
-            ('RESULTAT','F20','avg',NULL,'F99',NULL),
-            ('RESULTAT','F80','close_n',NULL,'F99',NULL),
-            ('RESULTAT','F81','close_n',NULL,'F99',NULL),
-            ('RESULTAT','F98','avg',NULL,'F99',NULL),
-            ('RESULTAT','F99','avg',NULL,'F99',NULL);
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F00','close_n1','F80','F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F01','close_n1','F80','F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F20','avg','F81','F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F80','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F81','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F98','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='BILAN'),'F99','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F00','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F01','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F20','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F80','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F81','close_n',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F98','avg',NULL,'F99',NULL),
+            ((SELECT id FROM dim_flow_scheme WHERE code='RESULTAT'),'F99','avg',NULL,'F99',NULL);
 
-        INSERT INTO dim_currency VALUES
-            ('EUR','Euro',2),
-            ('USD','Dollar US',2),
-            ('GBP','Livre sterling',2),
-            ('CHF','Franc suisse',2),
-            ('JPY','Yen',0);
-
-        INSERT INTO dim_nature VALUES
+        INSERT INTO dim_nature (code, libelle, rules) VALUES
             ('0LIASS','Liasse',NULL),
-            ('1AJUST','Ajustement',NULL);
+            ('1AJUST','Ajustement',NULL),
+            ('2ELI','Élimination interco',NULL);
         "
     ))?;
+
+    // Règle d'élimination interco (bench) : symétrique à ELI_700 du seed.
+    // Scope globalisé (toutes entités en méthode globale) + opérations sur
+    // `partner IS NOT NULL` au niveau consolidated. 30 % des écritures ont
+    // un partner dans gen_staging → ~750 k lignes matchées sur 2,5 M.
+    // L'objectif est de mesurer le coût du hook règles (snapshot + INSERT).
+    //
+    // Le JSON definition est passé en paramètre (?) plutôt qu'interpolé dans
+    // le batch SQL : ça évite l'échappement des `{}` dans le `format!` et
+    // garantit l'injection-safe.
+    const ELI_BENCH_DEF: &str = r#"{
+        "scope": [
+            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
+            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
+        ],
+        "operations": [
+            {
+                "seq": 1, "level": "consolidated",
+                "selection": [{"dim": "partner", "op": "IS NOT NULL"}],
+                "coefficient": {"type": "pct_integration"},
+                "multiplicateur": -1,
+                "destination": {
+                    "nature":  {"mode": "override", "value": "2ELI"},
+                    "partner": {"mode": "inherit"}
+                }
+            },
+            {
+                "seq": 2, "level": "consolidated",
+                "selection": [{"dim": "partner", "op": "IS NOT NULL"}],
+                "coefficient": {"type": "pct_integration"},
+                "multiplicateur": 1,
+                "destination": {
+                    "nature":  {"mode": "override", "value": "2ELI"},
+                    "partner": {"mode": "null"}
+                }
+            }
+        ]
+    }"#;
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
+        duckdb::params!["ELI_BENCH", "Élimination interco (bench)", ELI_BENCH_DEF],
+    )?;
+    con.execute_batch(
+        "INSERT INTO dim_ruleset (code, libelle) VALUES
+            ('RS_BENCH_INTERCO', 'Élimination interco (bench)');
+         INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code)
+         SELECT (SELECT id FROM dim_ruleset WHERE code = 'RS_BENCH_INTERCO'), 1, 'ELI_BENCH';",
+    )?;
     Ok(())
 }
 
@@ -270,8 +390,11 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
         INSERT INTO sat_perimeter
             (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie)
         SELECT
-            'PERIM_REEL', e.code, '2024',
-            CASE WHEN e.rn % 7 = 0 THEN 'proportionnelle' ELSE 'globale' END,
+            (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL'), e.code, '2024',
+            CASE WHEN e.rn % 7 = 0
+                THEN (SELECT id FROM dim_method WHERE code = 'proportionnelle')
+                ELSE (SELECT id FROM dim_method WHERE code = 'globale')
+            END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,
             CASE WHEN e.rn % 7 = 0 THEN 0.5000 ELSE 1.0000 END,
             CASE WHEN e.rn % 10 = 1 THEN TRUE ELSE FALSE END,
@@ -287,14 +410,14 @@ fn gen_satellites(con: &Connection) -> duckdb::Result<()> {
         -- période antérieure. Porté par la période N (ici 2024 = clôture 2023).
         INSERT INTO sat_exchange_rate
             (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture) VALUES
-            ('RATES','USD','2023', 0.92000000, NULL,        NULL),
-            ('RATES','USD','2024', 0.90000000, 0.95000000, 0.92000000),
-            ('RATES','GBP','2023', 1.15000000, NULL,        NULL),
-            ('RATES','GBP','2024', 1.12000000, 1.18000000, 1.15000000),
-            ('RATES','CHF','2023', 0.98000000, NULL,        NULL),
-            ('RATES','CHF','2024', 1.05000000, 1.02000000, 0.98000000),
-            ('RATES','JPY','2023', 0.00650000, NULL,        NULL),
-            ('RATES','JPY','2024', 0.00620000, 0.00680000, 0.00650000);
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'USD','2023', 0.92000000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'USD','2024', 0.90000000, 0.95000000, 0.92000000),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'GBP','2023', 1.15000000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'GBP','2024', 1.12000000, 1.18000000, 1.15000000),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'CHF','2023', 0.98000000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'CHF','2024', 1.05000000, 1.02000000, 0.98000000),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'JPY','2023', 0.00650000, NULL,        NULL),
+            ((SELECT id FROM dim_rate_set WHERE code = 'RATES'),'JPY','2024', 0.00620000, 0.00680000, 0.00650000);
         ",
     )?;
     Ok(())
@@ -312,8 +435,11 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
     // Index des entités/comptes pour le JOIN.
     con.execute_batch(
         "CREATE TEMP TABLE ent_idx AS
-            SELECT ROW_NUMBER() OVER () - 1 AS rn, code, devise_fonctionnelle
-            FROM dim_entity ORDER BY code;
+            SELECT ROW_NUMBER() OVER () - 1 AS rn, e.code,
+                   cu.code_iso AS devise_fonctionnelle
+            FROM dim_entity e
+            JOIN dim_currency cu ON cu.id = e.devise_fonctionnelle
+            ORDER BY e.code;
          CREATE TEMP TABLE acc_idx AS
             SELECT ROW_NUMBER() OVER () - 1 AS rn, code
             FROM dim_account ORDER BY code;",
@@ -325,6 +451,9 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
     // PostgreSQL). On utilise `//` (division entière floor) pour les index.
     let flow_cycle = N_ENTITIES * N_ACCOUNTS * 2;
     // CTE explicite : on matérialise les index (ent_rn / acc_rn) avant les JOIN.
+    // 30 % des écritures reçoivent un `partner` (= une autre entité du groupe)
+    // pour exercer une règle d'élimination interco réaliste au niveau
+    // consolidated. Sinon le hook règles n'aurait aucune ligne à matcher.
     let sql = format!(
         "
         INSERT INTO stg_entry
@@ -345,11 +474,13 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
             CASE WHEN gen.fl = 0 THEN 'F00' ELSE 'F20' END,
             e.devise_fonctionnelle,
             '0LIASS',
-            NULL, NULL, NULL,
+            CASE WHEN gen.i % 10 < 3 THEN p.code ELSE NULL END,
+            NULL, NULL,
             'BENCH-' || CAST(gen.i AS VARCHAR),
             CAST(((gen.i % 9000) + 1000) AS DECIMAL(18,2))
         FROM gen
         JOIN ent_idx e ON e.rn = gen.ent_rn
+        JOIN ent_idx p ON p.rn = (gen.ent_rn + 1 + (gen.i % 7)) % {N_ENTITIES}
         JOIN acc_idx a ON a.rn = gen.acc_rn;
         "
     );
@@ -381,9 +512,13 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
     }
 
     // (b) invariant structurel : F80/F81 absents du niveau fonctionnel.
+    // B1 étape 4 : fact_entry.flow est un INTEGER (FK vers dim_flow.id) — il
+    // faut résoudre les codes via dim_flow.
     for lvl in &["corporate"] {
         let n: i64 = con.query_row(
-            "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND flow IN ('F80','F81')",
+            "SELECT COUNT(*) FROM fact_entry \
+             WHERE level = ? \
+               AND flow IN (SELECT id FROM dim_flow WHERE code IN ('F80','F81'))",
             [lvl],
             |row| row.get(0),
         )?;
@@ -395,7 +530,9 @@ fn check_identity(con: &Connection) -> duckdb::Result<bool> {
 
     // (c) invariant structurel : F80/F81 présents au niveau consolidated (entités non-EUR).
     let n_consol: i64 = con.query_row(
-        "SELECT COUNT(*) FROM fact_entry WHERE level = 'consolidated' AND flow IN ('F80','F81')",
+        "SELECT COUNT(*) FROM fact_entry \
+         WHERE level = 'consolidated' \
+           AND flow IN (SELECT id FROM dim_flow WHERE code IN ('F80','F81'))",
         [],
         |row| row.get(0),
     )?;
@@ -508,11 +645,12 @@ périmètre), exécute le pipeline A→B→C→D sur une DuckDB fichier, puis va
 identités de clôture et les invariants F80/F81.
 
 USAGE
-    conso-bench [--rows <N>] [--db <path>]
+    conso-bench [--rows <N>] [--db <path>] [--no-rules]
 
 ARGUMENTS
     --rows <N>     Nombre d'écritures brutes générées dans stg_entry (défaut : 1000000)
     --db <path>    Fichier DuckDB (défaut : $TEMP/conso_bench.duckdb)
+    --no-rules     Désactive le hook règles (compare natif vs avec ruleset)
 
 EXEMPLE
     conso-bench --rows 5000000"
@@ -521,6 +659,7 @@ EXEMPLE
 
 fn validate_args(args: &[String]) -> Result<(), String> {
     let value_flags = ["--rows", "--db"];
+    let bool_flags = ["--no-rules"];
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
@@ -531,6 +670,8 @@ fn validate_args(args: &[String]) -> Result<(), String> {
                 return Err(format!("l'argument '{a}' requiert une valeur"));
             }
             i += 1;
+        } else if bool_flags.contains(&a.as_str()) {
+            // flag sans valeur
         } else {
             return Err(format!("argument inconnu : '{a}'"));
         }

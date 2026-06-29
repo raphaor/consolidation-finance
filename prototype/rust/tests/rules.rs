@@ -33,13 +33,59 @@ fn engine() -> Connection {
     seed_all(&con).expect("seed_all");
     con.execute("DELETE FROM fact_entry", [])
         .expect("clear fact_entry");
+    // Natures synthétiques utilisées comme cibles d'`override` par les règles de
+    // test. Sous B1, `fact_entry.nature` est une FK id (NOT NULL) : une valeur
+    // d'override doit donc exister dans `dim_nature` (avant, nature était du TEXT
+    // libre). On les seede ici (les natures « réelles » 0LIASS/1AJUST viennent du
+    // seed).
+    con.execute_batch(
+        "INSERT INTO dim_nature (code, libelle, rules) VALUES
+            ('TST','Test',NULL),('DONT','Dont',NULL),('MAIN','Main',NULL),
+            ('2A','Test 2A',NULL),('2B','Test 2B',NULL),('2CPY','Test copie',NULL),
+            ('MAPRF','Test map_ref',NULL),('SELN1','Test sélection N1',NULL),
+            ('SELRF','Test sélection ref',NULL),('SCACTIF','Test sous-classe actif',NULL),
+            ('FSBILAN','Test flow_scheme bilan',NULL);",
+    )
+    .expect("seed natures de test");
+    // Sous B1, les colonnes dimensionnelles de `fact_entry` sont des ids INTEGER.
+    // Cette vue rétablit les **codes** pour les assertions des tests (`ssum`/
+    // `scount` la ciblent) : les dims à master data sont jointes sur l'id et
+    // projetées en code ; `level`/`amount`/`analysis*` restent tels quels.
+    con.execute_batch(
+        "CREATE VIEW vfe AS
+         SELECT f.consolidation_id, f.level, f.amount, f.analysis, f.analysis2,
+                de.code  AS entity,
+                da.code  AS account,
+                dfl.code AS flow,
+                dn.code  AS nature,
+                dpa.code AS partner,
+                dsh.code AS share,
+                dc.code_iso AS currency,
+                dph.code AS phase,
+                dep.code AS entry_period,
+                dpe.code AS period
+         FROM fact_entry f
+         LEFT JOIN dim_entity            de  ON de.id  = f.entity
+         LEFT JOIN dim_account           da  ON da.id  = f.account
+         LEFT JOIN dim_flow              dfl ON dfl.id = f.flow
+         LEFT JOIN dim_nature            dn  ON dn.id  = f.nature
+         LEFT JOIN dim_entity            dpa ON dpa.id = f.partner
+         LEFT JOIN dim_entity            dsh ON dsh.id = f.share
+         LEFT JOIN dim_currency          dc  ON dc.id  = f.currency
+         LEFT JOIN dim_scenario_category dph ON dph.id = f.phase
+         LEFT JOIN dim_period            dep ON dep.id = f.entry_period
+         LEFT JOIN dim_period            dpe ON dpe.id = f.period;",
+    )
+    .expect("create view vfe");
     con
 }
 
 /// Résout l'id d'une consolidation par (phase, exercice).
 fn cid(con: &Connection, phase: &str, exercice: &str) -> i64 {
     con.query_row(
-        "SELECT id FROM dim_consolidation WHERE phase = ? AND exercice = ?",
+        "SELECT id FROM dim_consolidation \
+         WHERE phase = (SELECT id FROM dim_scenario_category WHERE code = ?) \
+         AND exercice = (SELECT id FROM dim_period WHERE code = ?)",
         [phase, exercice],
         |r| r.get(0),
     )
@@ -66,8 +112,19 @@ fn put(
         "INSERT INTO fact_entry \
             (consolidation_id, phase, entity, entry_period, period, account, flow, currency, \
              nature, partner, share, analysis, analysis2, level, amount) \
-         SELECT (SELECT id FROM dim_consolidation WHERE phase='REEL' AND exercice='2024'), \
-                'REEL', ?, '2024', '2024', ?, ?, 'EUR', ?, ?, NULL, NULL, NULL, ?, ?",
+         SELECT (SELECT id FROM dim_consolidation \
+                 WHERE phase = (SELECT id FROM dim_scenario_category WHERE code='REEL') \
+                   AND exercice = (SELECT id FROM dim_period WHERE code='2024')), \
+                (SELECT id FROM dim_scenario_category WHERE code='REEL'), \
+                (SELECT id FROM dim_entity WHERE code=?), \
+                (SELECT id FROM dim_period WHERE code='2024'), \
+                (SELECT id FROM dim_period WHERE code='2024'), \
+                (SELECT id FROM dim_account WHERE code=?), \
+                (SELECT id FROM dim_flow WHERE code=?), \
+                (SELECT id FROM dim_currency WHERE code_iso='EUR'), \
+                (SELECT id FROM dim_nature WHERE code=?), \
+                (SELECT id FROM dim_entity WHERE code=?), \
+                NULL, NULL, NULL, ?, ?",
         duckdb::params![entity, account, flow, nature, partner, level, amount],
     )
     .unwrap_or_else(|e| panic!("put({entity},{account},{flow}): {e}"));
@@ -90,7 +147,8 @@ fn run_one(con: &Connection, rule_code: &str) -> usize {
     )
     .expect("create ruleset");
     con.execute(
-        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES ('RS', 1, ?)",
+        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) \
+         VALUES ((SELECT id FROM dim_ruleset WHERE code = 'RS'), 1, ?)",
         duckdb::params![rule_code],
     )
     .expect("create ruleset item");
@@ -99,14 +157,16 @@ fn run_one(con: &Connection, rule_code: &str) -> usize {
 
 /// SUM(amount) sur `fact_entry` filtré par une clause SQL libre.
 fn ssum(con: &Connection, filter: &str) -> f64 {
-    let sql = format!("SELECT COALESCE(SUM(amount), 0) FROM fact_entry WHERE {filter}");
+    // `vfe` = vue code-aware sur `fact_entry` (cf. `engine`) : les filtres des
+    // tests citent les codes des dimensions, pas les ids de stockage.
+    let sql = format!("SELECT COALESCE(SUM(amount), 0) FROM vfe WHERE {filter}");
     con.query_row(&sql, [], |r| r.get::<_, f64>(0))
         .unwrap_or_else(|e| panic!("ssum({filter}): {e}"))
 }
 
-/// COUNT(*) sur `fact_entry` filtré.
+/// COUNT(*) sur `fact_entry` (via la vue `vfe`) filtré.
 fn scount(con: &Connection, filter: &str) -> i64 {
-    let sql = format!("SELECT COUNT(*) FROM fact_entry WHERE {filter}");
+    let sql = format!("SELECT COUNT(*) FROM vfe WHERE {filter}");
     con.query_row(&sql, [], |r| r.get::<_, i64>(0))
         .unwrap_or_else(|e| panic!("scount({filter}): {e}"))
 }
@@ -298,7 +358,7 @@ fn coefficient_constant_et_multiplicateur() {
 fn coefficient_pct_integration_lit_le_perimetre() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND perimeter_set = 'PERIM_REEL'",
+        "UPDATE sat_perimeter SET pct_integration = 0.5 WHERE entity = 'B' AND perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL')",
         [],
     )
     .expect("set pct_integration B");
@@ -404,7 +464,8 @@ fn selection_in_et_is_not_null() {
 fn scope_filtre_sur_methode_entite() {
     let con = engine();
     con.execute(
-        "UPDATE sat_perimeter SET methode = 'proportionnelle' WHERE entity = 'B' AND perimeter_set = 'PERIM_REEL'",
+        "UPDATE sat_perimeter SET methode = (SELECT id FROM dim_method WHERE code = 'proportionnelle') \
+         WHERE entity = 'B' AND perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL')",
         [],
     )
     .expect("set methode B");
@@ -459,9 +520,16 @@ fn destination_map_traverse_caracteristique() {
     .unwrap();
 
     // Valeur + affectation en SQL direct (le CRUD est testé côté `characteristics`).
+    // Après B1 étape 9, les colonnes physiques sont c{attr_id}, pas les noms d'attributs.
+    let char_id = conso_engine::characteristics::id_of(&con, "comportement").unwrap();
+    let car_table = conso_engine::characteristics::value_table(char_id);
+    let col_cd = conso_engine::characteristics::attr_col_for(&con, "comportement", "compte_destination").unwrap();
+    let col_nat = conso_engine::characteristics::attr_col_for(&con, "comportement", "nat").unwrap();
     con.execute(
-        "INSERT INTO car_comportement (code, libelle, compte_destination, nat) \
-         VALUES ('VENTES_IC', 'Ventes interco', '471L', '1AJUST')",
+        &format!(
+            "INSERT INTO {car_table} (code, libelle, \"{col_cd}\", \"{col_nat}\") \
+             VALUES ('VENTES_IC', 'Ventes interco', '471L', '1AJUST')"
+        ),
         [],
     )
     .unwrap();
@@ -560,9 +628,13 @@ fn selection_via_n1_filtre_par_valeur_de_caracteristique() {
 
     // N1 « regroupement » sur les comptes. Valeurs : PROD (ventes), CHGES (achats).
     create_characteristic(&con, "regroupement", "Regroupement", "account").unwrap();
+    let reg_id = conso_engine::characteristics::id_of(&con, "regroupement").unwrap();
+    let reg_table = conso_engine::characteristics::value_table(reg_id);
     con.execute(
-        "INSERT INTO car_regroupement (code, libelle) VALUES \
-         ('PROD', 'Produits'), ('CHGES', 'Charges')",
+        &format!(
+            "INSERT INTO {reg_table} (code, libelle) VALUES \
+             ('PROD', 'Produits'), ('CHGES', 'Charges')"
+        ),
         [],
     )
     .unwrap();
@@ -647,6 +719,59 @@ fn selection_via_ref_filtre_par_reference_directe() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  13b. Sélection par FK native ri() (id-aware) : `sous_classe` est stockée en
+//      id (B1). La sélection `ref: sous_classe` doit joindre la cible sur l'id
+//      et filtrer sur le code utilisateur — 1er cas id-aware post-flip.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn selection_via_sous_classe_id_aware() {
+    let con = engine();
+
+    // 200 = actif, 100 = passif (cf. seed ACCOUNTS).
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // actif → match
+    put(&con, "M", "100", "F20", None, "0LIASS", 100.0, "converted"); // passif → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","ref":"sous_classe","op":"=","val":"actif"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"SCACTIF"}}}]}"#,
+    );
+
+    assert_eq!(run_one(&con, "R"), 1, "un seul compte est de sous_classe actif");
+    assert_eq!(scount(&con, "nature='SCACTIF' AND account='200'"), 1);
+    assert_eq!(scount(&con, "nature='SCACTIF' AND account='100'"), 0, "passif exclu");
+}
+
+#[test]
+fn selection_via_flow_scheme_id_aware() {
+    let con = engine();
+
+    // Seed : les comptes bilan portent flow_scheme=BILAN, les comptes resultat
+    // flow_scheme=RESULTAT. 200 = bilan → match ; 600 = charges (resultat) → exclu.
+    put(&con, "M", "200", "F20", None, "0LIASS", 100.0, "converted"); // bilan → match
+    put(&con, "M", "600", "F20", None, "0LIASS", 100.0, "converted"); // resultat → exclu
+
+    create_rule(
+        &con,
+        "R",
+        r#"{"scope":[],"operations":[
+            {"seq":1,"level":"converted",
+             "selection":[{"dim":"account","ref":"flow_scheme","op":"=","val":"BILAN"}],
+             "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+             "destination":{"nature":{"mode":"override","value":"FSBILAN"}}}]}"#,
+    );
+
+    assert_eq!(run_one(&con, "R"), 1, "un seul compte est de flow_scheme BILAN");
+    assert_eq!(scount(&con, "nature='FSBILAN' AND account='200'"), 1);
+    assert_eq!(scount(&con, "nature='FSBILAN' AND account='600'"), 0, "resultat exclu");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Coefficients d'élimination IC corporate (N / N-1 / Var).
 //
 //  Vérifie la mécanique : facteur = Min(1, INTEG_PA / INTEG_EN), taux N-1 lu via
@@ -661,7 +786,7 @@ fn selection_via_ref_filtre_par_reference_directe() {
 fn set_pct_n(con: &Connection, entity: &str, pct: f64) {
     con.execute(
         "UPDATE sat_perimeter SET pct_integration = ?, pct_interet = ? \
-         WHERE perimeter_set = 'PERIM_REEL' AND entity = ? AND period = '2024'",
+         WHERE perimeter_set = (SELECT id FROM dim_perimeter_set WHERE code = 'PERIM_REEL') AND entity = ? AND period = '2024'",
         duckdb::params![pct, pct, entity],
     )
     .unwrap_or_else(|e| panic!("set_pct_n({entity}): {e}"));
@@ -676,11 +801,24 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
     )
     .expect("perimeter_set N-1");
     con.execute(
+        "INSERT INTO dim_period (code, libelle) VALUES ('2023', 'Exercice 2023') ON CONFLICT DO NOTHING",
+        [],
+    )
+    .expect("période 2023");
+    con.execute(
         "INSERT INTO dim_consolidation \
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency, \
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut) \
-         VALUES (nextval('seq_consolidation'), 'Réel 2023', 'REEL', '2023', 'PSET_N1', 'BASE', 'EUR', \
-                 '2023', 'RATES', '2023', NULL, NULL, 'verrouillé')",
+         VALUES (nextval('seq_consolidation'), 'Réel 2023', \
+                 (SELECT id FROM dim_scenario_category WHERE code = 'REEL'),
+                 (SELECT id FROM dim_period WHERE code = '2023'),
+                 (SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), \
+                 (SELECT id FROM dim_variant WHERE code = 'BASE'),
+                 (SELECT id FROM dim_currency WHERE code_iso = 'EUR'),
+                 (SELECT id FROM dim_period WHERE code = '2023'),
+                 (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
+                 (SELECT id FROM dim_period WHERE code = '2023'),
+                 NULL, NULL, 'verrouillé')",
         [],
     )
     .expect("consolidation à-nouveau");
@@ -697,7 +835,8 @@ fn setup_a_nouveau_perimeter(con: &Connection, pct_b_n1: f64) {
         con.execute(
             "INSERT INTO sat_perimeter \
                 (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-             VALUES ('PSET_N1', ?, '2023', 'globale', ?, ?, false, false)",
+             VALUES ((SELECT id FROM dim_perimeter_set WHERE code = 'PSET_N1'), ?, '2023', \
+                     (SELECT id FROM dim_method WHERE code = 'globale'), ?, ?, false, false)",
             duckdb::params![entity, pct, pct],
         )
         .expect("sat_perimeter N-1");
@@ -777,4 +916,122 @@ fn coefficient_elim_ic_corp_sans_a_nouveau_n1_nul() {
         (ssum(&con, "analysis='VAR'") - 500.0).abs() < TOL,
         "Var = N − 0 = 500"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  6b. Règle stockée avec `via` en id entier (post-migration JSON étape 6b) :
+//      le chemin d'exécution doit dénormaliser avant parsing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn via_id_selection_fonctionne_apres_normalisation() {
+    use conso_engine::characteristics::create_characteristic;
+    use conso_engine::json_migration::{denormalize_rule_definition, normalize_rule_definition};
+
+    let con = engine();
+
+    create_characteristic(&con, "regroupement", "R", "account").unwrap();
+    let reg_id = conso_engine::characteristics::id_of(&con, "regroupement").unwrap();
+    let reg_table = conso_engine::characteristics::value_table(reg_id);
+    con.execute(
+        &format!("INSERT INTO {reg_table} (code, libelle) VALUES ('PROD', 'Produits')"),
+        [],
+    )
+    .unwrap();
+    con.execute(
+        "UPDATE dim_account SET regroupement = 'PROD' WHERE code IN ('700','705')",
+        [],
+    )
+    .unwrap();
+    put(&con, "M", "700", "F20", None, "0LIASS", 100.0, "converted"); // classé PROD → match
+    put(&con, "M", "600", "F20", None, "0LIASS", 100.0, "converted"); // non classé → exclu
+
+    // Normaliser la définition avant stockage (simule ce que fait le serveur).
+    let def_code = r#"{"scope":[],"operations":[
+        {"seq":1,"level":"converted",
+         "selection":[{"dim":"account","via":"regroupement","op":"=","val":"PROD"}],
+         "coefficient":{"type":"constant","value":1},"multiplicateur":1,
+         "destination":{"nature":{"mode":"override","value":"SELN1"}}}]}"#;
+    let def_id = normalize_rule_definition(&con, def_code).unwrap();
+
+    // Vérifier que `via` est devenu un entier après normalisation.
+    let v: serde_json::Value = serde_json::from_str(&def_id).unwrap();
+    assert_eq!(
+        v["operations"][0]["selection"][0]["via"].as_i64(),
+        Some(reg_id),
+        "via doit être l'id après normalisation"
+    );
+
+    // Vérifier que la dénormalisation redonne le code.
+    let def_back = denormalize_rule_definition(&con, &def_id).unwrap();
+    assert!(
+        def_back.contains("\"via\":\"regroupement\""),
+        "via doit être le code après dénormalisation : {def_back}"
+    );
+
+    // Stocker la règle sous forme normalisée (ids) et exécuter.
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES ('RVIA', 'test_via', ?)",
+        duckdb::params![def_id],
+    )
+    .unwrap();
+    let n = run_one(&con, "RVIA");
+    assert_eq!(n, 1, "règle avec via=id doit exécuter (seul le compte classé PROD)");
+    assert_eq!(scount(&con, "nature='SELN1' AND account='700'"), 1, "700 sélectionné");
+    assert_eq!(scount(&con, "nature='SELN1' AND account='600'"), 0, "600 exclu");
+}
+
+#[test]
+fn via_id_destination_map_fonctionne_apres_normalisation() {
+    use conso_engine::characteristics::{add_attribute, create_characteristic};
+    use conso_engine::json_migration::normalize_rule_definition;
+
+    let con = engine();
+
+    create_characteristic(&con, "comportement", "C", "account").unwrap();
+    add_attribute(&con, "comportement", "compte_destination", "Cpt dest", "account").unwrap();
+    add_attribute(&con, "comportement", "nat", "Nature", "nature").unwrap();
+    let char_id = conso_engine::characteristics::id_of(&con, "comportement").unwrap();
+    let car_table = conso_engine::characteristics::value_table(char_id);
+    let col_cd = conso_engine::characteristics::attr_col_for(&con, "comportement", "compte_destination").unwrap();
+    let col_nat = conso_engine::characteristics::attr_col_for(&con, "comportement", "nat").unwrap();
+    con.execute(
+        &format!(
+            "INSERT INTO {car_table} (code, libelle, \"{col_cd}\", \"{col_nat}\") \
+             VALUES ('VENTES_IC', 'V', '471L', '1AJUST')"
+        ),
+        [],
+    )
+    .unwrap();
+    con.execute(
+        "UPDATE dim_account SET comportement = 'VENTES_IC' WHERE code = '468'",
+        [],
+    )
+    .unwrap();
+    put(&con, "M", "468", "F20", None, "0LIASS", 100.0, "converted");
+
+    // Normaliser la définition (via code → id dans destination.map).
+    let def_code = r#"{"scope":[],"operations":[
+        {"seq":1,"level":"converted",
+         "selection":[{"dim":"flow","op":"=","val":"F20"}],
+         "coefficient":{"type":"constant","value":1},"multiplicateur":-1,
+         "destination":{
+            "account":{"mode":"map","via":"comportement","attr":"compte_destination"},
+            "nature":{"mode":"map","via":"comportement","attr":"nat"}}}]}"#;
+    let def_id = normalize_rule_definition(&con, def_code).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&def_id).unwrap();
+    assert_eq!(
+        v["operations"][0]["destination"]["account"]["via"].as_i64(),
+        Some(char_id),
+        "via dans destination.map doit être l'id"
+    );
+
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES ('RMAP', 'test_map', ?)",
+        duckdb::params![def_id],
+    )
+    .unwrap();
+    let n = run_one(&con, "RMAP");
+    assert_eq!(n, 1, "destination map avec via=id doit exécuter");
+    assert_eq!(scount(&con, "account='471L' AND nature='1AJUST'"), 1, "compte + nature mappés");
 }

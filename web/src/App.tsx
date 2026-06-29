@@ -1,20 +1,29 @@
-// Racine de l'application : gère l'onglet actif et expose le statut API
+// Racine de l'application : gère la page active et expose le statut API
 // via un hook de polling.
 
 import { useState } from 'react';
 import { Layout, type PageId } from './components/Layout';
 import { useHealth } from './hooks/useHealth';
+import {
+  PERIMETER_CONFIG,
+  RATES_CONFIG,
+  SCHEMES_CONFIG,
+} from './config/masterDetailConfigs';
 import { CaracteristiquesPage } from './pages/CaracteristiquesPage';
 import { CoefficientsPage } from './pages/CoefficientsPage';
+import { DimensionsPage } from './pages/DimensionsPage';
 import { EcrituresPage } from './pages/EcrituresPage';
-import { IndicatorsPage } from './pages/IndicatorsPage';
+import { ExecutionPage } from './pages/ExecutionPage';
+import { HelpPage } from './pages/HelpPage';
+import { IndicateursPage, PostesPage } from './pages/IndicatorsPage';
 import { ImportPage } from './pages/ImportPage';
+import { MaintenancePage } from './pages/MaintenancePage';
 import { MasterDataPage } from './pages/MasterDataPage';
-import { PipelinePage } from './pages/PipelinePage';
+import { MasterDetailPage } from './pages/MasterDetailPage';
 import { RapportsPage } from './pages/RapportsPage';
-import { RulesPage } from './pages/RulesPage';
+import { JeuxReglesPage, RulesPage } from './pages/RulesPage';
+import { ControlsPage } from './pages/ControlsPage';
 import { SaisiePage } from './pages/SaisiePage';
-import { SchemasJeuxPage } from './pages/SchemasJeuxPage';
 import './App.css';
 
 export default function App() {
@@ -23,17 +32,52 @@ export default function App() {
 
   return (
     <Layout active={page} onNavigate={setPage} health={health}>
+      {/* Restitution */}
       {page === 'rapports' && <RapportsPage />}
       {page === 'ecritures' && <EcrituresPage />}
-      {page === 'saisie' && <SaisiePage />}
-      {page === 'pipeline' && <PipelinePage />}
-      {page === 'masterdata' && <MasterDataPage />}
-      {page === 'schemas' && <SchemasJeuxPage />}
-      {page === 'caracteristiques' && <CaracteristiquesPage />}
-      {page === 'coefficients' && <CoefficientsPage />}
-      {page === 'indicateurs' && <IndicatorsPage />}
-      {page === 'regles' && <RulesPage />}
+      {/* Alimentation */}
       {page === 'import' && <ImportPage />}
+      {page === 'saisie' && <SaisiePage />}
+      {/* Consolidation */}
+      {page === 'definitions' && (
+        <MasterDataPage fixedTable="consolidations" title="Définitions de consolidation" />
+      )}
+      {page === 'perimetres' && (
+        <MasterDetailPage title="Jeux de périmètre" config={PERIMETER_CONFIG} />
+      )}
+      {page === 'taux' && <MasterDetailPage title="Jeux de taux" config={RATES_CONFIG} />}
+      {page === 'execution' && <ExecutionPage />}
+      {/* Calculs */}
+      {page === 'schemas' && (
+        <MasterDetailPage title="Schémas de flux" config={SCHEMES_CONFIG} />
+      )}
+      {page === 'regles' && <RulesPage />}
+      {page === 'jeux-regles' && <JeuxReglesPage />}
+      {page === 'controles' && <ControlsPage />}
+      {page === 'coefficients' && <CoefficientsPage />}
+      {page === 'postes' && <PostesPage />}
+      {page === 'indicateurs' && <IndicateursPage />}
+      {/* Référentiel */}
+      {page === 'dimensions' && <DimensionsPage />}
+      {page === 'masterdata' && (
+        <MasterDataPage
+          // Tables à foyer dédié ailleurs (principe « une table = un seul foyer ») :
+          // consolidations → Définitions ; perimeter/rates → Jeux de périmètre/taux ;
+          // flow_schemes(+items) → Schémas de flux. Les car_*/lst_* sont écartés en
+          // amont (groupedTables ne garde que les natives — foyer = Attributs de dimension).
+          hideTables={[
+            'consolidations',
+            'perimeter',
+            'rates',
+            'flow_schemes',
+            'flow_scheme_items',
+          ]}
+        />
+      )}
+      {page === 'caracteristiques' && <CaracteristiquesPage />}
+      {page === 'maintenance' && <MaintenancePage />}
+      {/* Aide */}
+      {page === 'help' && <HelpPage />}
     </Layout>
   );
 }

@@ -15,7 +15,7 @@
 //! qu'elles sautent. L'agrégation se fait par le grain standard.
 
 use super::ConvertParams;
-use crate::dimensions;
+use crate::{dimensions, references};
 use duckdb::{params, Connection};
 
 /// Insère dans `fact_entry` au niveau `level` les écritures de `stg_entry`
@@ -26,7 +26,9 @@ use duckdb::{params, Connection};
 /// `p.consolidation_id` (isolation du run dans `fact_entry`).
 ///
 /// L'agrégation se fait par le grain complet des dimensions propagées
-/// (built-in + customs), généré dynamiquement depuis le registre.
+/// (built-in + customs), généré dynamiquement depuis le registre. Les codes
+/// TEXT de `stg_entry` sont résolus en INTEGER ids pour les 10 colonnes
+/// id-typées de `fact_entry` via JOIN sur la master data.
 ///
 /// Renvoie le nombre de lignes produites à ce niveau pour ce préfixe.
 pub fn inject_by_prefix(
@@ -39,22 +41,55 @@ pub fn inject_by_prefix(
     let cols = dimensions::propagated_cols(&dims);
     let col_list = cols.join(", ");
 
+    // Résolution code→id pour les dims id-typées (stg_entry TEXT → fact_entry INTEGER).
+    // La résolution est isolée dans une sous-requête : l'agrégation (GROUP BY +
+    // SUM) opère ensuite sur des noms de colonnes propres, sans collision entre
+    // la colonne brute `stg_entry.phase` (code) et l'alias `_dphase.id AS phase`
+    // — collision qui, sur un GROUP BY par alias, laisse l'`id` ni groupé ni
+    // agrégé (cf. même schéma que `aggregate.rs`).
+    let mut id_joins = String::new();
+    let mut inner_exprs: Vec<String> = Vec::new();
+    for dim in &dims {
+        let name = &dim.name;
+        if let Some((table, code_col)) = references::dimension_master(name) {
+            let alias = format!("_d{name}");
+            let join_type = if dim.nullable() { "LEFT JOIN" } else { "JOIN" };
+            id_joins.push_str(&format!(
+                "\n{join_type} {table} {alias} ON {alias}.{code_col} = s.{name}"
+            ));
+            inner_exprs.push(format!("{alias}.id AS {name}"));
+        } else {
+            inner_exprs.push(format!("s.{name}"));
+        }
+    }
+    let inner_list = inner_exprs.join(",\n        ");
+
     let sql = format!(
         "INSERT INTO fact_entry\n\
          ({col_list}, consolidation_id, level, amount)\n\
-         SELECT {col_list},\n\
-                ? AS consolidation_id,\n\
-                '{level}' AS level,\n\
-                SUM(amount) AS amount\n\
-         FROM stg_entry\n\
-         WHERE substr(nature, 1, 1) = '{prefix}'\n\
-           AND phase = ?\n\
-           AND entry_period = ?\n\
+         SELECT\n\
+             {col_list},\n\
+             ? AS consolidation_id,\n\
+             '{level}' AS level,\n\
+             SUM(amount) AS amount\n\
+         FROM (\n\
+           SELECT\n\
+             {inner_list},\n\
+             s.amount AS amount\n\
+           FROM stg_entry s\n\
+           {id_joins}\n\
+           WHERE substr(s.nature, 1, 1) = '{prefix}'\n\
+             AND s.phase = ?\n\
+             AND s.entry_period = ?\n\
+         ) t\n\
          GROUP BY {col_list}"
     );
     con.execute(&sql, params![p.consolidation_id, p.phase, p.exercice])?;
+    // Compte par JOIN sur dim_nature (nature est INTEGER dans fact_entry).
     let n: i64 = con.query_row(
-        "SELECT COUNT(*) FROM fact_entry WHERE level = ? AND substr(nature, 1, 1) = ?",
+        "SELECT COUNT(*) FROM fact_entry f \
+         JOIN dim_nature n ON n.id = f.nature \
+         WHERE f.level = ? AND substr(n.code, 1, 1) = ?",
         [level, prefix],
         |row| row.get(0),
     )?;

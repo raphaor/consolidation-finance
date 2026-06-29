@@ -25,7 +25,16 @@ pub struct Reference {
     pub table: &'static str,
     pub column: &'static str,
     pub target_table: &'static str,
+    /// Colonne **de stockage** de la cible (clé physique). `"code"`/`"code_iso"`
+    /// pour les FK historiques ; `"id"` pour les FK migrées en clé technique
+    /// (chantier B1).
     pub target_column: &'static str,
+    /// Colonne **de contrat** de la cible (ce que l'UI/CSV/API échangent). `None`
+    /// = identique à `target_column` (FK code classique, ou FK id en contrat
+    /// int de bout en bout comme `a_nouveau_consolidation_id`). `Some("code")` =
+    /// FK migrée en `id` mais dont le contrat externe reste le **code** (option A,
+    /// cf. `docs/PLAN_RENOMMAGE_CODES.md`) : on traduit code↔id aux frontières.
+    pub target_display_column: Option<&'static str>,
     pub required: bool,
 }
 
@@ -41,6 +50,7 @@ const fn r(
         column,
         target_table,
         target_column,
+        target_display_column: None,
         required: false,
     }
 }
@@ -57,34 +67,52 @@ const fn rq(
         column,
         target_table,
         target_column,
+        target_display_column: None,
         required: true,
+    }
+}
+
+/// Référence **migrée en clé technique** (option A) : stockée en `id`, mais le
+/// contrat externe reste le **code** `display`. Traduite code↔id aux frontières
+/// (CRUD, loader, validation, dropdowns). `required` = colonne non-nullable.
+const fn ri(
+    table: &'static str,
+    column: &'static str,
+    target_table: &'static str,
+    display: &'static str,
+    required: bool,
+) -> Reference {
+    Reference {
+        table,
+        column,
+        target_table,
+        target_column: "id",
+        target_display_column: Some(display),
+        required,
     }
 }
 
 /// Le graphe complet des références du modèle.
 ///
 /// Les auto-références statiques (`dim_flow.flux_de_report → dim_flow.code`,
-/// `dim_entity.entite_parent → dim_entity.code`) sont incluses : la validation à
+/// `dim_entity.entite_parent → dim_entity.id` [contrat code]) sont incluses : la validation à
 /// l'écriture tolère la valeur égale à la PK de la ligne elle-même (cf.
 /// `masterdata::validate_references`). L'ancienne `dim_account.compte_parent` est
 /// désormais une **référence directe** dynamique (cf. [`dynamic_references`] et
 /// `crate::custom_references`), donc absente de cette liste statique.
 pub const REFERENCES: &[Reference] = &[
     // dim_consolidation (ex dim_scenario) — objet composite (PK technique `id`).
-    r("dim_consolidation", "phase", "dim_scenario_category", "code"),
-    r("dim_consolidation", "exercice", "dim_period", "code"),
-    r("dim_consolidation", "perimeter_period", "dim_period", "code"),
-    r("dim_consolidation", "rate_period", "dim_period", "code"),
-    r(
-        "dim_consolidation",
-        "presentation_currency",
-        "dim_currency",
-        "code_iso",
-    ),
-    r("dim_consolidation", "variant", "dim_variant", "code"),
-    r("dim_consolidation", "ruleset_code", "dim_ruleset", "code"),
-    r("dim_consolidation", "rate_set", "dim_rate_set", "code"),
-    r("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code"),
+    ri("dim_consolidation", "phase", "dim_scenario_category", "code", false),
+    ri("dim_consolidation", "exercice", "dim_period", "code", false),
+    ri("dim_consolidation", "perimeter_period", "dim_period", "code", false),
+    ri("dim_consolidation", "rate_period", "dim_period", "code", false),
+    ri("dim_consolidation", "presentation_currency", "dim_currency", "code_iso", false),
+    // FK migrées en clé technique (chantier B1, étape 3) : stockées en id, contrat
+    // externe = code. Première FK dim→dim flippée (pilote du mécanisme générique).
+    ri("dim_consolidation", "variant", "dim_variant", "code", false),
+    ri("dim_consolidation", "ruleset_code", "dim_ruleset", "code", false),
+    ri("dim_consolidation", "rate_set", "dim_rate_set", "code", false),
+    ri("dim_consolidation", "perimeter_set", "dim_perimeter_set", "code", false),
     // Conso d'à-nouveau : auto-référence vers une autre consolidation (N-1 figé).
     r(
         "dim_consolidation",
@@ -92,32 +120,33 @@ pub const REFERENCES: &[Reference] = &[
         "dim_consolidation",
         "id",
     ),
-    // dim_entity
-    rq(
-        "dim_entity",
-        "devise_fonctionnelle",
-        "dim_currency",
-        "code_iso",
-    ),
-    r("dim_entity", "entite_parent", "dim_entity", "code"),
+    // dim_entity — B1 : devise_fonctionnelle et entite_parent stockés en id.
+    ri("dim_entity", "devise_fonctionnelle", "dim_currency", "code_iso", false),
+    ri("dim_entity", "entite_parent", "dim_entity", "code", false),
     // dim_account (compte_parent est désormais une référence directe dynamique)
-    r("dim_account", "sous_classe", "dim_sous_classe", "code"),
-    // Schéma de flux du compte (nullable : NULL = défaut dérivé de la classe).
-    r("dim_account", "flow_scheme", "dim_flow_scheme", "code"),
+    ri("dim_account", "sous_classe", "dim_sous_classe", "code", false),
+    // Schéma de flux du compte — migré en clé technique (chantier B1) : stocké en
+    // id, contrat code. Q45 : 100 % user-driven (plus de défaut dérivé de la
+    // classe) ; NULL = toléré mais exclu (option b). Rend `flow_scheme`
+    // entièrement flippée (renommable), avec ses deux références (cf. sat ci-dessous).
+    ri("dim_account", "flow_scheme", "dim_flow_scheme", "code", false),
     // dim_flow est désormais une dimension nue (code, libelle) : tout le
     // comportement (taux, écart, report, à-nouveau) vit dans sat_flow_scheme_item.
     // sat_perimeter (perimeter_set/entity/period = PK ; methode obligatoire)
-    rq(
-        "sat_perimeter",
-        "perimeter_set",
-        "dim_perimeter_set",
-        "code",
-    ),
+    // `perimeter_set` migrée en clé technique (chantier B1) : stockée en id,
+    // contrat externe = code. Rend la dimension `perimeter_set` entièrement
+    // flippée (renommable).
+    ri("sat_perimeter", "perimeter_set", "dim_perimeter_set", "code", true),
     rq("sat_perimeter", "entity", "dim_entity", "code"),
     rq("sat_perimeter", "period", "dim_period", "code"),
-    rq("sat_perimeter", "methode", "dim_method", "code"),
+    // `methode` migrée en clé technique (B1) : stockée en id, contrat externe = code.
+    // Rend la dimension `dim_method` entièrement flippée (renommable).
+    ri("sat_perimeter", "methode", "dim_method", "code", true),
     // sat_exchange_rate (rate_set/currency_source/period = PK)
-    rq("sat_exchange_rate", "rate_set", "dim_rate_set", "code"),
+    // `rate_set` migrée en clé technique (chantier B1) : stockée en id, contrat
+    // externe = code. Rend la dimension `rate_set` entièrement flippée (plus
+    // aucune référence code-based → renommable).
+    ri("sat_exchange_rate", "rate_set", "dim_rate_set", "code", true),
     rq(
         "sat_exchange_rate",
         "currency_source",
@@ -126,7 +155,10 @@ pub const REFERENCES: &[Reference] = &[
     ),
     rq("sat_exchange_rate", "period", "dim_period", "code"),
     // sat_flow_scheme_item (scheme/flow = PK ; flux_* nullables vers dim_flow)
-    rq("sat_flow_scheme_item", "scheme", "dim_flow_scheme", "code"),
+    // `scheme` migrée en clé technique (chantier B1) : stockée en id, contrat
+    // code. Seconde réf. vers dim_flow_scheme → la dimension est entièrement
+    // flippée (plus aucune référence code-based → renommable).
+    ri("sat_flow_scheme_item", "scheme", "dim_flow_scheme", "code", true),
     rq("sat_flow_scheme_item", "flow", "dim_flow", "code"),
     r("sat_flow_scheme_item", "flux_ecart", "dim_flow", "code"),
     r("sat_flow_scheme_item", "flux_de_report", "dim_flow", "code"),
@@ -144,22 +176,25 @@ pub const REFERENCES: &[Reference] = &[
     rq("stg_entry", "nature", "dim_nature", "code"),
     r("stg_entry", "partner", "dim_entity", "code"),
     r("stg_entry", "share", "dim_entity", "code"),
-    // Écritures — fact_entry (mêmes dimensions propagées que stg_entry, plus la
-    // colonne technique `consolidation_id` qui isole chaque run). `phase` y est
-    // propagée depuis la remontée ; `consolidation_id` référence la conso du run.
-    rq("fact_entry", "phase", "dim_scenario_category", "code"),
-    rq("fact_entry", "entity", "dim_entity", "code"),
-    rq("fact_entry", "entry_period", "dim_period", "code"),
-    rq("fact_entry", "period", "dim_period", "code"),
-    rq("fact_entry", "account", "dim_account", "code"),
-    rq("fact_entry", "flow", "dim_flow", "code"),
-    rq("fact_entry", "currency", "dim_currency", "code_iso"),
-    rq("fact_entry", "nature", "dim_nature", "code"),
-    r("fact_entry", "partner", "dim_entity", "code"),
-    r("fact_entry", "share", "dim_entity", "code"),
+    // Écritures — fact_entry : après étape 4 B1, toutes les dims sont stockées
+    // en id (INTEGER). ri() → target_column = "id" → invisibles à la garde de
+    // renommage (qui filtre target_column == code_col). La résolution code↔id
+    // se fait côté pipeline (aggregate.rs à l'entrée, jointures à la lecture).
+    ri("fact_entry", "phase", "dim_scenario_category", "code", true),
+    ri("fact_entry", "entity", "dim_entity", "code", true),
+    ri("fact_entry", "entry_period", "dim_period", "code", true),
+    ri("fact_entry", "period", "dim_period", "code", true),
+    ri("fact_entry", "account", "dim_account", "code", true),
+    ri("fact_entry", "flow", "dim_flow", "code", true),
+    ri("fact_entry", "currency", "dim_currency", "code_iso", true),
+    ri("fact_entry", "nature", "dim_nature", "code", true),
+    ri("fact_entry", "partner", "dim_entity", "code", false),
+    ri("fact_entry", "share", "dim_entity", "code", false),
     rq("fact_entry", "consolidation_id", "dim_consolidation", "id"),
     // Jeux de règles
-    rq("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code"),
+    // `ruleset_code` migré en clé technique (chantier B1) : stocké en id, contrat
+    // externe = code. Rend la dimension `dim_ruleset` entièrement flippée (renommable).
+    ri("dim_ruleset_item", "ruleset_code", "dim_ruleset", "code", true),
     rq("dim_ruleset_item", "rule_code", "dim_rule", "code"),
 ];
 
@@ -172,6 +207,10 @@ pub struct OwnedReference {
     pub column: String,
     pub target_table: String,
     pub target_column: String,
+    /// Cf. [`Reference::target_display_column`]. `None` pour toutes les
+    /// références dynamiques (caractéristiques N1/N2, patron B) qui restent
+    /// code-keyed.
+    pub target_display_column: Option<String>,
     pub required: bool,
 }
 
@@ -182,8 +221,16 @@ impl OwnedReference {
             column: r.column.to_string(),
             target_table: r.target_table.to_string(),
             target_column: r.target_column.to_string(),
+            target_display_column: r.target_display_column.map(|s| s.to_string()),
             required: r.required,
         }
+    }
+
+    /// `Some(colonne_code)` si cette référence est une FK migrée en `id` dont le
+    /// contrat externe reste le code (option A) — déclenche la traduction code↔id
+    /// aux frontières (CRUD, loader, validation, dropdowns). `None` sinon.
+    pub fn code_contract(&self) -> Option<&str> {
+        self.target_display_column.as_deref()
     }
 }
 
@@ -193,6 +240,14 @@ impl OwnedReference {
 /// `None` pour les dimensions sans master data (analysis, analysis2, custom).
 pub fn dimension_master(dim: &str) -> Option<(&'static str, &'static str)> {
     entry_dimension_target(dim).map(|r| (r.target_table, r.target_column))
+}
+
+/// Variante **id-aware** de [`dimension_master`] : retourne `(table, "id")` au
+/// lieu de `(table, code_col)`. À utiliser quand on joint **depuis `fact_entry`**
+/// (qui stocke les ids après l'étape 4 du chantier B1) vers la master data.
+/// `None` pour les dimensions libres (analysis, analysis2, custom).
+pub fn dimension_master_id_join(dim: &str) -> Option<(&'static str, &'static str)> {
+    entry_dimension_target(dim).map(|r| (r.target_table, "id"))
 }
 
 /// Master data **secondaire** : tables référentielles `dim_*` qui ne sont **pas**
@@ -212,7 +267,11 @@ pub fn secondary_master_data(dim: &str) -> Option<(&'static str, &'static str)> 
             if r.target_table == "dim_" {
                 continue;
             }
-            return Some((r.target_table, r.target_column));
+            // Clé naturelle pour la résolution de valeurs : la colonne **code**.
+            // Pour une FK migrée en `id` (contrat code), c'est `target_display_column`,
+            // pas `target_column` (= "id"). Sinon `target_column` (code/code_iso).
+            let key = r.target_display_column.unwrap_or(r.target_column);
+            return Some((r.target_table, key));
         }
     }
     None
@@ -234,10 +293,27 @@ pub fn target_master(con: &Connection, target: &str) -> Option<(String, String)>
     if let Some((t, c)) = secondary_master_data(target) {
         return Some((t.to_string(), c.to_string()));
     }
-    if crate::value_lists::list_exists(con, target) {
-        return Some((crate::value_lists::value_table(target), "code".to_string()));
+    if let Some(list_id) = crate::value_lists::id_of(con, target) {
+        return Some((crate::value_lists::value_table(list_id), "code".to_string()));
     }
     None
+}
+
+/// Pour une référence directe `(host_dim, column)` : si c'est une **FK native
+/// migrée en clé technique** (`ri()`), renvoie `(table_cible, colonne_code)` —
+/// le contrat à utiliser pour **joindre sur l'id** (`cible.id = hôte.<column>`)
+/// tout en lisant/écrivant le **code** (le contrat externe). `None` pour une
+/// référence user code-keyed (patron B, colonne TEXT : lecture directe).
+///
+/// Sert au moteur de règles (`rules.rs`) pour rendre la traversée `ref` /
+/// `map_ref` **id-aware** : une FK native flippée stocke un id, donc le JOIN
+/// cible se fait sur `id` et la valeur échangée est le `code`. Les références
+/// user (patron B) restent en TEXT, lues directement.
+pub fn ref_code_contract(host_dim: &str, column: &str) -> Option<(&'static str, &'static str)> {
+    let host_table = dimension_master(host_dim)?.0;
+    REFERENCES.iter().find(|r| {
+        r.table == host_table && r.column == column && r.target_display_column.is_some()
+    }).map(|r| (r.target_table, r.target_display_column.unwrap()))
 }
 
 /// `true` si les registres des caractéristiques existent (faux au tout premier
@@ -267,20 +343,21 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
     }
     let mut out = Vec::new();
 
-    // N1 : colonne de rattachement sur la dimension de base → car_<code>.code
-    if let Ok(mut stmt) =
-        con.prepare("SELECT code, base_dimension FROM dim_characteristic ORDER BY code")
-    {
-        if let Ok(rows) =
-            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        {
-            for (code, base) in rows.flatten() {
+    // N1 : colonne de rattachement sur la dimension de base → car_<id>.code
+    if let Ok(mut stmt) = con.prepare(
+        "SELECT id, code, base_dimension FROM dim_characteristic ORDER BY code",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        }) {
+            for (id, code, base) in rows.flatten() {
                 if let Some((base_table, _)) = dimension_master(&base) {
                     out.push(OwnedReference {
                         table: base_table.to_string(),
                         column: code.clone(),
-                        target_table: format!("car_{code}"),
+                        target_table: crate::characteristics::value_table(id),
                         target_column: "code".to_string(),
+                        target_display_column: None,
                         required: false,
                     });
                 }
@@ -288,26 +365,26 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
         }
     }
 
-    // N2 : chaque attribut car_<char>.<name> → master data de la dimension cible
+    // N2 : chaque attribut car_<char_id>."c<attr_id>" → master data de la dimension cible.
+    // Colonne physique = c{attr_id} (B1 étape 9 ; avant migration = nom de l'attribut).
     if let Ok(mut stmt) = con.prepare(
-        "SELECT characteristic_code, name, target_dimension \
-         FROM dim_characteristic_attribute ORDER BY characteristic_code, name",
+        "SELECT dc.id, dca.id, dca.target_dimension \
+         FROM dim_characteristic_attribute dca \
+         JOIN dim_characteristic dc ON dc.code = dca.characteristic_code \
+         ORDER BY dc.id, dca.id",
     ) {
         if let Ok(rows) = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?))
         }) {
-            for (char_code, name, target) in rows.flatten() {
+            for (char_id, attr_id, target) in rows.flatten() {
                 // La cible d'un N2 peut être une dimension ou une liste de valeurs.
                 if let Some((tt, tc)) = target_master(con, &target) {
                     out.push(OwnedReference {
-                        table: format!("car_{char_code}"),
-                        column: name,
+                        table: crate::characteristics::value_table(char_id),
+                        column: crate::characteristics::attr_col(attr_id),
                         target_table: tt,
                         target_column: tc,
+                        target_display_column: None,
                         required: false,
                     });
                 }
@@ -318,29 +395,84 @@ pub fn dynamic_references(con: &Connection) -> Vec<OwnedReference> {
     // Références directes (patron B) : dim_<host>.<column> → master data cible.
     // Auto-références tolérées comme les statiques (ex. compte_parent → account).
     if custom_reference_registry_exists(con) {
-        if let Ok(mut stmt) = con.prepare(
-            "SELECT host_dimension, column_name, target_dimension \
-             FROM dim_custom_reference ORDER BY host_dimension, column_name",
-        ) {
+        // B1 étape 11 : la colonne physique est r{id} pour les refs custom
+        // (non-natives). Pour les natives, col physique = column_name.
+        let has_id = con.query_row(
+            "SELECT COUNT(*) > 0 FROM information_schema.columns \
+             WHERE table_schema = 'main' AND table_name = 'dim_custom_reference' \
+             AND column_name = 'id'",
+            [],
+            |r| r.get::<_, bool>(0),
+        ).unwrap_or(false);
+        let sql = if has_id {
+            "SELECT host_dimension, column_name, target_dimension, \
+                     COALESCE(native, FALSE), id \
+             FROM dim_custom_reference ORDER BY host_dimension, column_name"
+        } else {
+            "SELECT host_dimension, column_name, target_dimension, \
+                     COALESCE(native, FALSE), NULL \
+             FROM dim_custom_reference ORDER BY host_dimension, column_name"
+        };
+        if let Ok(mut stmt) = con.prepare(sql) {
             if let Ok(rows) = stmt.query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
+                    r.get::<_, bool>(3)?,
+                    r.get::<_, Option<i64>>(4)?,
                 ))
             }) {
-                for (host, column, target) in rows.flatten() {
+                for (host, column, target, native, id) in rows.flatten() {
+                    let phys_col = match (native, id) {
+                        (false, Some(i)) => format!("r{i}"),
+                        _ => column.clone(),
+                    };
                     if let (Some((ht, _)), Some((tt, tc))) =
                         (dimension_master(&host), dimension_master(&target))
                     {
+                        // Si cette (table, colonne physique) est déjà déclarée en `ri()`,
+                        // l'omettre pour éviter le doublon (voir commentaire original).
+                        let already_ri = REFERENCES.iter().any(|r| {
+                            r.table == ht
+                                && r.column == phys_col
+                                && r.target_display_column.is_some()
+                        });
+                        if already_ri {
+                            continue;
+                        }
                         out.push(OwnedReference {
                             table: ht.to_string(),
-                            column,
+                            column: phys_col,
                             target_table: tt.to_string(),
                             target_column: tc.to_string(),
+                            target_display_column: None,
                             required: false,
                         });
                     }
+                }
+            }
+        }
+    }
+
+    // Dimensions custom empruntées (§11) : x{id} → master data de la cible.
+    if let Ok(mut stmt) = con.prepare(
+        "SELECT id, target_dimension FROM dim_custom_dimension \
+         WHERE target_dimension IS NOT NULL",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        }) {
+            for (id, target) in rows.flatten() {
+                if let Some((tt, tc)) = dimension_master(&target) {
+                    out.push(OwnedReference {
+                        table: "stg_entry".to_string(),
+                        column: format!("x{id}"),
+                        target_table: tt.to_string(),
+                        target_column: tc.to_string(),
+                        target_display_column: None,
+                        required: false,
+                    });
                 }
             }
         }
@@ -402,7 +534,8 @@ pub const NATIVE_MASTER_REFS: &[(&str, &str, &str)] = &[
     ("consolidation", "perimeter_period", "period"),
     ("consolidation", "rate_period", "period"),
     ("consolidation", "presentation_currency", "currency"),
-    ("consolidation", "variant", "variant"),
+    // `variant` retirée : migrée en clé technique (ri() dans REFERENCES), donc
+    // plus une référence native code-keyed (éviterait un doublon de graphe).
     ("consolidation", "ruleset_code", "ruleset"),
     ("consolidation", "rate_set", "rate_set"),
     ("consolidation", "perimeter_set", "perimeter_set"),

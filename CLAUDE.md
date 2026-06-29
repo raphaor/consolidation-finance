@@ -44,7 +44,7 @@ Le tool shell attend la fermeture des pipes stdout/stderr ; un process qui garde
 - `conso-server` / `npm run dev` → **toujours** en arrière-plan via PowerShell `Start-Process -PassThru -WindowStyle Hidden -RedirectStandardOutput <log>`, stocker le PID, poller `/api/health` avec `Invoke-RestMethod`, puis `Stop-Process -Id $pid -Force`.
 - Les **subagents/workers ne lancent jamais le serveur** : eux se limitent à `cargo build` + `cargo test`. Les tests HTTP runtime sont réservés à l'utilisateur principal.
 
-Variables d'env du serveur : `CONSO_PORT` (3000), `CONSO_DB_PATH` (`conso.duckdb`), `CONSO_CSV_DIR` (`data`), `CONSO_WEB_DIR` (`../../web/dist`), `CONSO_FORCE_RESEED=1` (rejoue DROP + import CSV au démarrage). Au démarrage, les CSV ne sont réimportés que si la base est vierge ; sinon la base existante est conservée (les éditions UI survivent). Pour repartir des CSV à chaud : `POST /api/reset`.
+Variables d'env du serveur : `CONSO_PORT` (3000), `CONSO_DB_PATH` (`conso.duckdb`), `CONSO_SEED_JSON` (paquet JSON à importer au boot sur base vierge / au `POST /api/reset` — défaut : non défini → schéma seul), `CONSO_WEB_DIR` (`../../web/dist`), `CONSO_FORCE_RESEED=1` (rejoue DROP + import JSON si `CONSO_SEED_JSON` défini). Au démarrage, si la base est déjà initialisée elle est conservée (éditions UI préservées) ; sinon, schéma seul ou import JSON selon `CONSO_SEED_JSON`. Workflow de seed : `POST /api/export` pour extraire un paquet JSON depuis une base de référence, puis `CONSO_SEED_JSON=<chemin>` au démarrage ou `POST /api/import/all` à chaud.
 
 ## Architecture du moteur
 

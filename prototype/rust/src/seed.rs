@@ -105,12 +105,14 @@ const PERIODS: &[(&str, &str, &str, &str, &str, &str)] = &[
     ),
 ];
 
-/// Sous-classes de comptes : (code, libelle, classe).
-const SOUS_CLASSES: &[(&str, &str, &str)] = &[
-    ("actif", "Actif", "bilan"),
-    ("passif", "Passif", "bilan"),
-    ("charges", "Charges", "resultat"),
-    ("produits", "Produits", "resultat"),
+/// Sous-classes de comptes : (code, libelle, classe, sens).
+/// `sens` (Q44) : C créditeur / D débiteur — pilotait autrefois le `SENS_CASE`
+/// en dur dans server.rs ; désormais user-driven via cette colonne.
+const SOUS_CLASSES: &[(&str, &str, &str, &str)] = &[
+    ("actif", "Actif", "bilan", "D"),
+    ("passif", "Passif", "bilan", "C"),
+    ("charges", "Charges", "resultat", "D"),
+    ("produits", "Produits", "resultat", "C"),
 ];
 
 /// Plan de compte : (code, libelle, classe, sous_classe).
@@ -119,7 +121,8 @@ const SOUS_CLASSES: &[(&str, &str, &str)] = &[
 /// reporté au passif, pas un compte de P&L. Les comptes 6xx/7xx sont les
 /// véritables comptes de produits et charges (classe `resultat`). Le regroupement
 /// par nature (ex. `capitaux_propres` sur `100`) et la hiérarchie de compte
-/// parent ne sont plus des colonnes en dur : ils se posent via [`seed_demo_attributes`].
+/// parent ne sont plus des colonnes en dur : ils transitent par le paquet JSON
+/// de seed (`tests/fixtures/seed.json`) via les registres pilotables.
 const ACCOUNTS: &[(&str, &str, &str, &str)] = &[
     ("100", "Capital", "bilan", "passif"),
     ("200", "Immobilisations", "bilan", "actif"),
@@ -805,23 +808,45 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute("INSERT INTO app_config VALUES (?, ?)", params![k, v])?;
     }
 
-    // --- Nouvelles dimensions référentielles (avant dim_scenario) ---
+    // --- Nouvelles dimensions référentielles (avant dim_consolidation) ---
     for c in SCENARIO_CATEGORIES {
         con.execute(
-            "INSERT INTO dim_scenario_category VALUES (?, ?)",
+            "INSERT INTO dim_scenario_category (code, libelle) VALUES (?, ?)",
             params![c.0, c.1],
         )?;
     }
     for v in VARIANTS {
-        con.execute("INSERT INTO dim_variant VALUES (?, ?)", params![v.0, v.1])?;
+        con.execute(
+            "INSERT INTO dim_variant (code, libelle) VALUES (?, ?)",
+            params![v.0, v.1],
+        )?;
     }
     for r in RATE_SETS {
-        con.execute("INSERT INTO dim_rate_set VALUES (?, ?)", params![r.0, r.1])?;
+        con.execute(
+            "INSERT INTO dim_rate_set (code, libelle) VALUES (?, ?)",
+            params![r.0, r.1],
+        )?;
     }
     for ps in PERIMETER_SETS {
         con.execute(
-            "INSERT INTO dim_perimeter_set VALUES (?, ?)",
+            "INSERT INTO dim_perimeter_set (code, libelle) VALUES (?, ?)",
             params![ps.0, ps.1],
+        )?;
+    }
+    // Périodes et devises avant dim_consolidation : exercice / presentation_currency /
+    // perimeter_period / rate_period sont désormais des FK en id (B1).
+    for p in PERIODS {
+        con.execute(
+            "INSERT INTO dim_period \
+             (code, libelle, type, date_debut, date_fin, statut) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![p.0, p.1, p.2, p.3, p.4, p.5],
+        )?;
+    }
+    for c in CURRENCIES {
+        con.execute(
+            "INSERT INTO dim_currency (code_iso, libelle, decimales) VALUES (?, ?, ?)",
+            params![c.0, c.1, c.2],
         )?;
     }
 
@@ -829,40 +854,66 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     for c in CONSOLIDATIONS {
         // `id` alloué par nextval : déterministe (1 sur base fraîche) et avance
         // la séquence (évite tout collision avec un INSERT ultérieur).
+        // B1 : exercice / presentation_currency / perimeter_period / rate_period /
+        // ruleset_code sont désormais stockés en id — résolus par sous-requête.
         con.execute(
             "INSERT INTO dim_consolidation
                 (id, libelle, phase, exercice, perimeter_set, variant,
                  presentation_currency, perimeter_period, rate_set, rate_period,
                  ruleset_code, a_nouveau_consolidation_id, statut)
-             VALUES (nextval('seq_consolidation'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+             VALUES (nextval('seq_consolidation'),
+                     ?,
+                     (SELECT id FROM dim_scenario_category WHERE code = ?),
+                     (SELECT id FROM dim_period WHERE code = ?),
+                     (SELECT id FROM dim_perimeter_set WHERE code = ?),
+                     (SELECT id FROM dim_variant WHERE code = ?),
+                     (SELECT id FROM dim_currency WHERE code_iso = ?),
+                     (SELECT id FROM dim_period WHERE code = ?),
+                     (SELECT id FROM dim_rate_set WHERE code = ?),
+                     (SELECT id FROM dim_period WHERE code = ?),
+                     (SELECT id FROM dim_ruleset WHERE code = ?),
+                     NULL, ?)",
             params![c.0, c.1, c.2, c.3, c.4, c.5, c.6, c.7, c.8, c.9, c.10],
         )?;
     }
+    // B1 : devise_fonctionnelle → dim_currency.id, entite_parent → dim_entity.id.
+    // Le parent (M) est inséré en premier (tableau ordonné) → la sous-requête
+    // auto-référentielle résout correctement pour les filiales.
     for e in ENTITIES {
         con.execute(
-            "INSERT INTO dim_entity VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO dim_entity (code, libelle, devise_fonctionnelle, entite_parent, statut) \
+             VALUES (?, ?,
+                     (SELECT id FROM dim_currency WHERE code_iso = ?),
+                     (SELECT id FROM dim_entity WHERE code = ?),
+                     ?)",
             params![e.0, e.1, e.2, e.3, e.4],
-        )?;
-    }
-    for p in PERIODS {
-        con.execute(
-            "INSERT INTO dim_period VALUES (?, ?, ?, ?, ?, ?)",
-            params![p.0, p.1, p.2, p.3, p.4, p.5],
         )?;
     }
     for sc in SOUS_CLASSES {
         con.execute(
-            "INSERT INTO dim_sous_classe VALUES (?, ?, ?)",
-            params![sc.0, sc.1, sc.2],
+            "INSERT INTO dim_sous_classe (code, libelle, classe, sens) VALUES (?, ?, ?, ?)",
+            params![sc.0, sc.1, sc.2, sc.3],
+        )?;
+    }
+    // Doit précéder ACCOUNTS : dim_account.flow_scheme (B1) résout le code du
+    // schéma vers son id par sous-requête à l'insertion.
+    for s in FLOW_SCHEMES {
+        con.execute(
+            "INSERT INTO dim_flow_scheme (code, libelle) VALUES (?, ?)",
+            params![s.0, s.1],
         )?;
     }
     for a in ACCOUNTS {
-        // Liste de colonnes explicite : `flow_scheme` (ajoutée) reste NULL — le
-        // schéma par défaut est dérivé de la classe à la conversion (cf.
-        // pipeline::convert), surchargeable ensuite via le CRUD.
+        // Q45 : `flow_scheme` est désormais 100 % user-driven (plus de défaut dérivé
+        // de la classe dans la vue). On peuple donc chaque compte explicitement,
+        // à partir de sa classe, pour reproduire l'ancien comportement par défaut
+        // (bilan → BILAN, resultat → RESULTAT) → golden **stable**. B1 : résolu en id.
+        let scheme = if a.2 == "resultat" { "RESULTAT" } else { "BILAN" };
         con.execute(
-            "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES (?, ?, ?, ?)",
-            params![a.0, a.1, a.2, a.3],
+            "INSERT INTO dim_account (code, libelle, classe, sous_classe, flow_scheme) \
+             VALUES (?, ?, ?, (SELECT id FROM dim_sous_classe WHERE code = ?), \
+                     (SELECT id FROM dim_flow_scheme WHERE code = ?))",
+            params![a.0, a.1, a.2, a.3, scheme],
         )?;
     }
     for f in FLOWS {
@@ -871,35 +922,23 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
             params![f.0, f.1],
         )?;
     }
-    for s in FLOW_SCHEMES {
-        con.execute(
-            "INSERT INTO dim_flow_scheme VALUES (?, ?)",
-            params![s.0, s.1],
-        )?;
-    }
     for i in FLOW_SCHEME_ITEMS {
         con.execute(
             "INSERT INTO sat_flow_scheme_item \
              (scheme, flow, taux_conversion, flux_ecart, flux_de_report, flux_a_nouveau) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+             VALUES ((SELECT id FROM dim_flow_scheme WHERE code = ?), ?, ?, ?, ?, ?)",
             params![i.0, i.1, i.2, i.3, i.4, i.5],
-        )?;
-    }
-    for c in CURRENCIES {
-        con.execute(
-            "INSERT INTO dim_currency VALUES (?, ?, ?)",
-            params![c.0, c.1, c.2],
         )?;
     }
     for n in NATURES {
         con.execute(
-            "INSERT INTO dim_nature VALUES (?, ?, ?)",
+            "INSERT INTO dim_nature (code, libelle, rules) VALUES (?, ?, ?)",
             params![n.0, n.1, n.2],
         )?;
     }
     for m in METHODS {
         con.execute(
-            "INSERT INTO dim_method VALUES (?, ?, ?)",
+            "INSERT INTO dim_method (code, libelle, consolidated) VALUES (?, ?, ?)",
             params![m.0, m.1, m.2],
         )?;
     }
@@ -909,7 +948,11 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute(
             "INSERT INTO sat_perimeter \
              (perimeter_set, entity, period, methode, pct_interet, pct_integration, entree, sortie) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (\
+               (SELECT id FROM dim_perimeter_set WHERE code = ?), \
+               ?, ?, \
+               (SELECT id FROM dim_method WHERE code = ?), \
+               ?, ?, ?, ?)",
             params![k.0, k.1, k.2, k.3, Money(v.0), Money(v.1), v.2, v.3],
         )?;
     }
@@ -917,7 +960,7 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
         con.execute(
             "INSERT INTO sat_exchange_rate \
              (rate_set, currency_source, period, taux_close, taux_moyen, taux_ouverture) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+             VALUES ((SELECT id FROM dim_rate_set WHERE code = ?), ?, ?, ?, ?, ?)",
             params![k.0, k.1, k.2, v.0.map(Money), v.1.map(Money), v.2.map(Money),],
         )?;
     }
@@ -953,198 +996,67 @@ pub fn seed_all(con: &Connection) -> duckdb::Result<()> {
     Ok(())
 }
 
-/// Seede la **démo d'élimination interco** : la règle `ELI_700` + le jeu
-/// `RS_INTERCO`. Elle est absente des CSV car la `definition` est du JSON, mal
-/// adapté au format CSV ; on la pose donc en code (même esprit que [`seed_all`]).
-///
-/// Reproduit la fixture canonique de `tests/rules.rs::elim_700_json` : élimine
-/// l'interco du compte 700 entre entités en méthode `globale` (op 1 extourne
-/// partner hérité, op 2 pose la contrepartie partner vidé, le tout en nature
-/// `2ELI`). La consolidation `REEL` référence `RS_INTERCO` (cf.
-/// `consolidations.csv`), et `entries.csv` contient la ligne interco M→A sur 700
-/// que la règle matche.
-///
-/// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
-/// `POST /api/reset`), pas par [`seed_all`] (les tests créent leurs propres
-/// règles). À exécuter sur un schéma fraîchement créé → INSERT simples.
-pub fn seed_demo_rules(con: &Connection) -> duckdb::Result<()> {
-    const ELI_700: &str = r#"{
-        "scope": [
-            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
-            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
+/// Contrôles de données de démonstration — exemples intégrés pour guider
+/// l'utilisateur. Appelée au démarrage serveur sur base existante pour
+/// backfiller les contrôles natifs (idempotent : INSERT OR IGNORE).
+pub fn seed_demo_controls(con: &Connection) -> duckdb::Result<()> {
+    // ── CTRL_ACTIF_PASSIF : équilibre bilan (actif = passif) ──
+    let def_actif_passif = r#"{
+        "levels": ["raw", "corporate", "converted", "consolidated"],
+        "grain": ["entity", "entry_period"],
+        "selection": [
+            {"dim": "account", "ref": "sous_classe", "op": "IN", "val": ["actif", "passif"]}
         ],
-        "operations": [
-            {
-                "seq": 1, "level": "consolidated",
-                "selection": [
-                    {"dim": "account", "op": "=", "val": "700"},
-                    {"dim": "partner", "op": "IS NOT NULL"}
-                ],
-                "coefficient": {"type": "pct_integration"},
-                "multiplicateur": -1,
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2ELI"},
-                    "partner": {"mode": "inherit"}
-                }
-            },
-            {
-                "seq": 2, "level": "consolidated",
-                "selection": [
-                    {"dim": "account", "op": "=", "val": "700"},
-                    {"dim": "partner", "op": "IS NOT NULL"}
-                ],
-                "coefficient": {"type": "pct_integration"},
-                "multiplicateur": 1,
-                "destination": {
-                    "nature":  {"mode": "override", "value": "2ELI"},
-                    "partner": {"mode": "null"}
-                }
-            }
-        ]
+        "expression": "SUM(IF(r_sous_classe.code = 'actif', amount, -amount))",
+        "assertions": [{"type": "equals", "target": 0}],
+        "compare": null
     }"#;
     con.execute(
-        "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
-        params!["ELI_700", "Élimination interco 700", ELI_700],
+        "INSERT INTO dim_control (code, libelle, definition) VALUES (?, ?, ?) \
+         ON CONFLICT (code) DO UPDATE SET libelle = excluded.libelle, definition = excluded.definition",
+        params![
+            "CTRL_ACTIF_PASSIF",
+            "Équilibre actif = passif (bilan)",
+            def_actif_passif
+        ],
+    )?;
+
+    // ── CTRL_SOLDE_IC : vérification que l'interco est soldée ──
+    let def_solde_ic = r#"{
+        "levels": ["consolidated"],
+        "grain": ["entity", "entry_period"],
+        "selection": [
+            {"dim": "nature", "op": "=", "val": "2ELI"}
+        ],
+        "expression": null,
+        "assertions": [{"type": "equals", "target": 0}],
+        "compare": null
+    }"#;
+    con.execute(
+        "INSERT INTO dim_control (code, libelle, definition) VALUES (?, ?, ?) \
+         ON CONFLICT (code) DO UPDATE SET libelle = excluded.libelle, definition = excluded.definition",
+        params![
+            "CTRL_SOLDE_IC",
+            "Interco soldée (nature 2ELI = 0)",
+            def_solde_ic
+        ],
+    )?;
+
+    // ── Jeu de contrôles regroupant les exemples ──
+    con.execute(
+        "INSERT INTO dim_control_set (code, libelle) VALUES (?, ?) \
+         ON CONFLICT (code) DO UPDATE SET libelle = excluded.libelle",
+        params!["CS_BILAN", "Contrôles bilan (démo)"],
     )?;
     con.execute(
-        "INSERT INTO dim_ruleset (code, libelle) VALUES (?, ?)",
-        params!["RS_INTERCO", "Élimination interco (démo)"],
+        "INSERT INTO dim_control_set_item (set_code, control_code, ord) VALUES (?, ?, ?) \
+         ON CONFLICT (set_code, control_code) DO NOTHING",
+        params!["CS_BILAN", "CTRL_ACTIF_PASSIF", 1],
     )?;
     con.execute(
-        "INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code) VALUES (?, ?, ?)",
-        params!["RS_INTERCO", 1, "ELI_700"],
+        "INSERT INTO dim_control_set_item (set_code, control_code, ord) VALUES (?, ?, ?) \
+         ON CONFLICT (set_code, control_code) DO NOTHING",
+        params!["CS_BILAN", "CTRL_SOLDE_IC", 2],
     )?;
     Ok(())
-}
-
-/// Seede les **attributs de dimension du plan de comptes** : recrée, via les
-/// mécanismes pilotables, ce qui était auparavant codé en dur sur `dim_account`.
-///
-/// - **Caractéristique** `groupement` (N1 sur `account`) avec la valeur
-///   `capitaux_propres`, affectée au compte `10` (Capital et réserves) ;
-/// - **Référence directe** `compte_parent` (patron B) sur `account → account`
-///   puis **chargement de la hiérarchie** depuis `account_parents.csv` (`code,
-///   compte_parent`) si le fichier est présent dans `data_dir`.
-///
-/// Appelée par le serveur **après l'import CSV** (démarrage sur base vierge /
-/// `POST /api/reset`), comme [`seed_demo_rules`]. Renvoie [`AppError`] car elle
-/// s'appuie sur les fonctions de haut niveau (validation incluse).
-///
-/// **Idempotente** : les registres de caractéristiques / références directes
-/// survivent au reset (hors `ALL_DROP`) ; on ne recrée donc la caractéristique
-/// et la référence que si elles sont absentes, et la hiérarchie est rejouée à
-/// chaque appel (UPDATE depuis le CSV).
-pub fn seed_demo_attributes(
-    con: &Connection,
-    data_dir: &std::path::Path,
-) -> Result<(), crate::state::AppError> {
-    use crate::{characteristics, custom_references};
-    use serde_json::{json, Map};
-
-    // La caractéristique « groupement » et la référence « compte_parent » vivent
-    // dans des registres qui survivent au reset : ne (re)créer que si absentes.
-    let groupement_present: bool = con
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM dim_characteristic WHERE code = 'groupement'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(crate::state::db_err)?;
-    if !groupement_present {
-        // Caractéristique « groupement » + valeur « capitaux_propres » sur le compte 10.
-        characteristics::create_characteristic(
-            con,
-            "groupement",
-            "Groupement technique",
-            "account",
-        )?;
-        let mut val = Map::new();
-        val.insert("code".into(), json!("capitaux_propres"));
-        val.insert("libelle".into(), json!("Capitaux propres"));
-        characteristics::create_value(con, "groupement", &val)?;
-        characteristics::assign(con, "groupement", "10", Some("capitaux_propres"))?;
-    }
-
-    let compte_parent_present: bool = con
-        .query_row(
-            "SELECT COUNT(*) > 0 FROM dim_custom_reference \
-             WHERE host_dimension = 'account' AND column_name = 'compte_parent'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(crate::state::db_err)?;
-    if !compte_parent_present {
-        // Référence directe « compte_parent » : account → account (hiérarchie).
-        custom_references::create(con, "account", "compte_parent", "account")?;
-    }
-
-    // Chargement de la hiérarchie depuis `account_parents.csv` (si présent).
-    // UPDATE en masse plutôt que 800+ appels `assign` : les valeurs viennent du
-    // plan de comptes (CSV de confiance) et la colonne existe (réf. ci-dessus).
-    let parents_csv = data_dir.join("account_parents.csv");
-    if parents_csv.exists() {
-        let path = parents_csv.display().to_string();
-        con.execute(
-            &format!(
-                "UPDATE dim_account AS a SET compte_parent = src.compte_parent \
-                 FROM read_csv('{path}', auto_detect=false, \
-                     columns={{'code':'VARCHAR','compte_parent':'VARCHAR'}}, \
-                     header=true, delim=',') AS src \
-                 WHERE a.code = src.code"
-            ),
-            [],
-        )
-        .map_err(crate::state::db_err)?;
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    fn parent_of(con: &Connection, code: &str) -> Option<String> {
-        con.query_row(
-            "SELECT compte_parent FROM dim_account WHERE code = ?",
-            [code],
-            |r| r.get(0),
-        )
-        .unwrap()
-    }
-
-    /// `seed_demo_attributes` charge la hiérarchie `compte_parent` depuis
-    /// `account_parents.csv` (via `UPDATE ... FROM read_csv`) et reste idempotente
-    /// (registres caractéristique / référence directe survivant au reset).
-    #[test]
-    fn charge_la_hierarchie_compte_parent_et_reste_idempotente() {
-        let con = Connection::open_in_memory().expect("open in-memory");
-        crate::schema::create_schema(&con).expect("create_schema");
-        con.execute_batch(
-            "INSERT INTO dim_account (code, libelle, classe, sous_classe) VALUES \
-                ('10','Capital et réserves','bilan','passif'), \
-                ('101','Capital','bilan','passif'), \
-                ('1011','Capital souscrit','bilan','passif');",
-        )
-        .expect("seed accounts");
-
-        // CSV de hiérarchie dans un répertoire temporaire unique.
-        let dir = std::env::temp_dir().join(format!("conso_seed_test_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut f = std::fs::File::create(dir.join("account_parents.csv")).unwrap();
-        writeln!(f, "code,compte_parent\n101,10\n1011,101").unwrap();
-        drop(f);
-
-        seed_demo_attributes(&con, &dir).expect("seed_demo_attributes");
-        assert_eq!(parent_of(&con, "10"), None, "racine sans parent");
-        assert_eq!(parent_of(&con, "101").as_deref(), Some("10"));
-        assert_eq!(parent_of(&con, "1011").as_deref(), Some("101"));
-
-        // Deuxième appel (simule POST /api/reset) : pas de conflit de registre.
-        seed_demo_attributes(&con, &dir).expect("second seed_demo_attributes idempotent");
-        assert_eq!(parent_of(&con, "1011").as_deref(), Some("101"));
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
 }

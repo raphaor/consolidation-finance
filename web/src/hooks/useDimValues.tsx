@@ -11,7 +11,6 @@ import {
   useContext,
   useEffect,
   useState,
-  type ReactNode,
 } from 'react';
 import { api } from '../api';
 import { compareText, formatOptionLabel } from '../utils/format';
@@ -52,23 +51,46 @@ export const DIM_TO_TABLE_FALLBACK: DimToTable = {
   partner: { table: 'entities', pkCol: 'code' },
   share: { table: 'entities', pkCol: 'code' },
   methode: { table: 'methods', pkCol: 'code' },
+  // FK natives secondaires (colonnes sur master data, pas sur stg_entry).
+  sous_classe: { table: 'sous_classes', pkCol: 'code' },
+  flow_scheme: { table: 'flow_schemes', pkCol: 'code' },
 };
 
 // Construit le mapping dimension → table depuis le graphe de références exposé
-// par l'API. On ne garde que les sources `stg_entry` (dimensions d'écriture) et
-// `perimeter` (scope des règles, dont `methode`) : ce sont les colonnes
-// pilotables dans les formulaires. `target_table` est déjà un nom de table
-// master data.
+// par l'API.
+//
+// Étape 1 : colonnes directes de `stg_entry` et `perimeter` (dimensions
+// d'écriture et scope des règles).
+//
+// Étape 2 : FK natives secondaires — colonnes sur les master data primaires
+// (ex. `account.sous_classe → sous_classes`, `account.flow_scheme → flow_schemes`,
+// `entity.entite_parent → entities`). Ces colonnes ne sont pas sur stg_entry
+// mais sont traversables dans les sélections de règles via le mode `ref:`.
 export function buildDimToTable(refs: ReferenceInfo[]): DimToTable {
   const out: DimToTable = {};
+
+  // Étape 1 : colonnes directes de stg_entry / perimeter.
+  const primaryTargets = new Set<string>();
   for (const r of refs) {
     if (r.table === 'stg_entry' || r.table === 'perimeter') {
       out[r.column] = {
         table: r.target_table as MasterTable,
         pkCol: r.target_column,
       };
+      primaryTargets.add(r.target_table);
     }
   }
+
+  // Étape 2 : FK natives secondaires (colonnes sur les master data primaires).
+  for (const r of refs) {
+    if (primaryTargets.has(r.table) && !(r.column in out)) {
+      out[r.column] = {
+        table: r.target_table as MasterTable,
+        pkCol: r.target_column,
+      };
+    }
+  }
+
   return out;
 }
 
@@ -146,19 +168,6 @@ export function useDimValues(dim: string): { values: DimValue[]; loading: boolea
   }, [dim, dimToTable]);
 
   return { values, loading };
-}
-
-/// Provider qui charge le graphe de références API une seule fois et expose le
-/// mapping à tous les `useDimValues` descendants via le contexte.
-export function DimRefProvider({
-  children,
-  references,
-}: {
-  children: ReactNode;
-  references: ReferenceInfo[] | null;
-}) {
-  const mapping = references ? buildDimToTable(references) : DIM_TO_TABLE_FALLBACK;
-  return <DimRefContext.Provider value={mapping}>{children}</DimRefContext.Provider>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

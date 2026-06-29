@@ -1,6 +1,7 @@
 // Surveille le statut de l'API via /api/health (polling toutes les 5 s).
 
 import { useEffect, useState } from 'react';
+import { errMsg } from '../utils/errMessage';
 import { api } from '../api';
 
 export type HealthState =
@@ -24,7 +25,7 @@ export function useHealth(intervalMs = 5000): HealthState {
         );
       } catch (err) {
         if (!active) return;
-        setState({ kind: 'down', message: err instanceof Error ? err.message : 'erreur' });
+        setState({ kind: 'down', message: errMsg(err, 'erreur') });
       }
     }
 

@@ -88,7 +88,14 @@ pub fn seed_builtins(con: &Connection) -> duckdb::Result<()> {
 /// Colonnes **numériques** de `sat_perimeter` (whitelist des champs d'opérande).
 /// Data-driven : tout champ numérique du périmètre devient disponible aux 4
 /// perspectives. Repli sur les deux champs connus si information_schema est vide.
+///
+/// Les colonnes-clés (FK/PK) sont exclues : ce sont des identifiants, pas des
+/// mesures. Sous B1, `perimeter_set` est `INTEGER` — sans cette exclusion il
+/// serait capté par le filtre numérique (faux opérande).
 pub fn perimeter_fields(con: &Connection) -> Vec<String> {
+    let keys: Vec<String> = crate::references::references_for("sat_perimeter")
+        .map(|r| r.column.to_string())
+        .collect();
     con.prepare(
         "SELECT column_name \
          FROM information_schema.columns \
@@ -101,6 +108,10 @@ pub fn perimeter_fields(con: &Connection) -> Vec<String> {
     .and_then(|mut stmt| {
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect::<duckdb::Result<Vec<_>>>()
+    })
+    .map(|mut cols| {
+        cols.retain(|c| !keys.contains(c));
+        cols
     })
     .unwrap_or_else(|_| vec!["pct_interet".into(), "pct_integration".into()])
 }

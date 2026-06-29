@@ -22,16 +22,12 @@
 }
 
 .app__logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 8px;
-  background: var(--primary);
-  color: #fff;
-  font-weight: 700;
-  font-size: 20px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
 }
 
 .app__title {
@@ -70,6 +66,15 @@
 .tab--active {
   color: var(--primary);
   border-bottom-color: var(--primary);
+}
+
+/* 2ᵉ niveau de navigation : sous-onglets du groupe actif. */
+.app__subtabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 
 .app__main {
@@ -262,15 +267,21 @@
 }
 
 .alert--error {
-  background: #fdeaea;
-  border-color: #f3b4b4;
+  background: rgba(201, 58, 58, 0.1);
+  border-color: rgba(201, 58, 58, 0.4);
   color: var(--danger);
 }
 
 .alert--success {
   background: rgba(26, 159, 90, 0.1);
-  border-color: #9fd8ba;
+  border-color: rgba(26, 159, 90, 0.4);
   color: var(--ok);
+}
+
+.alert--warning {
+  background: rgba(199, 119, 0, 0.12);
+  border-color: rgba(199, 119, 0, 0.4);
+  color: var(--warn);
 }
 
 .muted {
@@ -281,6 +292,8 @@
 
 .table-wrap {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 60vh;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -342,6 +355,22 @@
   text-align: center;
   color: var(--text-muted);
   padding: 24px;
+}
+
+/* Colonnes sticky (Actions à droite) */
+.grid th[data-pinned="right"],
+.grid td[data-pinned="right"] {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -2px 0 4px rgba(0,0,0,0.06);
+}
+
+/* Header sticky + actions sticky → z-index plus élevé pour le header */
+.grid thead th[data-pinned="right"] {
+  z-index: 2;
 }
 
 /* ---------- Rapport détaillé (arbre compte → natures) ---------- */
@@ -444,7 +473,7 @@
 .status--error {
   border-color: var(--danger);
   color: var(--danger);
-  background: #fdeaea;
+  background: rgba(201, 58, 58, 0.1);
 }
 
 .scenario-picker {
@@ -462,7 +491,8 @@
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
   font-size: 0.9rem;
 }
 
@@ -471,7 +501,7 @@
   padding: 0.6rem 0.9rem;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg-soft, #f7f8fa);
+  background: var(--header-bg);
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 0.4rem 1.2rem;
@@ -617,6 +647,26 @@
   gap: 6px;
 }
 
+/* Disposition « bibliothèque à gauche + éditeur à droite » partagée par les
+   pages Coefficients / Postes / Indicateurs / Contrôles / Règles. */
+.editor-split {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.editor-pane {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Barre d'actions d'un éditeur (Enregistrer / Fermer), alignée à gauche. */
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 /* ---------- Import ---------- */
 
 .upload-grid {
@@ -672,6 +722,7 @@
   display: flex;
   gap: 4px;
   border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
 }
 
 .subtab {
@@ -696,7 +747,31 @@
 }
 
 .rule-modal {
-  max-width: 1100px;
+  /* Pleine largeur : on exploite l'espace de l'écran (cap pour les très
+     grands moniteurs). */
+  max-width: min(1500px, 95vw);
+}
+
+/* Cohérence de tous les contrôles de la modale règle : même hauteur, même
+   fond/bordure/rayon (les <select> natifs hors `.field` héritaient sinon du
+   style gris du navigateur). */
+.rule-modal select,
+.rule-modal input[type='text'],
+.rule-modal input[type='number'] {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+.rule-modal select:focus,
+.rule-modal input[type='text']:focus,
+.rule-modal input[type='number']:focus {
+  outline: 2px solid rgba(31, 111, 235, 0.35);
+  outline-offset: 0;
+  border-color: var(--primary);
 }
 
 .rule-badge {
@@ -712,8 +787,8 @@
 }
 
 .rule-section {
-  margin-top: 14px;
-  padding: 12px 14px;
+  margin-top: 12px;
+  padding: 10px 12px;
   background: var(--header-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -783,8 +858,8 @@
 }
 
 .field-inline--invalid {
-  border-color: #d33;
-  background: #fff5f5;
+  border-color: var(--danger);
+  background: rgba(201, 58, 58, 0.08);
 }
 
 /* Astérisque des champs obligatoires. */
@@ -858,7 +933,7 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   flex-wrap: wrap;
 }
 
@@ -871,15 +946,146 @@
   min-width: 120px;
 }
 
+/* Sélection compacte : on masque les libellés (Dim / Traverser / Op / Valeur)
+   et on aligne les contrôles sur une seule ligne, comme la destination. */
+.rule-condition--compact {
+  align-items: center;
+  gap: 6px;
+}
+.rule-condition--compact .field > span {
+  display: none;
+}
+.rule-condition--compact .field {
+  gap: 0;
+}
+.rule-condition--compact .field--grow {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* Dimension fixe d'une ligne de filtre (équivalent de `rule-dest-label`). */
+.rule-sel-dim {
+  flex: 0 0 auto;
+  width: 86px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Le dropdown de valeur remplit la cellule (sélection compacte + destination). */
+.rule-condition--compact .multiselect {
+  flex: 1;
+  min-width: 0;
+}
+.rule-dest-extra .multiselect {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Opérateur compact : symbole seul, largeur réduite (prime sur le min-width
+   générique des champs de condition). */
+.field--op,
+.field--traverse {
+  flex: 0 0 auto;
+}
+.rule-condition .field--op select.op-select {
+  min-width: 0;
+  width: 48px;
+  text-align: center;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+/* Bouton « Traverser » replié (icône ↳) + glyphe inline dans les hints. */
+.rule-traverse-btn {
+  min-width: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.rule-traverse-btn:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.rule-traverse-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.rule-traverse-glyph {
+  display: inline-block;
+  padding: 0 4px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Sélection | Destination en regard, chacune une moitié. Repli en une colonne
+   sur écran étroit. */
+.rule-op-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .rule-op-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Bloc d'aide consolidé en bas de la section Opérations (affiché une fois). */
+.rule-help {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rule-help .rule-section__hint {
+  margin: 0;
+}
+.rule-op-legend code {
+  font-size: 11px;
+}
+
+/* Phrase de synthèse d'une opération (relecture du JSON). */
+.rule-op-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--row-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.55;
+}
+.rule-op-summary__tag {
+  flex: 0 0 auto;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
 .rule-operation {
   border: 1px solid var(--border-strong);
   background: var(--surface);
   border-radius: 8px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .rule-operation__head {
@@ -898,26 +1104,113 @@
 
 .rule-dest-row {
   display: grid;
-  grid-template-columns: 110px 140px 1fr;
+  grid-template-columns: 96px 150px minmax(0, 1fr) 26px;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  padding: 2px 0;
   font-size: 12px;
 }
 
 .rule-dest-row .rule-dest-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Conteneur de la valeur/contrôle spécifique au mode (3ᵉ colonne). Les modes
+   `map` posent deux selects côte à côte. */
+.rule-dest-extra {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rule-dest-muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Le style visuel (hauteur/bordure/fond) vient de `.rule-modal select|input` ;
+   ici uniquement le comportement de remplissage dans `.rule-dest-extra`. */
+.rule-dest-row .rule-dest-input {
+  min-width: 0;
+  flex: 1;
+}
+
+/* Codage couleur du mode : inherit/null discrets, override (bleu) et map/map_ref
+   (violet) signalent une dimension réellement pilotée. */
+.rule-modal .rule-dest-mode--override {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+.rule-modal .rule-dest-mode--map,
+.rule-modal .rule-dest-mode--map_ref {
+  border-color: #7f77dd;
+  color: #534ab7;
+}
+.rule-modal .rule-dest-mode--null {
   color: var(--text-muted);
 }
 
-.rule-dest-row .rule-dest-input {
-  padding: 4px 8px;
-  border: 1px solid var(--border-strong);
+/* Bouton de retrait d'une dimension non-défaut. */
+.rule-dest-remove {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
   border-radius: 4px;
-  background: var(--surface);
-  color: var(--text);
   font-size: 12px;
-  min-width: 0;
-  width: 100%;
+  line-height: 1;
+}
+.rule-dest-remove:hover {
+  color: var(--danger);
+  background: var(--row-hover);
+}
+
+/* Zone d'ajout des dimensions de destination supplémentaires (chips « + »). */
+.rule-dest-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.rule-dest-add__label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.rule-chip {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 12px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.rule-chip:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.rule-chip--active {
+  border-style: solid;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  font-weight: 500;
+}
+.rule-chip--active:hover {
+  background: var(--primary-hover, var(--primary));
+  color: #fff;
 }
 
 /* ─── Multi-select repliable (opérateur IN de la sélection) ─── */
@@ -928,18 +1221,52 @@
 }
 
 .multiselect__btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
-  padding: 4px 8px;
+  min-height: 30px;
+  padding: 3px 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--text);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+}
+
+.multiselect__placeholder {
+  flex: 1;
+  color: var(--text-muted);
+}
+
+.multiselect__caret {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* Valeurs sélectionnées affichées en pastilles dans le bouton fermé. */
+.multiselect__chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.dim-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--select-bg);
+  color: var(--select-text);
+  border-radius: 10px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .multiselect__btn:disabled {
@@ -952,13 +1279,13 @@
   top: calc(100% + 2px);
   left: 0;
   z-index: 50;
-  min-width: 100%;
-  max-width: 320px;
-  max-height: 240px;
+  min-width: 280px;
+  max-width: 460px;
+  max-height: 280px;
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
@@ -970,22 +1297,53 @@
   font-style: italic;
 }
 
+/* Ligne de valeur : code (pastille discrète) + libellé sur une ligne, ✓ à
+   droite quand sélectionnée. Pas de checkbox (gain de place). */
 .multiselect__item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 3px;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   font-size: 12px;
+  text-align: left;
   cursor: pointer;
 }
 
 .multiselect__item:hover {
-  background: var(--surface-alt, rgba(0, 0, 0, 0.04));
+  background: var(--row-hover);
 }
 
-.multiselect__item input[type='checkbox'] {
-  margin: 0;
+.multiselect__item.is-selected {
+  background: var(--select-bg);
+}
+
+.multiselect__code {
+  flex: 0 0 auto;
+  min-width: 34px;
+  font-weight: 500;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.multiselect__lib {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multiselect__tick {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  color: var(--primary);
+  font-weight: 600;
 }
 
 .rule-add-btn {
@@ -1178,4 +1536,603 @@
   border-radius: 6px;
   padding: 4px 6px;
   background: var(--bg, #fff);
+}
+
+/* ---------- Éditeur de formules (coloration + autocomplétion) ---------- */
+/* Un <pre> coloré est superposé sous un <textarea> transparent (caret visible).
+   Les deux partagent exactement les mêmes métriques (police, padding, bord,
+   wrapping) pour que les caractères s'alignent pixel pour pixel. */
+
+.formula-editor {
+  position: relative;
+}
+
+.formula-editor__overlay,
+.formula-editor__ta {
+  margin: 0;
+  /* Métriques communes — toute différence casse l'alignement du caret. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+.formula-editor__overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  color: var(--text);
+  overflow: hidden;
+  pointer-events: none;
+  /* Le scroll est piloté par celui du textarea (cf. FormulaEditor onScroll). */
+}
+
+.formula-editor__ta {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.formula-editor__ta::placeholder {
+  color: var(--text-muted);
+}
+
+.formula-editor__ta:focus {
+  outline: 2px solid rgba(31, 111, 235, 0.35);
+  outline-offset: 0;
+  border-color: var(--primary);
+}
+
+/* Tokens : références (bleu primaire), fonctions (violet), nombres (orange),
+   opérateurs/séparateurs (grisé). Référence inconnue → soulignement onduleur. */
+.tok-ref {
+  color: var(--primary);
+  font-weight: 600;
+}
+.tok-fn {
+  color: #8250df;
+  font-weight: 600;
+}
+.tok-num {
+  color: #b3541e;
+}
+.tok-op {
+  color: var(--text-muted);
+}
+.tok-err {
+  text-decoration: underline wavy var(--danger);
+  text-underline-offset: 2px;
+}
+
+/* Liste d'autocomplétion au `[` : ancrée sous l'éditeur, largeur du conteneur. */
+.formula-editor__complete {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 5;
+  min-width: 260px;
+  max-width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(20, 40, 70, 0.16);
+  padding: 4px;
+}
+
+.formula-editor__opt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.formula-editor__opt.is-active {
+  background: var(--row-hover);
+}
+
+.formula-editor__opt-token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--primary-dark);
+  flex: 0 0 auto;
+}
+
+.formula-editor__opt-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Chips (opérandes & fonctions insérables) ---------- */
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.chip:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+.chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chip__token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+}
+.chip__label {
+  color: var(--text-muted);
+}
+/* Fonctions (MIN, MAX…) : teinte primaire pour les distinguer des opérandes. */
+.chip--fn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  background: rgba(31, 111, 235, 0.06);
+}
+
+/* ---------- Palette d'opérandes (recherche + tri) ---------- */
+.operand-palette {
+  margin-top: 16px;
+}
+.operand-palette__head {
+  margin-bottom: 8px;
+}
+.operand-palette__title {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.operand-palette__hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.operand-palette__search {
+  width: 100%;
+  max-width: 340px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+}
+.operand-palette__search:focus {
+  outline: 2px solid rgba(31, 111, 235, 0.35);
+  border-color: var(--primary);
+}
+.operand-palette__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------- Grain (chips togglables) ---------- */
+.grain-block {
+  margin-top: 8px;
+}
+.grain-block__label {
+  margin-bottom: 4px;
+}
+.grain-block__empty {
+  margin-top: 4px;
+}
+.grain-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.grain-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.grain-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary-dark);
+}
+.grain-chip.is-on {
+  background: rgba(31, 111, 235, 0.1);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+/* ---------- Preview live (coefficients) ---------- */
+.preview {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+.preview--ok {
+  background: rgba(26, 159, 90, 0.06);
+  border-color: rgba(26, 159, 90, 0.4);
+}
+.preview--err {
+  background: rgba(201, 58, 58, 0.06);
+  border-color: rgba(201, 58, 58, 0.4);
+}
+.preview pre {
+  margin: 6px 0 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.preview__error {
+  color: var(--danger);
+}
+
+/* ---------- Attributs de dimension (caractéristiques & emprunts) ---------- */
+
+/* Barre de choix de la dimension (la page se consulte dimension par dimension) :
+   le sélecteur puis l'action « + Nouvel attribut » alignés en bas. */
+.attr-dimbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Liste unifiée (gauche) | détail de la sélection (droite). Repli en une
+   colonne sur écran étroit, comme `rule-op-grid`. */
+.attr-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .attr-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.attr-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Une ligne cliquable par attribut (caractéristique ou emprunt) : code + badge
+   de type en tête, phrase de relecture « en clair » en dessous. */
+.attr-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.attr-item:last-child {
+  border-bottom: none;
+}
+.attr-item:hover {
+  background: var(--row-hover);
+}
+.attr-item.is-selected {
+  background: rgba(31, 111, 235, 0.08);
+}
+
+.attr-item__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.attr-item__code {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+.attr-item__recap {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.attr-item__del {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.attr-item__del:hover {
+  color: var(--danger);
+  background: var(--row-hover);
+}
+
+/* Badges de type : caractéristique (bleu), emprunt (neutre), natif (verrouillé,
+   bord pointillé). Même échelle que `dim-chip`. */
+.attr-badge {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 0 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.attr-badge--char {
+  background: var(--select-bg);
+  color: var(--select-text);
+}
+.attr-badge--ref {
+  background: var(--header-bg);
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+}
+.attr-badge--native {
+  background: var(--header-bg);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-strong);
+}
+
+/* Empty state de la liste. */
+.attr-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Valeurs depuis : dimension vs liste de valeurs (légère teinte). */
+.attr-src {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ---------- Valeurs d'exemple (preview coefficient) ---------- */
+.coeff-samples {
+  margin-top: 8px;
+}
+.coeff-samples__label {
+  margin-bottom: 4px;
+}
+.coeff-samples__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.coeff-samples__token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.coeff-samples__input {
+  width: 90px;
+}
+
+/* ---------- Bascule de thème (topbar) ---------- */
+
+.app__topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.theme-toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ---------- Page d'aide ---------- */
+
+.help-layout {
+  display: flex;
+  gap: 24px;
+  min-height: 600px;
+}
+
+.help-sidebar {
+  flex: 0 0 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.help-sidebar h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-nav {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-nav li {
+  margin-bottom: 4px;
+}
+
+.help-nav-link {
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.help-nav-link:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+
+.help-nav-link--active {
+  background: var(--select-bg);
+  color: var(--select-text);
+  font-weight: 500;
+}
+
+.help-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-page {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px 32px;
+}
+
+.help-content h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.help-content h3 {
+  margin-top: 24px;
+  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-content p {
+  margin: 8px 0 16px 0;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-content ul,
+.help-content ol {
+  margin: 8px 0 16px 0;
+  padding-left: 24px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-content li {
+  margin-bottom: 4px;
+}
+
+.help-content pre {
+  margin: 12px 0 16px 0;
+  padding: 12px 16px;
+  background: var(--header-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.help-content code {
+  background: var(--header-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--select-text);
+}
+
+.help-content strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-nav-link-inline {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--select-bg);
+  color: var(--select-text);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.help-nav-link-inline:hover {
+  border-bottom-color: var(--select-text);
+  color: var(--select-text);
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 16px 0;
+  font-size: 13px;
+}
+
+.help-table th,
+.help-table td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.help-table th {
+  background: var(--header-bg);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-table tr:nth-child(even) {
+  background: var(--row-hover);
 }
