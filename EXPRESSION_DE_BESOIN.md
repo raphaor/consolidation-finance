@@ -136,5 +136,10 @@ Deux natures de traitements (la dichotomie B/C est abandonnée) :
 - Extensions natives : fusions, entrées/sorties en cours d'exercice, IFRS 5.
 - Règles avancées : intérêts minoritaires, retraitements, variations de capital, répartition des résultats (cf. catalogue [`docs/REGLES_CONSO.md`](./docs/REGLES_CONSO.md) §10).
 - Multi-phases (budget, prévision), TFT, annexe, dashboards.
+- **Évolutions architecturales futures** (analyse dans [`docs/QUESTIONS_OUVERTES.md`](./docs/QUESTIONS_OUVERTES.md) §*Évolutions futures*) : dimensions dépendantes du temps [Q47], consolidation à la marge + locking [Q48], consolidation temps réel déclenchée à l'intégration [Q49], calcul hiérarchique sur les dimensions [Q50].
+- **Formulaires configurables** (cahiers de saisie & restitution, pivot tables) [Q51].
+- **Gestion des droits d'accès** (rôles, scopes, packages) [Q52].
+- **Environnements multiples** (Dev / Intégration / Production, promotion paramétrage + données) [Q53].
+- **Accessibilité API pour agents IA** (MCP, bulk master data, pagination, recherche) [Q54].
 
 **Encore à trancher (TÔT) avant la 1ʳᵒ implémentation** : [Q6](./docs/QUESTIONS_OUVERTES.md) (mode complète/marge), [Q8](./docs/QUESTIONS_OUVERTES.md) (workflow validation), [Q9](./docs/QUESTIONS_OUVERTES.md) (granularité de clôture), [Q10](./docs/QUESTIONS_OUVERTES.md) (détection interco — utile au post-MVP), [Q12](./docs/QUESTIONS_OUVERTES.md) (cible de perf).

@@ -108,7 +108,7 @@ exercice), ruleset, `rate_set`, `perimeter_set`. Les saisies (`stg_entry`) sont 
 (`flux_a_nouveau` du schéma + `dim_consolidation.a_nouveau_consolidation_id`). Collé au **corporate** et au
 **consolidé** (fige le % N-1) ; le converti se déduit par conversion normale. **Garde par
 compte** : seul le bilan reporte (le résultat non). Contrôle de cohérence dans `validate`.
-→ Spec : [`A_NOUVEAU.md`](./A_NOUVEAU.md) / [`A_NOUVEAU_IMPL.md`](./A_NOUVEAU_IMPL.md).
+→ Spec : [`A_NOUVEAU.md`](./A_NOUVEAU.md) / [`A_NOUVEAU_IMPL.md`](./archive/specs-livrees/A_NOUVEAU_IMPL.md).
 
 ## Éditeur de règles de consolidation — [Q24]
 
@@ -207,7 +207,7 @@ d'une configuration donnée (interco, équivalence, variations de périmètre pa
 la **recette** — validée end-to-end sur un cas réel complet (saisies + pipeline + ruleset
 interco + à-nouveau + UI). Les anciens scripts Python (`golden_test.py` / `rules_test.py` /
 `smoke_test.py`) ont été retirés lors du chantier migration CSV→JSON (cf.
-[`PLAN_MIGRATION_CSV_JSON.md`](./PLAN_MIGRATION_CSV_JSON.md)).
+[`PLAN_MIGRATION_CSV_JSON.md`](./archive/specs-livrees/PLAN_MIGRATION_CSV_JSON.md)).
 
 ## Performance — `conso-bench` ([Q12], [Q3])
 

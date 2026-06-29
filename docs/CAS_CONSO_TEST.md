@@ -8,7 +8,7 @@ chiffres sur des cas représentatifs.
 
 > **Note** (2026-06-28) : les datasets CSV `prototype/rust/data/smoke/` et le
 > script `smoke_test.py` ont été supprimés par le chantier migration CSV→JSON
-> (cf. [`PLAN_MIGRATION_CSV_JSON.md`](./PLAN_MIGRATION_CSV_JSON.md)). Ce document
+> (cf. [`PLAN_MIGRATION_CSV_JSON.md`](./archive/specs-livrees/PLAN_MIGRATION_CSV_JSON.md)). Ce document
 > reste valable comme spécification des cas de test ; l'implémentation de
 > référence vit désormais dans `tests/rules.rs`, `tests/golden.rs`,
 > `tests/pipeline.rs`.
