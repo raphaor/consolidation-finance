@@ -37,20 +37,25 @@ use axum::{
 use duckdb::params_from_iter;
 use duckdb::types::Value as DbValue;
 use duckdb::Connection;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
 
-use conso_engine::rules::{run_ruleset_at_level, validate_definition, RuleResult, RulesetReport};
+use conso_engine::rules::validate_definition;
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, coefficients, controls, create_schema, custom_references, dimensions, entries,
-    export, import, indicators, masterdata, money::Money, references, run_pipeline,
-    run_pipeline_with_hook, seed_demo_controls,
-    value_lists, ConvertParams,
+    export, import, indicators, masterdata, references, reports, run_pipeline,
+    seed_demo_controls, value_lists, ConvertParams,
+};
+
+// Types métier partagés HTTP ↔ MCP (Q54) : bilan/P&L, exécution pipeline.
+// Le cœur métier vit dans `conso_engine::reports` ; ce binaire n'en fait que
+// wrapper les handlers Axum.
+use conso_engine::reports::{
+    build_filters_fe, run_consolidation, BilanQuery, BilanRow, PipelineResult,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,54 +76,13 @@ struct LevelCount {
     count: i64,
 }
 
-/// Ligne `/api/bilan` : montant agrégé par (compte, flux, nature) au niveau demandé.
-///
-/// `amount` est sérialisé en **nombre** JSON (feature `serde-float` de
-/// `rust_decimal`) — le frontend TS attend `amount: 9774.0`, pas une chaîne.
-#[derive(Serialize)]
-struct BilanRow {
-    account: String,
-    flow: String,
-    nature: String,
-    /// Sens du compte dérivé de `dim_sous_classe.classe`/code : `"C"` créditeur
-    /// (passif, produits) ou `"D"` débiteur (actif, charges). Permet au rapport
-    /// de calculer le total comme Σ(comptes C) − Σ(comptes D) — équilibre du
-    /// bilan, résultat du P&L. `"?"` si la sous-classe est inconnue/nulle.
-    sens: String,
-    amount: Decimal,
-}
+// `BilanRow`, `CoherenceWarning`, `PipelineResult` sont définis dans
+// `conso_engine::reports` (partagés avec le serveur MCP, Q54).
 
 // Sens comptable (Q44) : désormais user-driven via `dim_sous_classe.sens`
 // (colonne C/D). Les rapports bilan/P&L signent via un LEFT JOIN sur cette
 // colonne (COALESCE '?' si NULL). L'ancien CASE en dur `SENS_CASE` est supprimé
 // — `sous_classe` devient renommable (plus de code en dur référençant ses valeurs).
-
-/// Avertissement de cohérence de l'à-nouveau (non bloquant), remonté au client
-/// pour affichage dans l'UI plutôt qu'en console (cf. docs/A_NOUVEAU.md §5.1).
-#[derive(Serialize)]
-struct CoherenceWarning {
-    kind: String,
-    entity: String,
-    detail: String,
-}
-
-/// Réponse `/api/run` : nombre de lignes produites à chaque étape du pipeline.
-#[derive(Serialize)]
-struct PipelineResult {
-    corporate: usize,
-    converted: usize,
-    consolidated: usize,
-    /// Identifiant (`id`) de la consolidation utilisée pour le run (explicite
-    /// dans le body ou première consolidation `'ouvert'` trouvée).
-    consolidation: i64,
-    /// Ruleset exécuté après le pipeline (NULL si la consolidation n'en référence pas).
-    ruleset: Option<String>,
-    /// Rapport du ruleset, présent si `ruleset` est `Some`.
-    ruleset_report: Option<RulesetReport>,
-    /// Avertissements de cohérence de l'à-nouveau (non bloquants). Tableau vide
-    /// si aucun ; remplace l'ancien `eprintln!` console.
-    a_nouveau_warnings: Vec<CoherenceWarning>,
-}
 
 /// Réponse `/api/reset` : statut + nombre d'écritures brutes rechargées.
 #[derive(Serialize)]
@@ -131,21 +95,7 @@ struct ResetResult {
 //  Paramètres de requête (query string)
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct BilanQuery {
-    #[serde(default = "default_level")]
-    level: String,
-    #[serde(default)]
-    consolidation: Option<i64>,
-    #[serde(default)]
-    entity: Option<String>,
-    #[serde(default)]
-    entry_period: Option<String>,
-    #[serde(default)]
-    period: Option<String>,
-    #[serde(default)]
-    nature: Option<String>,
-}
+// `BilanQuery` est défini dans `conso_engine::reports` (Q54).
 
 #[derive(Deserialize)]
 struct EntriesQuery {
@@ -226,39 +176,8 @@ fn build_filters(
     (sql, params)
 }
 
-/// Filtres pour `fact_entry` (colonnes INTEGER après étape 4 B1).
-/// Les codes TEXT sont résolus en ids via sous-requêtes.
-fn build_filters_fe(
-    consolidation: &Option<i64>,
-    entity: &Option<String>,
-    entry_period: &Option<String>,
-    period: &Option<String>,
-    nature: &Option<String>,
-) -> (String, Vec<DbValue>) {
-    let mut sql = String::new();
-    let mut params = Vec::new();
-    if let Some(c) = consolidation {
-        sql.push_str(" AND consolidation_id = ?");
-        params.push(DbValue::BigInt(*c));
-    }
-    if let Some(e) = entity {
-        sql.push_str(" AND entity = (SELECT id FROM dim_entity WHERE code = ?)");
-        params.push(DbValue::Text(e.clone()));
-    }
-    if let Some(ep) = entry_period {
-        sql.push_str(" AND entry_period = (SELECT id FROM dim_period WHERE code = ?)");
-        params.push(DbValue::Text(ep.clone()));
-    }
-    if let Some(p) = period {
-        sql.push_str(" AND period = (SELECT id FROM dim_period WHERE code = ?)");
-        params.push(DbValue::Text(p.clone()));
-    }
-    if let Some(n) = nature {
-        sql.push_str(" AND nature = (SELECT id FROM dim_nature WHERE code = ?)");
-        params.push(DbValue::Text(n.clone()));
-    }
-    (sql, params)
-}
+// `build_filters_fe` (filtres `fact_entry`, colonnes INTEGER résolues via
+// sous-requêtes) est défini dans `conso_engine::reports` (Q54).
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Handlers
@@ -309,63 +228,15 @@ async fn get_levels(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Level
 ///
 /// Le « bilan » au sens large (actif + passif + capitaux propres) regroupe les
 /// comptes de classe `bilan`. Les comptes de `resultat` (P&L : classes 6/7) sont
-/// exclus — ils sont exposés via `/api/compte-resultat`. On join `dim_account`
-/// pour filtrer sur la classe.
+/// exclus — ils sont exposés via `/api/compte-resultat`. Cœur métier dans
+/// `reports::get_bilan` (partagé avec le MCP, Q54).
 async fn get_bilan(
     Query(q): Query<BilanQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        // Totaux = lignes principales uniquement : on exclut les « dont »
-        // (dimensions analytiques renseignées), qui sont des détails de la ligne
-        // de même grain sans la dimension. Cf. dimensions::analytical_cols.
-        let dims = dimensions::load_all(&con).map_err(db_err)?;
-        let of_which: String = dimensions::analytical_cols(&dims)
-            .iter()
-            .map(|c| format!(" AND e.{c} IS NULL"))
-            .collect();
-        let (fsql, fparams) = build_filters_fe(
-            &q.consolidation,
-            &q.entity,
-            &q.entry_period,
-            &q.period,
-            &q.nature,
-        );
-        // fact_entry stocke account/flow/nature en INTEGER (étape 4 B1) →
-        // JOINs sur id pour résoudre les codes et filtrer par classe.
-        let sql = format!(
-            "SELECT a.code AS account, df.code AS flow, n.code AS nature,
-                    COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
-             FROM fact_entry e
-             JOIN dim_account a ON a.id = e.account
-             JOIN dim_flow df ON df.id = e.flow
-             JOIN dim_nature n ON n.id = e.nature
-             LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
-             WHERE e.level = ? AND a.classe = 'bilan' {fsql}{of_which}
-             GROUP BY a.code, df.code, n.code, a.sous_classe, sc.sens
-             ORDER BY a.code, df.code, n.code"
-        );
-        let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
-        params.extend(fparams);
-        let mut stmt = con.prepare(&sql).map_err(db_err)?;
-        let iter = stmt
-            .query_map(params_from_iter(params), |row| {
-                let m: Money = row.get(4)?;
-                Ok(BilanRow {
-                    account: row.get(0)?,
-                    flow: row.get(1)?,
-                    nature: row.get(2)?,
-                    sens: row.get(3)?,
-                    amount: m.into_decimal(),
-                })
-            })
-            .map_err(db_err)?;
-        let mut out = Vec::new();
-        for r in iter {
-            out.push(r.map_err(db_err)?);
-        }
-        out
+        reports::get_bilan(&con, &q)?
     };
     Ok(Json(rows))
 }
@@ -373,57 +244,14 @@ async fn get_bilan(
 /// GET /api/compte-resultat?level=consolidated — compte de résultat par flux.
 ///
 /// Restreint aux comptes de classe « resultat » (P&L : produits et charges).
+/// Cœur métier dans `reports::get_compte_resultat` (partagé avec le MCP, Q54).
 async fn get_compte_resultat(
     Query(q): Query<BilanQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<BilanRow>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        // Totaux = lignes principales uniquement (exclut les « dont »). Idem bilan.
-        let dims = dimensions::load_all(&con).map_err(db_err)?;
-        let of_which: String = dimensions::analytical_cols(&dims)
-            .iter()
-            .map(|c| format!(" AND e.{c} IS NULL"))
-            .collect();
-        let (fsql, fparams) = build_filters_fe(
-            &q.consolidation,
-            &q.entity,
-            &q.entry_period,
-            &q.period,
-            &q.nature,
-        );
-        let sql = format!(
-             "SELECT a.code AS account, df.code AS flow, n.code AS nature,
-                     COALESCE(sc.sens, '?') AS sens, SUM(e.amount) AS amount
-              FROM fact_entry e
-              JOIN dim_account a ON a.id = e.account
-              JOIN dim_flow df ON df.id = e.flow
-              JOIN dim_nature n ON n.id = e.nature
-              LEFT JOIN dim_sous_classe sc ON sc.id = a.sous_classe
-              WHERE e.level = ? AND a.classe = 'resultat' {fsql}{of_which}
-              GROUP BY a.code, df.code, n.code, a.sous_classe, sc.sens
-              ORDER BY a.code, df.code, n.code"
-        );
-        let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
-        params.extend(fparams);
-        let mut stmt = con.prepare(&sql).map_err(db_err)?;
-        let iter = stmt
-            .query_map(params_from_iter(params), |row| {
-                let m: Money = row.get(4)?;
-                Ok(BilanRow {
-                    account: row.get(0)?,
-                    flow: row.get(1)?,
-                    nature: row.get(2)?,
-                    sens: row.get(3)?,
-                    amount: m.into_decimal(),
-                })
-            })
-            .map_err(db_err)?;
-        let mut out = Vec::new();
-        for r in iter {
-            out.push(r.map_err(db_err)?);
-        }
-        out
+        reports::get_compte_resultat(&con, &q)?
     };
     Ok(Json(rows))
 }
@@ -641,136 +469,15 @@ async fn list_consolidations(
 
 /// POST /api/run — déclenche le pipeline 3 étapes (sur la consolidation du body,
 /// sinon la 1ère consolidation `'ouvert'`) et, si la consolidation référence un
-/// ruleset, exécute celui-ci après le pipeline.
-///
-/// Workflow :
-/// 1. Résolution de l'id consolidation (body ou défaut `'ouvert'`).
-/// 2. `ConvertParams::load_params(con, consolidation_id)`.
-/// 3. `DELETE FROM fact_entry WHERE consolidation_id = ?` (reset de la conso
-///    courante ; les autres consolidations — snapshot d'à-nouveau figé — sont
-///    préservées).
-/// 4. `run_pipeline(con, &params)`.
-/// 5. Si `consolidation.ruleset_code` non NULL : `run_ruleset(con, ruleset_code)`.
-/// 6. Retourne `{ counts, consolidation, ruleset?, ruleset_report? }`.
+/// ruleset, exécute celui-ci après le pipeline. Cœur métier dans
+/// `reports::run_consolidation` (partagé avec le MCP, Q54).
 async fn run_pipeline_handler(
     State(state): State<Arc<AppState>>,
     body: Option<Json<RunBody>>,
 ) -> Result<Json<PipelineResult>, AppError> {
     let result = {
         let con = lock_con(&state)?;
-        // 1. Résolution de la consolidation : explicite dans le body, sinon 1ère 'ouvert'.
-        let consolidation_id: i64 = match body.and_then(|b| b.0.consolidation_id) {
-            Some(id) => id,
-            None => con
-                .query_row(
-                    "SELECT id FROM dim_consolidation \
-                     WHERE statut = 'ouvert' OR statut IS NULL \
-                     ORDER BY id LIMIT 1",
-                    [],
-                    |r| r.get::<_, i64>(0),
-                )
-                .map_err(|e| {
-                    AppError::bad_request(format!(
-                        "aucune consolidation 'ouvert' trouvée (précisez {{\"consolidation_id\":N}}) : {e}"
-                    ))
-                })?,
-        };
-
-        // 2. Chargement des params depuis dim_consolidation + app_config.
-        let params = ConvertParams::load_params(&con, consolidation_id).map_err(db_err)?;
-
-        // 3. Lecture du ruleset_code (NULL si la consolidation n'en référence pas).
-        //    B1 : stocké en id → résolu en code par LEFT JOIN.
-        let ruleset_code: Option<String> = con
-            .query_row(
-                "SELECT rs.code FROM dim_consolidation c \
-                 LEFT JOIN dim_ruleset rs ON rs.id = c.ruleset_code \
-                 WHERE c.id = ?",
-                [consolidation_id],
-                |r| r.get::<_, Option<String>>(0),
-            )
-            .map_err(db_err)?;
-
-        // 4. Vider les résultats du pipeline de la CONSOLIDATION COURANTE avant
-        //    de relancer (isolation par consolidation_id : les autres
-        //    consolidations — ex. snapshot d'à-nouveau figé — sont préservées).
-        //    Cf. docs/A_NOUVEAU.md §2.3 / §3.
-        con.execute(
-            "DELETE FROM fact_entry WHERE consolidation_id = ?",
-            [consolidation_id],
-        )
-        .map_err(db_err)?;
-
-        // 5. Pipeline. Si la consolidation référence un ruleset, on **intercale**
-        //    ses règles au niveau qu'elles ciblent (hook post-étape) : une règle
-        //    `converted` est injectée juste après l'étape C, puis consolidée par
-        //    l'étape D — propagation identique à une écriture manuelle. Sinon,
-        //    pipeline natif seul.
-        let mut rule_results: Vec<RuleResult> = Vec::new();
-        let counts = match &ruleset_code {
-            Some(code) => {
-                let mut hook = |c: &Connection, level: &str| -> duckdb::Result<()> {
-                    rule_results.extend(run_ruleset_at_level(
-                        c,
-                        code,
-                        level,
-                        Some(consolidation_id),
-                    )?);
-                    Ok(())
-                };
-                run_pipeline_with_hook(&con, &params, &mut hook)
-                    .map_err(db_err)?
-                    .counts()
-            }
-            None => run_pipeline(&con, &params).map_err(db_err)?.counts(),
-        };
-
-        // 5b. À-nouveau : contrôle de cohérence **non bloquant** (cf.
-        //     docs/A_NOUVEAU.md §5.1, A5 : statut `ouvert` toléré → on alerte).
-        //     Les anomalies sont remontées dans la réponse (UI) au lieu de la
-        //     console.
-        let mut a_nouveau_warnings: Vec<CoherenceWarning> = Vec::new();
-        if let Some(a_nouveau_id) = params.a_nouveau_consolidation_id {
-            match conso_engine::validate::check_a_nouveau_coherence(
-                &con,
-                consolidation_id,
-                a_nouveau_id,
-                &params.exercice,
-            ) {
-                Ok(anomalies) => {
-                    a_nouveau_warnings = anomalies
-                        .into_iter()
-                        .map(|a| CoherenceWarning {
-                            kind: a.kind.to_string(),
-                            entity: a.entity,
-                            detail: a.detail,
-                        })
-                        .collect();
-                }
-                Err(e) => a_nouveau_warnings.push(CoherenceWarning {
-                    kind: "controle_echoue".to_string(),
-                    entity: String::new(),
-                    detail: format!("contrôle de cohérence à-nouveau échoué : {e}"),
-                }),
-            }
-        }
-
-        // 6. Rapport du ruleset (agrégé depuis les niveaux intercalés).
-        let ruleset_report = ruleset_code.as_ref().map(|code| RulesetReport {
-            ruleset: code.clone(),
-            total_generated: rule_results.iter().map(|r| r.generated).sum(),
-            rules: rule_results,
-        });
-
-        PipelineResult {
-            corporate: counts[0],
-            converted: counts[1],
-            consolidated: counts[2],
-            consolidation: consolidation_id,
-            ruleset: ruleset_code,
-            ruleset_report,
-            a_nouveau_warnings,
-        }
+        run_consolidation(&con, body.and_then(|b| b.0.consolidation_id))?
     };
     Ok(Json(result))
 }

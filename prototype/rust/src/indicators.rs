@@ -503,13 +503,15 @@ fn compile_indicator(
 
 /// Une ligne de résultat : valeurs de grain (texte) + la valeur de l'indicateur.
 #[derive(Serialize)]
-struct IndicatorRow {
-    grain: std::collections::BTreeMap<String, Option<String>>,
-    value: Option<f64>,
+pub struct IndicatorRow {
+    pub grain: std::collections::BTreeMap<String, Option<String>>,
+    pub value: Option<f64>,
 }
 
-/// Exécute un indicateur et renvoie ses lignes.
-fn run_indicator(
+/// Exécute un indicateur et renvoie ses lignes. Public pour le serveur MCP
+/// (Q54) — calcule une formule à un grain sur une consolidation, sans passer
+/// par l'API REST.
+pub fn run_indicator(
     con: &Connection,
     expression: &str,
     grain: &[String],

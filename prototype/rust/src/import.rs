@@ -137,15 +137,15 @@ fn split_first_line(bytes: &[u8]) -> Result<(String, usize), AppError> {
     Ok((header, end))
 }
 
-async fn import_entries(
-    State(state): State<Arc<AppState>>,
-    multipart: Multipart,
-) -> Result<Json<serde_json::Value>, AppError> {
-    let bytes = extract_file_bytes(multipart).await?;
+/// Import CSV d'écritures (append dans `stg_entry`) depuis des octets bruts.
+/// Réutilisable par l'handler HTTP (multipart) et par le MCP (CSV construit
+/// depuis un JSON ou fourni directement). Valide le header + la cohérence
+/// référentielle **avant** insertion. Retourne le nombre de lignes insérées.
+pub fn import_entries_csv(con: &duckdb::Connection, bytes: &[u8]) -> Result<i64, AppError> {
     if bytes.is_empty() {
         return Err(AppError::bad_request("fichier vide"));
     }
-    let (header_line, _header_end) = split_first_line(&bytes)?;
+    let (header_line, _header_end) = split_first_line(bytes)?;
     let header = parse_header_line(&header_line);
     // Colonnes required minimales (Fixed + Active + amount). Les dimensions
     // Analytical (partner, share, analysis, analysis2 et toutes les customs)
@@ -166,22 +166,17 @@ async fn import_entries(
     )?;
 
     let tmp = unique_tmp_path("csv");
-    std::fs::write(&tmp, &bytes)
+    std::fs::write(&tmp, bytes)
         .map_err(|e| AppError::bad_request(format!("écriture temp : {e}")))?;
     let path = escape_csv_path(&tmp.display().to_string());
 
-    let imported = {
-        let con = lock_con(&state)?;
-
+    let result = (|| {
         // Cohérence référentielle des dimensions avant insertion.
-        if let Err(e) = validate_csv_references(&con, "stg_entry", &header, &path) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e);
-        }
+        validate_csv_references(con, "stg_entry", &header, &path)?;
 
         // Colonnes connues de stg_entry = dimensions propagées (built-in +
         // customs) + amount. Pas de `level` dans stg_entry.
-        let dims = dimensions::load_all(&con).map_err(|e| {
+        let dims = dimensions::load_all(con).map_err(|e| {
             AppError::bad_request(format!("registre des dimensions illisible : {e}"))
         })?;
         let mut cols = dimensions::propagated_cols(&dims);
@@ -213,16 +208,25 @@ async fn import_entries(
         );
 
         match con.execute(&sql, []) {
-            Ok(n) => n,
-            Err(e) => {
-                let _ = std::fs::remove_file(&tmp);
-                return Err(AppError::bad_request(format!(
-                    "lecture CSV impossible : {e}"
-                )));
-            }
+            Ok(n) => Ok(n as i64),
+            Err(e) => Err(AppError::bad_request(format!(
+                "lecture CSV impossible : {e}"
+            ))),
         }
-    };
+    })();
     let _ = std::fs::remove_file(&tmp);
+    result
+}
+
+async fn import_entries(
+    State(state): State<Arc<AppState>>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let bytes = extract_file_bytes(multipart).await?;
+    let imported = {
+        let con = lock_con(&state)?;
+        import_entries_csv(&con, &bytes)?
+    };
     Ok(Json(json!({ "imported": imported })))
 }
 
