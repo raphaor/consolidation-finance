@@ -110,16 +110,49 @@ fn translate_rows_out(
     Ok(out)
 }
 
-struct TableDef {
-    api_name: &'static str,
-    label: &'static str,
-    sql_name: &'static str,
-    columns: &'static [&'static str],
-    pk: &'static [&'static str],
+pub struct TableDef {
+    pub api_name: &'static str,
+    pub label: &'static str,
+    pub sql_name: &'static str,
+    pub columns: &'static [&'static str],
+    pub pk: &'static [&'static str],
     /// `true` si la PK est auto-générée (ex. `INTEGER DEFAULT nextval(...)`).
     /// Dans ce cas, le `create` omet la colonne PK de l'INSERT et récupère l'id
     /// généré via `INSERT ... RETURNING <pk>`.
-    auto_pk: bool,
+    pub auto_pk: bool,
+}
+
+/// Catalogue statique des tables master data navigables (Q54 : exposé au MCP
+/// pour `describe_model`). Voir [`TABLES`] pour le contenu.
+pub fn tables() -> &'static [TableDef] {
+    TABLES
+}
+
+/// Catalogue des champs de saisie `stg_entry` (Q54) : nom, catégorie
+/// (Fixed/Active/Analytical/custom), obligatoire, et cible FK vers la master
+/// data. Sert à `describe_model` pour qu'un agent construise des écritures
+/// valides sans connaître le schéma SQL.
+pub fn entry_field_catalog(con: &duckdb::Connection) -> Vec<JsonValue> {
+    let dims = crate::dimensions::load_all(con).unwrap_or_default();
+    let mut out = Vec::new();
+    for d in &dims {
+        let fk = crate::references::dimension_master(&d.name)
+            .map(|(t, c)| serde_json::json!({ "table": t, "column": c }));
+        out.push(serde_json::json!({
+            "name": d.name,
+            "category": format!("{:?}", d.category),
+            "required": !d.nullable(),
+            "fk": fk,
+        }));
+    }
+    // `source` (provenance) et `amount` ne sont pas des dimensions propagées.
+    out.push(serde_json::json!({
+        "name": "source", "category": "Provenance", "required": false, "type": "TEXT", "fk": null
+    }));
+    out.push(serde_json::json!({
+        "name": "amount", "category": "Amount", "required": true, "type": "DECIMAL", "fk": null
+    }));
+    out
 }
 
 const TABLES: &[TableDef] = &[
@@ -848,6 +881,147 @@ fn enrich_rows(
     Ok(out)
 }
 
+// ───────────────────────── API publique (réutilisée par le MCP, Q54) ───────────
+
+/// Options de lecture master data (Q54) : recherche, filtres, pagination,
+/// enrichissement. Les filtres sont validés contre le schéma de la table.
+#[derive(Default)]
+pub struct MdListOptions {
+    pub search: Option<String>,
+    pub filters: HashMap<String, String>,
+    pub limit: Option<i64>,
+    pub offset: i64,
+    pub enrich: bool,
+}
+
+/// Lecture paginée/filtrée d'une table master data. Retourne `(rows, total)`.
+/// Réutilisé par `GET /api/md/{table}` et par l'outil MCP `list_master_data`.
+pub fn md_list(
+    con: &duckdb::Connection,
+    table: &str,
+    opts: MdListOptions,
+) -> Result<(Vec<JsonValue>, i64), AppError> {
+    let def = resolve_table(con, table)?
+        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+    let (mut rows, total) = select_filtered(
+        &def,
+        con,
+        opts.search.as_deref(),
+        &opts.filters,
+        opts.limit,
+        opts.offset,
+    )?;
+    if opts.enrich {
+        rows = enrich_rows(&def, con, rows)?;
+    }
+    Ok((rows, total))
+}
+
+/// Upsert en masse (Q54). Retourne `(inserted, updated)`. Validation
+/// all-or-nothing puis transaction. Réutilisé par `PUT /api/md/{table}/bulk` et
+/// l'outil MCP `upsert_master_data`.
+pub fn md_bulk_upsert(
+    con: &duckdb::Connection,
+    table: &str,
+    body: Vec<JsonValue>,
+) -> Result<(usize, usize), AppError> {
+    let def = resolve_table(con, table)?
+        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+    let mut errors: Vec<String> = Vec::new();
+    for (i, row) in body.iter().enumerate() {
+        let obj = match row.as_object() {
+            Some(o) => o,
+            None => {
+                errors.push(format!("ligne {i} : doit être un objet JSON"));
+                continue;
+            }
+        };
+        if let Err(e) = reject_unknown_fields(&def, obj) {
+            errors.push(format!("ligne {i} : {}", e.1));
+        } else if let Err(e) = validate_references(&def, obj, con) {
+            errors.push(format!("ligne {i} : {}", e.1));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(AppError::bad_request(format!(
+            "batch rejeté ({} erreur(s)) : {}",
+            errors.len(),
+            errors.join(" ; ")
+        )));
+    }
+    con.execute_batch("BEGIN").map_err(db_err)?;
+    let outcome: Result<(usize, usize), AppError> = (|| {
+        let mut inserted = 0usize;
+        let mut updated = 0usize;
+        for row in &body {
+            let obj = row.as_object().expect("validé plus haut");
+            if row_upsert(&def, con, obj)? {
+                inserted += 1;
+            } else {
+                updated += 1;
+            }
+        }
+        Ok((inserted, updated))
+    })();
+    match outcome {
+        Ok(v) => {
+            con.execute_batch("COMMIT").map_err(db_err)?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = con.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// Suppression en masse (Q54). Retourne `(deleted, missing)`. Transactionnel,
+/// best-effort sur les PK absentes. Réutilisé par `DELETE /api/md/{table}/bulk`
+/// et l'outil MCP (non exposé individuellement — `upsert` + read suffisent).
+pub fn md_bulk_delete(
+    con: &duckdb::Connection,
+    table: &str,
+    body: Vec<JsonValue>,
+) -> Result<(usize, usize), AppError> {
+    let def = resolve_table(con, table)?
+        .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+    con.execute_batch("BEGIN").map_err(db_err)?;
+    let outcome: Result<(usize, usize), AppError> = (|| {
+        let mut deleted = 0usize;
+        let mut missing = 0usize;
+        for (i, pk_obj) in body.iter().enumerate() {
+            let pk_vals = pk_from_body(&def, pk_obj).map_err(|e| {
+                AppError::bad_request(format!("ligne {i} : {}", e.1))
+            })?;
+            if fetch_one(&def, &pk_vals, con)?.is_none() {
+                missing += 1;
+                continue;
+            }
+            let where_clause = def
+                .pk
+                .iter()
+                .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            let sql = format!("DELETE FROM {} WHERE {}", def.sql_name, where_clause);
+            let params: Vec<DbValue> = pk_vals.iter().map(|(_, v)| json_to_db_value(v)).collect();
+            let n = con.execute(&sql, params_from_iter(params)).map_err(db_err)?;
+            deleted += n as usize;
+        }
+        Ok((deleted, missing))
+    })();
+    match outcome {
+        Ok(v) => {
+            con.execute_batch("COMMIT").map_err(db_err)?;
+            Ok(v)
+        }
+        Err(e) => {
+            let _ = con.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 fn fetch_one(
     def: &OwnedTableDef,
     pk_vals: &[(String, JsonValue)],
@@ -1006,14 +1180,17 @@ async fn list(
 
     let (rows, total) = {
         let con = lock_con(&state)?;
-        let def = resolve_table(&con, &table)?
-            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
-        let (mut rows, total) =
-            select_filtered(&def, &con, search.as_deref(), &all, limit, offset)?;
-        if enrich {
-            rows = enrich_rows(&def, &con, rows)?;
-        }
-        (rows, total)
+        md_list(
+            &con,
+            &table,
+            MdListOptions {
+                search,
+                filters: all,
+                limit,
+                offset,
+                enrich,
+            },
+        )?
     };
 
     // Rétrocompat (D5) : sans paramètre de pagination ni `?envelope=true`, on
@@ -1390,135 +1567,40 @@ fn row_upsert(
 ///
 /// Body : un tableau JSON d'objets (chacun porte ses colonnes, **PK incluse**
 /// pour les tables à PK code ; `id` optionnel pour les tables auto-PK).
-/// Validation **all-or-nothing** : toutes les lignes sont validées (champs
-/// inconnus + intégrité référentielle) avant la moindre écriture. Puis une
-/// transaction `BEGIN`/`COMMIT` englobe les upserts ; toute erreur DB →
-/// `ROLLBACK` et 500.
-///
-/// Réponse : `{ "inserted": N, "updated": M }`.
+/// Validation **all-or-nothing**, puis transaction. Réponse `{inserted, updated}`.
+/// Cœur métier dans [`md_bulk_upsert`] (partagé avec le MCP, Q54).
 async fn bulk_upsert(
     Path(table): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<Vec<JsonValue>>,
 ) -> Result<Json<JsonValue>, AppError> {
-    let result = {
+    let (inserted, updated) = {
         let con = lock_con(&state)?;
-        let def = resolve_table(&con, &table)?
-            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
-        // 1. Validation du batch entier avant écriture.
-        let mut errors: Vec<String> = Vec::new();
-        for (i, row) in body.iter().enumerate() {
-            let obj = match row.as_object() {
-                Some(o) => o,
-                None => {
-                    errors.push(format!("ligne {i} : doit être un objet JSON"));
-                    continue;
-                }
-            };
-            if let Err(e) = reject_unknown_fields(&def, obj) {
-                errors.push(format!("ligne {i} : {}", e.1));
-            } else if let Err(e) = validate_references(&def, obj, &con) {
-                errors.push(format!("ligne {i} : {}", e.1));
-            }
-        }
-        if !errors.is_empty() {
-            return Err(AppError::bad_request(format!(
-                "batch rejeté ({} erreur(s)) : {}",
-                errors.len(),
-                errors.join(" ; ")
-            )));
-        }
-        // 2. Transaction d'écriture.
-        con.execute_batch("BEGIN").map_err(db_err)?;
-        let outcome: Result<(usize, usize), AppError> = (|| {
-            let mut inserted = 0usize;
-            let mut updated = 0usize;
-            for row in &body {
-                let obj = row.as_object().expect("validé plus haut");
-                if row_upsert(&def, &con, obj)? {
-                    inserted += 1;
-                } else {
-                    updated += 1;
-                }
-            }
-            Ok((inserted, updated))
-        })();
-        match outcome {
-            Ok((inserted, updated)) => {
-                con.execute_batch("COMMIT").map_err(db_err)?;
-                (inserted, updated)
-            }
-            Err(e) => {
-                let _ = con.execute_batch("ROLLBACK");
-                return Err(e);
-            }
-        }
+        md_bulk_upsert(&con, &table, body)?
     };
     Ok(Json(serde_json::json!({
-        "inserted": result.0,
-        "updated": result.1,
+        "inserted": inserted,
+        "updated": updated,
     })))
 }
 
 /// `DELETE /api/md/{table}/bulk` — suppression en masse (Q54).
 ///
 /// Body : un tableau JSON d'objets PK (multi-colonnes OK, ex.
-/// `{perimeter_set, entity, period}`). Transactionnel : toute erreur DB →
-/// `ROLLBACK`. Best-effort sur les PK absentes (comptées dans `missing`, non
-/// bloquant).
-///
-/// Réponse : `{ "deleted": N, "missing": M }`.
+/// `{perimeter_set, entity, period}`). Best-effort sur les PK absentes
+/// (`missing`). Réponse `{deleted, missing}`. Cœur métier dans [`md_bulk_delete`].
 async fn bulk_delete(
     Path(table): Path<String>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<Vec<JsonValue>>,
 ) -> Result<Json<JsonValue>, AppError> {
-    let result = {
+    let (deleted, missing) = {
         let con = lock_con(&state)?;
-        let def = resolve_table(&con, &table)?
-            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
-        con.execute_batch("BEGIN").map_err(db_err)?;
-        let outcome: Result<(usize, usize), AppError> = (|| {
-            let mut deleted = 0usize;
-            let mut missing = 0usize;
-            for (i, pk_obj) in body.iter().enumerate() {
-                let pk_vals = pk_from_body(&def, pk_obj).map_err(|e| {
-                    AppError::bad_request(format!("ligne {i} : {}", e.1))
-                })?;
-                if fetch_one(&def, &pk_vals, &con)?.is_none() {
-                    missing += 1;
-                    continue;
-                }
-                let where_clause = def
-                    .pk
-                    .iter()
-                    .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
-                    .collect::<Vec<_>>()
-                    .join(" AND ");
-                let sql = format!("DELETE FROM {} WHERE {}", def.sql_name, where_clause);
-                let params: Vec<DbValue> =
-                    pk_vals.iter().map(|(_, v)| json_to_db_value(v)).collect();
-                let n = con
-                    .execute(&sql, params_from_iter(params))
-                    .map_err(db_err)?;
-                deleted += n as usize;
-            }
-            Ok((deleted, missing))
-        })();
-        match outcome {
-            Ok((deleted, missing)) => {
-                con.execute_batch("COMMIT").map_err(db_err)?;
-                (deleted, missing)
-            }
-            Err(e) => {
-                let _ = con.execute_batch("ROLLBACK");
-                return Err(e);
-            }
-        }
+        md_bulk_delete(&con, &table, body)?
     };
     Ok(Json(serde_json::json!({
-        "deleted": result.0,
-        "missing": result.1,
+        "deleted": deleted,
+        "missing": missing,
     })))
 }
 

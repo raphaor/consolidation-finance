@@ -7,12 +7,14 @@
 use duckdb::{params_from_iter, types::Value as DbValue, Connection};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
+use crate::masterdata;
 use crate::money::Money;
 use crate::rules::{run_ruleset_at_level, RuleResult, RulesetReport};
 use crate::state::{db_err, AppError};
 use crate::validate;
-use crate::{dimensions, ConvertParams, run_pipeline, run_pipeline_with_hook};
+use crate::{dimensions, references, ConvertParams, run_pipeline, run_pipeline_with_hook};
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  DTO
@@ -70,6 +72,41 @@ pub struct BilanQuery {
 
 fn default_level() -> String {
     "consolidated".to_string()
+}
+
+fn default_limit() -> i64 {
+    100
+}
+
+/// Paramètres de requête pour la lecture des écritures (`/api/entries` et outil
+/// MCP `get_entries`). `level` = `raw` (saisie `stg_entry`) ou un niveau
+/// `fact_entry` (`corporate` / `converted` / `consolidated`).
+#[derive(Deserialize, Default, Clone)]
+pub struct EntriesQuery {
+    #[serde(default = "default_level")]
+    pub level: String,
+    #[serde(default = "default_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+    /// Filtre par consolidation (PK `dim_consolidation.id`) pour les niveaux
+    /// `fact_entry` (corporate / converted / consolidated).
+    #[serde(default)]
+    pub consolidation: Option<i64>,
+    /// Filtre par phase pour le niveau `raw` (`stg_entry.phase`).
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub entity: Option<String>,
+    #[serde(default)]
+    pub entry_period: Option<String>,
+    #[serde(default)]
+    pub period: Option<String>,
+    #[serde(default)]
+    pub nature: Option<String>,
+    /// Filtre par provenance (`source`) — niveau `raw` uniquement.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +210,219 @@ pub fn get_bilan(con: &Connection, q: &BilanQuery) -> Result<Vec<BilanRow>, AppE
 /// Compte de résultat par flux (comptes de classe `resultat`).
 pub fn get_compte_resultat(con: &Connection, q: &BilanQuery) -> Result<Vec<BilanRow>, AppError> {
     report_by_class(con, q, "resultat")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Lecture des écritures (stg_entry / fact_entry)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Filtres pour `stg_entry` (colonnes TEXT — niveau `raw`). Renvoie un fragment
+/// préfixé par " AND ..." prêt à concaténer après un WHERE existant.
+pub fn build_filters(
+    consolidation: &Option<i64>,
+    entity: &Option<String>,
+    entry_period: &Option<String>,
+    period: &Option<String>,
+    nature: &Option<String>,
+) -> (String, Vec<DbValue>) {
+    let mut sql = String::new();
+    let mut params = Vec::new();
+    if let Some(c) = consolidation {
+        sql.push_str(" AND consolidation_id = ?");
+        params.push(DbValue::BigInt(*c));
+    }
+    if let Some(e) = entity {
+        sql.push_str(" AND entity = ?");
+        params.push(DbValue::Text(e.clone()));
+    }
+    if let Some(ep) = entry_period {
+        sql.push_str(" AND entry_period = ?");
+        params.push(DbValue::Text(ep.clone()));
+    }
+    if let Some(p) = period {
+        sql.push_str(" AND period = ?");
+        params.push(DbValue::Text(p.clone()));
+    }
+    if let Some(n) = nature {
+        sql.push_str(" AND nature = ?");
+        params.push(DbValue::Text(n.clone()));
+    }
+    (sql, params)
+}
+
+/// Lecture paginée des écritures. `level = "raw"` lit la saisie brute
+/// (`stg_entry`) ; sinon un niveau `fact_entry` (avec résolution des codes via
+/// JOINs). Cœur du `GET /api/entries` et de l'outil MCP `get_entries` (Q54).
+pub fn get_entries(con: &Connection, q: &EntriesQuery) -> Result<Vec<JsonValue>, AppError> {
+    let dims = dimensions::load_all(con).map_err(db_err)?;
+    let col_list = dimensions::propagated_cols(&dims).join(", ");
+    let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
+        let (mut fsql, mut fparams) = build_filters(
+            &None,
+            &q.entity,
+            &q.entry_period,
+            &q.period,
+            &q.nature,
+        );
+        if let Some(ph) = &q.phase {
+            fsql.push_str(" AND phase = ?");
+            fparams.push(DbValue::Text(ph.clone()));
+        }
+        let source_clause = match &q.source {
+            Some(s) => {
+                let mut p = Vec::new();
+                p.push(DbValue::Text(s.clone()));
+                (format!(" AND source = ?"), p)
+            }
+            None => (String::new(), Vec::new()),
+        };
+        let has_filters = !fsql.is_empty() || !source_clause.0.is_empty();
+        let where_stg = if has_filters {
+            format!("WHERE {}", {
+                let mut combined = String::new();
+                if !fsql.is_empty() {
+                    combined.push_str(fsql.trim_start_matches(" AND "));
+                }
+                if !source_clause.0.is_empty() {
+                    if !combined.is_empty() {
+                        combined.push_str(" AND");
+                    }
+                    combined.push_str(source_clause.0.trim_start_matches(" AND "));
+                }
+                combined
+            })
+        } else {
+            String::new()
+        };
+        let sql = format!(
+            "SELECT id, {col_list}, source, 'raw' AS level, amount
+             FROM stg_entry {where_stg}
+             ORDER BY id
+             LIMIT ? OFFSET ?"
+        );
+        fparams.extend(source_clause.1);
+        fparams.push(DbValue::BigInt(q.limit));
+        fparams.push(DbValue::BigInt(q.offset));
+        (sql, fparams)
+    } else {
+        let (fsql, fparams) = build_filters_fe(
+            &q.consolidation,
+            &q.entity,
+            &q.entry_period,
+            &q.period,
+            &q.nature,
+        );
+        let mut fe_joins = String::new();
+        let mut fe_select: Vec<String> = Vec::new();
+        for dim in &dims {
+            let name = &dim.name;
+            if let Some((table, code_col)) = references::dimension_master(name) {
+                let alias = format!("_fe{name}");
+                let join_type = if dim.nullable() { "LEFT JOIN" } else { "JOIN" };
+                fe_joins.push_str(&format!(
+                    "\n{join_type} {table} {alias} ON {alias}.id = e.{name}"
+                ));
+                fe_select.push(format!("{alias}.{code_col} AS {name}"));
+            } else {
+                fe_select.push(format!("e.{name}"));
+            }
+        }
+        let fe_select_list = fe_select.join(", ");
+        let sql = format!(
+            "SELECT e.id, {fe_select_list}, NULL AS source, e.level, e.amount
+             FROM fact_entry e{fe_joins}
+             WHERE e.level = ? {fsql}
+             ORDER BY e.id
+             LIMIT ? OFFSET ?"
+        );
+        let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
+        params.extend(fparams);
+        params.push(DbValue::BigInt(q.limit));
+        params.push(DbValue::BigInt(q.offset));
+        (sql, params)
+    };
+    masterdata::run_query(con, &sql, params)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  describe_model — guide de démarrage pour l'agent (Q54, outil MCP)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Décrit le modèle de données de façon compacte pour qu'un agent IA puisse
+/// saisir des écritures valides sans tâtonner : tables master data navigables
+/// (avec PK), champs de saisie `stg_entry`, catalogue de codes structurants
+/// (flux, natures, classes, devises, méthodes, phases) et liste des
+/// consolidations existantes. Cf. PLAN_Q54 §4.3.1.
+pub fn describe_model(con: &Connection) -> Result<JsonValue, AppError> {
+    use serde_json::{json, Value as JsonValue};
+
+    // 1. Tables master data navigables (catalogue statique).
+    let master_tables: Vec<JsonValue> = masterdata::tables()
+        .iter()
+        .map(|t| {
+            json!({
+                "api_name": t.api_name,
+                "label": t.label,
+                "sql_name": t.sql_name,
+                "pk": t.pk,
+                "columns": t.columns,
+                "search_on": t.columns.contains(&"libelle").then_some("libelle"),
+            })
+        })
+        .collect();
+
+    // 2. Champs de saisie stg_entry (l'ordre canonique de l'EDB).
+    let entry_fields = masterdata::entry_field_catalog(con);
+
+    // 3. Catalogue de codes structurants (échantillonné pour entités/périodes).
+    let code_catalog = json!({
+        "flows": query_codes(con, "dim_flow", "code")?,
+        "natures": query_codes(con, "dim_nature", "code")?,
+        "account_classes": ["bilan", "resultat"],
+        "scenario_categories": query_codes(con, "dim_scenario_category", "code")?,
+        "methods": query_codes(con, "dim_method", "code")?,
+        "currencies": query_codes(con, "dim_currency", "code_iso")?,
+        "entities_sample": query_codes_limited(con, "dim_entity", "code", 15)?,
+        "periods_sample": query_codes_limited(con, "dim_period", "code", 15)?,
+    });
+
+    // 4. Consolidations existantes (id, libelle, statut).
+    let consolidations = masterdata::run_query(
+        con,
+        "SELECT id, libelle, statut FROM dim_consolidation ORDER BY id",
+        Vec::new(),
+    )?;
+
+    Ok(json!({
+        "pipeline_levels": ["raw", "corporate", "converted", "consolidated"],
+        "entry_schema": { "fields": entry_fields },
+        "master_tables": master_tables,
+        "code_catalog": code_catalog,
+        "consolidations": consolidations,
+    }))
+}
+
+fn query_codes(con: &Connection, table: &str, col: &str) -> Result<Vec<String>, AppError> {
+    let sql = format!("SELECT \"{col}\" AS c FROM {table} ORDER BY c");
+    let rows = masterdata::run_query(con, &sql, Vec::new())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.get("c").and_then(|v| v.as_str()).map(String::from))
+        .collect())
+}
+
+fn query_codes_limited(
+    con: &Connection,
+    table: &str,
+    col: &str,
+    limit: i64,
+) -> Result<Vec<String>, AppError> {
+    let sql = format!("SELECT \"{col}\" AS c FROM {table} ORDER BY c LIMIT {limit}");
+    let rows = masterdata::run_query(con, &sql, Vec::new())?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| r.get("c").and_then(|v| v.as_str()).map(String::from))
+        .collect())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

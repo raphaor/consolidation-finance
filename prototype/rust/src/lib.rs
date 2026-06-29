@@ -51,6 +51,7 @@ pub mod dimensions;
 pub mod export;
 pub mod import;
 pub mod masterdata;
+pub mod mcp;
 pub mod money;
 pub mod pipeline;
 pub mod references;

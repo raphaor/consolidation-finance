@@ -32,6 +32,13 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
+# SDK MCP officiel (Q54) — sert le moteur comme outils typés pour les agents IA
+# via le mode `conso-server --mcp` (transport stdio). `transport-io` = stdio
+# serveur, `schemars` = génération du JSON Schema des paramètres d'outils.
+rmcp = { version = "2", features = ["server", "transport-io", "schemars"] }
+# schemars : génération du JSON Schema des paramètres d'outils MCP (le derive
+# `JsonSchema` référence le crate directement). Version alignée sur rmcp 2.
+schemars = "1"
 
 [profile.release]
 # Optimisations pour le calcul analytique (GROUP BY / JOIN volumineux).

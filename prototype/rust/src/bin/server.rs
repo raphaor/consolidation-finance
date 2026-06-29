@@ -12,6 +12,15 @@
 //! | POST    | /api/run     | Déclenche le pipeline             |
 //! | POST    | /api/reset   | Reset DB + reimport CSV           |
 //!
+//! # Mode MCP (`--mcp`, Q54)
+//!
+//! Avec le flag `--mcp`, le binaire ne démarre **pas** le serveur HTTP : il
+//! expose le moteur comme un **serveur MCP** (Model Context Protocol) sur
+//! stdin/stdout, sous forme d'outils typés pour les agents IA (opencode,
+//! Claude…). Voir [`conso_engine::mcp`] et `docs/PLAN_Q54_API_MCP.md`.
+//! Contrainte DuckDB mono-processus : ne pas lancer simultanément le mode HTTP
+//! et le mode `--mcp` sur le même fichier `.duckdb`.
+//!
 //! # Configuration (variables d'environnement)
 //!
 //! - `CONSO_PORT`          : port d'écoute (défaut : 3000).
@@ -47,7 +56,7 @@ use conso_engine::rules::validate_definition;
 use conso_engine::state::{db_err, lock_con, AppError, AppState};
 use conso_engine::{
     characteristics, coefficients, controls, create_schema, custom_references, dimensions, entries,
-    export, import, indicators, masterdata, references, reports, run_pipeline,
+    export, import, indicators, masterdata, reports, run_pipeline,
     seed_demo_controls, value_lists, ConvertParams,
 };
 
@@ -55,7 +64,7 @@ use conso_engine::{
 // Le cœur métier vit dans `conso_engine::reports` ; ce binaire n'en fait que
 // wrapper les handlers Axum.
 use conso_engine::reports::{
-    build_filters_fe, run_consolidation, BilanQuery, BilanRow, PipelineResult,
+    run_consolidation, BilanQuery, BilanRow, EntriesQuery, PipelineResult,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,89 +104,12 @@ struct ResetResult {
 //  Paramètres de requête (query string)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// `BilanQuery` est défini dans `conso_engine::reports` (Q54).
+// `BilanQuery` et `EntriesQuery` sont définis dans `conso_engine::reports` (Q54)
+// et importés ci-dessus pour les extracteurs `Query<>`.
 
-#[derive(Deserialize)]
-struct EntriesQuery {
-    #[serde(default = "default_level")]
-    level: String,
-    #[serde(default = "default_limit")]
-    limit: i64,
-    #[serde(default)]
-    offset: i64,
-    /// Filtre par consolidation (PK `dim_consolidation.id`) pour les niveaux
-    /// `fact_entry` (corporate / converted / consolidated).
-    #[serde(default)]
-    consolidation: Option<i64>,
-    /// Filtre par phase pour le niveau `raw` (`stg_entry.phase`).
-    #[serde(default)]
-    phase: Option<String>,
-    #[serde(default)]
-    entity: Option<String>,
-    #[serde(default)]
-    entry_period: Option<String>,
-    #[serde(default)]
-    period: Option<String>,
-    #[serde(default)]
-    nature: Option<String>,
-    /// Filtre par provenance (`source`) : ex. `MANUAL` pour ne voir que les
-    /// saisies manuelles, ou toute autre valeur de `stg_entry.source`. N'affecte
-    /// que le niveau `raw` (le pipeline ne propage pas `source` aux niveaux
-    /// corporate/converted/consolidated).
-    #[serde(default)]
-    source: Option<String>,
-}
-
-fn default_level() -> String {
-    "consolidated".to_string()
-}
-
-fn default_limit() -> i64 {
-    100
-}
-
-/// Construit le fragment SQL et les paramètres pour les filtres optionnels
-/// `consolidation` (PK de la conso, isolation d'un run dans `fact_entry`),
-/// `entity`, `entry_period` (exercice clôturé), `period` (période impactée par
-/// l'écriture) et `nature`. Renvoie une chaîne préfixée par " AND ..." prête à
-/// concaténer après un WHERE existant. Le filtre `consolidation` ne s'applique
-/// qu'aux niveaux `fact_entry` (le niveau `raw` / `stg_entry` filtre sur `phase`,
-/// géré séparément par l'appelant).
-/// Filtres pour `stg_entry` (colonnes TEXT).
-fn build_filters(
-    consolidation: &Option<i64>,
-    entity: &Option<String>,
-    entry_period: &Option<String>,
-    period: &Option<String>,
-    nature: &Option<String>,
-) -> (String, Vec<DbValue>) {
-    let mut sql = String::new();
-    let mut params = Vec::new();
-    if let Some(c) = consolidation {
-        sql.push_str(" AND consolidation_id = ?");
-        params.push(DbValue::BigInt(*c));
-    }
-    if let Some(e) = entity {
-        sql.push_str(" AND entity = ?");
-        params.push(DbValue::Text(e.clone()));
-    }
-    if let Some(ep) = entry_period {
-        sql.push_str(" AND entry_period = ?");
-        params.push(DbValue::Text(ep.clone()));
-    }
-    if let Some(p) = period {
-        sql.push_str(" AND period = ?");
-        params.push(DbValue::Text(p.clone()));
-    }
-    if let Some(n) = nature {
-        sql.push_str(" AND nature = ?");
-        params.push(DbValue::Text(n.clone()));
-    }
-    (sql, params)
-}
-
-// `build_filters_fe` (filtres `fact_entry`, colonnes INTEGER résolues via
-// sous-requêtes) est défini dans `conso_engine::reports` (Q54).
+// `build_filters` (filtres `stg_entry`, colonnes TEXT) et `build_filters_fe`
+// (filtres `fact_entry`, colonnes INTEGER résolues via sous-requêtes) sont
+// définis dans `conso_engine::reports` (Q54).
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Handlers
@@ -275,105 +207,7 @@ async fn get_entries(
 ) -> Result<Json<Vec<JsonValue>>, AppError> {
     let rows = {
         let con = lock_con(&state)?;
-        // Colonnes propagées (built-in + custom) depuis le registre.
-        let dims = dimensions::load_all(&con).map_err(db_err)?;
-        let col_list = dimensions::propagated_cols(&dims).join(", ");
-        let (sql, params): (String, Vec<DbValue>) = if q.level == "raw" {
-            // Niveau raw (stg_entry) : le filtre de remontée porte sur `phase`
-            // (et non consolidation_id, absent de stg_entry). Les autres filtres
-            // (entity/entry_period/period/nature) sont communs.
-            let (mut fsql, mut fparams) = build_filters(
-                &None,
-                &q.entity,
-                &q.entry_period,
-                &q.period,
-                &q.nature,
-            );
-            if let Some(ph) = &q.phase {
-                fsql.push_str(" AND phase = ?");
-                fparams.push(DbValue::Text(ph.clone()));
-            }
-            // Filtre source (raw uniquement) : n'a pas de sens aux autres
-            // niveaux car `source` n'est pas propagée par le pipeline.
-            let source_clause = match &q.source {
-                Some(s) => {
-                    let mut p = Vec::new();
-                    p.push(DbValue::Text(s.clone()));
-                    (format!(" AND source = ?"), p)
-                }
-                None => (String::new(), Vec::new()),
-            };
-            // Le WHERE sur stg_entry est composé à partir des filtres standards
-            // (préfixés " AND ..." par build_filters + phase) et du filtre source.
-            let has_filters = !fsql.is_empty() || !source_clause.0.is_empty();
-            let where_stg = if has_filters {
-                format!("WHERE {}", {
-                    let mut combined = String::new();
-                    if !fsql.is_empty() {
-                        combined.push_str(fsql.trim_start_matches(" AND "));
-                    }
-                    if !source_clause.0.is_empty() {
-                        if !combined.is_empty() {
-                            combined.push_str(" AND");
-                        }
-                        combined.push_str(source_clause.0.trim_start_matches(" AND "));
-                    }
-                    combined
-                })
-            } else {
-                String::new()
-            };
-            let sql = format!(
-                "SELECT id, {col_list}, source, 'raw' AS level, amount
-                 FROM stg_entry {where_stg}
-                 ORDER BY id
-                 LIMIT ? OFFSET ?"
-            );
-            fparams.extend(source_clause.1);
-            fparams.push(DbValue::BigInt(q.limit));
-            fparams.push(DbValue::BigInt(q.offset));
-            (sql, fparams)
-        } else {
-            let (fsql, fparams) = build_filters_fe(
-                &q.consolidation,
-                &q.entity,
-                &q.entry_period,
-                &q.period,
-                &q.nature,
-            );
-            // Résoudre les colonnes INTEGER de fact_entry en codes TEXT pour l'UI.
-            // Chaque dim avec master data → alias JOIN + projection code.
-            // Les dims libres (analysis, analysis2, custom) → e.{dim} directement.
-            let mut fe_joins = String::new();
-            let mut fe_select: Vec<String> = Vec::new();
-            for dim in &dims {
-                let name = &dim.name;
-                if let Some((table, code_col)) = references::dimension_master(name) {
-                    let alias = format!("_fe{name}");
-                    let join_type = if dim.nullable() { "LEFT JOIN" } else { "JOIN" };
-                    fe_joins.push_str(&format!(
-                        "\n{join_type} {table} {alias} ON {alias}.id = e.{name}"
-                    ));
-                    fe_select.push(format!("{alias}.{code_col} AS {name}"));
-                } else {
-                    fe_select.push(format!("e.{name}"));
-                }
-            }
-            let fe_select_list = fe_select.join(", ");
-            let sql = format!(
-                "SELECT e.id, {fe_select_list}, NULL AS source, e.level, e.amount
-                 FROM fact_entry e{fe_joins}
-                 WHERE e.level = ? {fsql}
-                 ORDER BY e.id
-                 LIMIT ? OFFSET ?"
-            );
-            let mut params: Vec<DbValue> = vec![DbValue::Text(q.level.clone())];
-            params.extend(fparams);
-            params.push(DbValue::BigInt(q.limit));
-            params.push(DbValue::BigInt(q.offset));
-            (sql, params)
-        };
-        masterdata::run_query(&con, &sql, params)?
+        reports::get_entries(&con, &q)?
     };
     Ok(Json(rows))
 }
@@ -1442,6 +1276,18 @@ async fn main() {
         seed_json,
     });
 
+    // Mode MCP (Q54) : si `--mcp`, on ne démarre PAS le serveur HTTP mais on
+    // expose le moteur comme un serveur MCP sur stdin/stdout (outils typés pour
+    // agents IA). Le setup DB (ci-dessus, migrations + seed + CHECKPOINT) est
+    // partagé avec le mode HTTP. Contrainte DuckDB mono-processus : ne pas faire
+    // tourner le mode HTTP et le mode MCP sur le même fichier `.duckdb`.
+    if args.iter().any(|a| a == "--mcp") {
+        conso_engine::mcp::run_stdio(state)
+            .await
+            .unwrap_or_else(|e| panic!("✗ serveur MCP : {e}"));
+        return;
+    }
+
     // CORS permissif pour le prototype : autorise le frontend React (Vite,
     // localhost:5173) et tout autre origine. À restreindre en production.
     let cors = tower_http::cors::CorsLayer::new()
@@ -1531,7 +1377,13 @@ Au démarrage : si la base est déjà initialisée, elle est conservée telle qu
 CONSO_SEED_JSON est défini — import du paquet JSON.
 
 USAGE
-    conso-server [--help]
+    conso-server [--help] [--mcp]
+
+    --mcp               Mode serveur MCP (Model Context Protocol) sur stdin/stdout
+                        au lieu du serveur HTTP. Expose le moteur comme outils
+                        typés pour les agents IA (Q54). Ne pas combiner avec une
+                        instance HTTP sur le même fichier .duckdb (DuckDB
+                        mono-processus).
 
 VARIABLES D'ENVIRONNEMENT
     CONSO_PORT          Port d'écoute (défaut : 3000)
@@ -1551,8 +1403,8 @@ EXEMPLE
 
 fn validate_args(args: &[String]) -> Result<(), String> {
     for a in args {
-        if a == "-h" || a == "--help" {
-            // déjà traité avant l'appel
+        if a == "-h" || a == "--help" || a == "--mcp" {
+            // déjà traité avant l'appel (ou flag --mcp valide)
         } else {
             return Err(format!("argument inconnu : '{a}'"));
         }
