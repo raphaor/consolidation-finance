@@ -67,6 +67,22 @@ use conso_engine::reports::{
     run_consolidation, BilanQuery, BilanRow, EntriesQuery, PipelineResult,
 };
 
+// Mode `--mcp` (Q54) : en MCP, le protocole JSON-RPC voyage sur stdin/stdout.
+// Toute écriture sur stdout (logs de boot) corrompt l'échange → on les
+// supprime. Les `eprintln!` (stderr) restent autorisés (diagnostic, sans effet
+// sur le protocole). Mis à `true` tôt dans `main()` si `--mcp` est présent.
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+static MCP_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Comme `println!` mais silencieux en mode `--mcp` (préserve stdout pour MCP).
+macro_rules! bootln {
+    ($($arg:tt)*) => {{
+        if !MCP_MODE.load(AtomicOrdering::Relaxed) {
+            println!($($arg)*);
+        }
+    }};
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  État partagé et erreurs
 // ─────────────────────────────────────────────────────────────────────────────
@@ -987,6 +1003,11 @@ fn build_ruleset_detail(con: &Connection, code: &str) -> Result<RulesetDetail, A
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    // Détection précoce du mode MCP (Q54) : avant tout log de boot, pour que
+    // `bootln!` se taise et préserve stdout pour le protocole JSON-RPC.
+    let mcp_mode = args.iter().any(|a| a == "--mcp");
+    MCP_MODE.store(mcp_mode, AtomicOrdering::Relaxed);
+
     if args.iter().any(|a| a == "-h" || a == "--help") {
         print_help();
         std::process::exit(0);
@@ -1009,7 +1030,7 @@ async fn main() {
     let seed_json = std::env::var("CONSO_SEED_JSON").ok().filter(|s| !s.is_empty());
     let web_dir = std::env::var("CONSO_WEB_DIR").unwrap_or_else(|_| "../../web/dist".to_string());
 
-    println!("▶ Ouverture de DuckDB ({db_path})…");
+    bootln!("▶ Ouverture de DuckDB ({db_path})…");
     let con = Connection::open(&db_path)
         .unwrap_or_else(|e| panic!("✗ Impossible d'ouvrir DuckDB ({db_path}) : {e}"));
 
@@ -1038,10 +1059,10 @@ async fn main() {
         let n: i64 = con
             .query_row("SELECT COUNT(*) FROM fact_entry", [], |r| r.get(0))
             .unwrap_or(0);
-        println!(
+        bootln!(
             "   Base déjà initialisée ({n} lignes dans fact_entry) — CSV non réimportés, éditions UI préservées."
         );
-        println!("   (Pour forcer le rechargement : POST /api/reset ou CONSO_FORCE_RESEED=1)");
+        bootln!("   (Pour forcer le rechargement : POST /api/reset ou CONSO_FORCE_RESEED=1)");
         // Migration idempotente : ajoute la colonne `native` au registre des
         // références directes (introduite après les premières bases) et peuple
         // les FK natives (account.sous_classe, entity.entite_parent, …).
@@ -1187,7 +1208,7 @@ async fn main() {
         }
     } else {
         if force_reseed {
-            println!("   CONSO_FORCE_RESEED=1 — réinitialisation complète demandée.");
+            bootln!("   CONSO_FORCE_RESEED=1 — réinitialisation complète demandée.");
         }
         // Boot sur base vierge (ou CONSO_FORCE_RESEED=1) : on construit le
         // schéma, puis — si CONSO_SEED_JSON est défini — on y importe le paquet
@@ -1200,7 +1221,7 @@ async fn main() {
         // JSON ne contient pas ces tables, elles restent vides — c'est attendu.
         create_schema(&con).expect("✗ create_schema");
         if let Some(json_path) = &seed_json {
-            println!("   CONSO_SEED_JSON={json_path} — import du paquet…");
+            bootln!("   CONSO_SEED_JSON={json_path} — import du paquet…");
             let raw = std::fs::read_to_string(json_path).unwrap_or_else(|e| {
                 panic!("✗ Impossible de lire CONSO_SEED_JSON ({json_path}) : {e}")
             });
@@ -1214,10 +1235,10 @@ async fn main() {
                 .values()
                 .filter_map(|v| v.as_u64().map(|n| n as usize))
                 .sum();
-            println!("   Import JSON : {total} lignes restaurées sur {} tables.", counts.len());
+            bootln!("   Import JSON : {total} lignes restaurées sur {} tables.", counts.len());
         } else {
-            println!("   CONSO_SEED_JSON non défini — schéma seul (base vide).");
-            println!("   (Pour bootstrapper : POST /api/import/all avec un paquet JSON)");
+            bootln!("   CONSO_SEED_JSON non défini — schéma seul (base vide).");
+            bootln!("   (Pour bootstrapper : POST /api/import/all avec un paquet JSON)");
         }
 
         // Pipeline initial pour exposer des données exploitables dès le démarrage.
@@ -1238,7 +1259,7 @@ async fn main() {
                 Ok(params) => match run_pipeline(&con, &params) {
                     Ok(report) => {
                         let counts = report.counts();
-                        println!(
+                        bootln!(
                             "   Pipeline initial (consolidation {id}) : corporate={}, converted={}, consolidated={}",
                             counts[0], counts[1], counts[2]
                         );
@@ -1281,7 +1302,7 @@ async fn main() {
     // agents IA). Le setup DB (ci-dessus, migrations + seed + CHECKPOINT) est
     // partagé avec le mode HTTP. Contrainte DuckDB mono-processus : ne pas faire
     // tourner le mode HTTP et le mode MCP sur le même fichier `.duckdb`.
-    if args.iter().any(|a| a == "--mcp") {
+    if mcp_mode {
         conso_engine::mcp::run_stdio(state)
             .await
             .unwrap_or_else(|e| panic!("✗ serveur MCP : {e}"));
