@@ -1,0 +1,37 @@
+// Modèle de configuration opencode pour le serveur MCP conso (Q54).
+// Copiez ce fichier vers `opencode.jsonc` et adaptez les chemins à votre machine.
+//
+// IMPORTANT : le chemin du binaire dans `command` est résolu par opencode
+// depuis le répertoire d'où vous lancez opencode (comportement exec.Command),
+// PAS depuis la racine du workspace. Un chemin relatif cassera donc selon
+// l'endroit de lancement. Deux options robustes :
+//
+//   (A) Chemin absolu (le plus simple, machine-spécifique) :
+//       "command": ["/chemin/absolu/vers/conso-server", "--mcp"]
+//
+//   (B) Variable d'environnement (portable, committable) : définissez
+//       CONSO_SERVER_EXE (chemin absolu du binaire) dans votre shell, puis :
+//       "command": ["{env:CONSO_SERVER_EXE}", "--mcp"]
+//
+// Sous Windows le binaire est `conso-server.exe`, sous Linux `conso-server`.
+// `CONSO_DB_PATH` : base de test dédiée (ne pas utiliser la base dev de l'UI).
+// `CONSO_SEED_JSON` : paquet JSON de seed (importé sur base vierge).
+//
+// Contrainte DuckDB mono-processus : ne lancez pas simultanément l'UI
+// (`conso-server` HTTP) et le MCP (`--mcp`) sur le même fichier .duckdb.
+
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "conso": {
+      "type": "local",
+      "command": ["{env:CONSO_SERVER_EXE}", "--mcp"],
+      "environment": {
+        "CONSO_DB_PATH": "{env:CONSO_DB_PATH}",
+        "CONSO_SEED_JSON": "{env:CONSO_SEED_JSON}"
+      },
+      "enabled": true,
+      "timeout": 20000
+    }
+  }
+}

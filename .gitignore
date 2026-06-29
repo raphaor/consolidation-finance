@@ -9,3 +9,6 @@ prototype/rust/target/
 # DuckDB — bases runtime (dev conso.duckdb + base de test MCP .conso-mcp.duckdb)
 *.duckdb
 *.duckdb.wal
+
+# Config opencode machine-spécifique (chemins absolus) — garder le .example
+.opencode/opencode.jsonc

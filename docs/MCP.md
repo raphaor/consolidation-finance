@@ -57,11 +57,16 @@ Windows). La 1ʳᵉ compilation est lourde (DuckDB C++ embarqué + rmcp + schema
 
 ## Configuration d'opencode
 
-Une config workspace est fournie (`.opencode/opencode.jsonc`) : elle est
-**chargée automatiquement à chaque session** opencode dans ce projet. Elle
-pointe vers une base de test dédiée `.conso-mcp.duckdb` (seedée depuis
-`tests/fixtures/seed.json` au premier lancement) — elle ne touche pas la base
-dev utilisée par l'UI.
+La config se met dans `.opencode/opencode.jsonc` (workspace). Un template
+`.opencode/opencode.jsonc.example` est fourni (committed) ; la config réelle
+(chemins absolus, machine-spécifique) est **gitignored**.
+
+> **Piège de chemin (important)** : opencode résout le chemin du binaire dans
+> `command` **depuis le répertoire d'où vous lancez opencode**, pas depuis la
+> racine du workspace. Un chemin relatif (`prototype/rust/...`) cassera donc si
+> vous lancez opencode depuis un sous-dossier (ex. `prototype/`). **Utilisez un
+> chemin absolu** (ou une variable d'environnement `{env:CONSO_SERVER_EXE}`) pour
+> le binaire — c'est la cause du `Connection closed` si vous l'avez rencontré.
 
 > Activation : opencode charge les serveurs MCP **au démarrage de la session**.
 > Pour prendre en compte la config, **relancez la session opencode** (ou
@@ -69,7 +74,7 @@ dev utilisée par l'UI.
 > `opencode mcp list` (statut du serveur `conso`) ; les outils apparaissent
 > préfixés `conso_*`.
 
-### Windows — `.opencode/opencode.jsonc` (workspace, fourni)
+### Windows — `.opencode/opencode.jsonc` (chemins absolus)
 
 ```jsonc
 {
@@ -77,19 +82,37 @@ dev utilisée par l'UI.
   "mcp": {
     "conso": {
       "type": "local",
-      "command": ["./prototype/rust/target/release/conso-server.exe", "--mcp"],
+      "command": ["C:/.../consolidation-finance/prototype/rust/target/release/conso-server.exe", "--mcp"],
       "environment": {
-        "CONSO_DB_PATH": "{env:CONSO_DB_PATH}",
-        "CONSO_SEED_JSON": "{env:CONSO_SEED_JSON}"
+        "CONSO_DB_PATH": "C:/.../consolidation-finance/.conso-mcp.duckdb",
+        "CONSO_SEED_JSON": "C:/.../consolidation-finance/prototype/rust/tests/fixtures/seed.json"
       },
       "enabled": true,
-      "timeout": 15000
+      "timeout": 20000
     }
   }
 }
 ```
 
-### Linux — `~/.config/opencode/opencode.jsonc` (ou `.opencode/opencode.jsonc` du workspace)
+(Forward slashes `/` acceptés sous Windows ; ou échappez les antislashs `\\`.)
+
+### Portable (recommandé) — via variable d'environnement (Windows + Linux)
+
+Définissez une fois dans votre shell (persistent) le chemin absolu du binaire,
+puis référencez-le par `{env:}` — la config reste committable et fonctionne
+depuis n'importe quel répertoire de lancement :
+
+```bash
+# Windows (PowerShell, persistent pour l'utilisateur)
+setx CONSO_SERVER_EXE "C:/.../prototype/rust/target/release/conso-server.exe"
+setx CONSO_DB_PATH "C:/.../consolidation-finance/.conso-mcp.duckdb"
+setx CONSO_SEED_JSON "C:/.../consolidation-finance/prototype/rust/tests/fixtures/seed.json"
+
+# Linux (ajouter à ~/.bashrc ou ~/.zshrc)
+export CONSO_SERVER_EXE="$PWD/prototype/rust/target/release/conso-server"
+export CONSO_DB_PATH="$PWD/.conso-mcp.duckdb"
+export CONSO_SEED_JSON="$PWD/prototype/rust/tests/fixtures/seed.json"
+```
 
 ```jsonc
 {
@@ -97,17 +120,19 @@ dev utilisée par l'UI.
   "mcp": {
     "conso": {
       "type": "local",
-      "command": ["./prototype/rust/target/release/conso-server", "--mcp"],
+      "command": ["{env:CONSO_SERVER_EXE}", "--mcp"],
       "environment": {
         "CONSO_DB_PATH": "{env:CONSO_DB_PATH}",
         "CONSO_SEED_JSON": "{env:CONSO_SEED_JSON}"
       },
       "enabled": true,
-      "timeout": 15000
+      "timeout": 20000
     }
   }
 }
 ```
+
+(Sous Windows le binaire est `conso-server.exe`, sous Linux `conso-server`.)
 
 Variables d'environnement attendues (à définir dans le shell qui lance
 opencode) :
