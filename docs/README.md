@@ -22,6 +22,7 @@ Tenus à jour avec le code. À lire avant d'implémenter.
 | [`CAS_CONSO_TEST.md`](./CAS_CONSO_TEST.md) | Cahier de recette pour l'éditeur de règles (cas représentatifs). |
 | [`TECHNIQUE.md`](./TECHNIQUE.md) | Architecture et justifications de la stack. |
 | [`RECETTE_PYTHON.md`](./RECETTE_PYTHON.md) | Recette boîte noire : lancement et rôle des 3 scripts Python (`smoke` / `rules` / `golden`). |
+| [`PLAN_Q54_API_MCP.md`](./PLAN_Q54_API_MCP.md) | Plan Q54 en cours : améliorations API REST (bulk, pagination, recherche) + serveur MCP intégré (`--mcp`). À archiver une fois livré. |
 
 ### Articulation des specs
 
