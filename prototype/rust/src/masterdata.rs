@@ -19,11 +19,12 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use duckdb::{params_from_iter, types::Value as DbValue, types::ValueRef, Row};
 use serde_json::{Map, Value as JsonValue};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::references;
@@ -662,6 +663,7 @@ fn resolve_table(con: &duckdb::Connection, api: &str) -> Result<Option<OwnedTabl
     Ok(None)
 }
 
+#[cfg(test)]
 fn select_all(def: &OwnedTableDef, con: &duckdb::Connection) -> Result<Vec<JsonValue>, AppError> {
     let cols = (0..def.columns.len())
         .map(|i| def.select_expr(i))
@@ -670,6 +672,180 @@ fn select_all(def: &OwnedTableDef, con: &duckdb::Connection) -> Result<Vec<JsonV
     let sql = format!("SELECT {cols} FROM {}", def.sql_name);
     let rows = run_query(con, &sql, Vec::new())?;
     translate_rows_out(con, &def.sql_name, rows)
+}
+
+/// Construit un SELECT filtré/paginé sur la table. Renvoie `(rows, total)` où
+/// `total` est le nombre de lignes correspondant aux filtres **sans** la
+/// pagination (pour l'enveloppe `{total, rows}`). La pagination `LIMIT/OFFSET`
+/// n'est appliquée que si `limit` est `Some`.
+///
+/// - `search` : recherche multi-mots en `ILIKE '%mot%'` sur la colonne API
+///   `libelle` (no-op si la table n'en a pas — ex. satellites). Insensible à la
+///   casse via DuckDB `ILIKE`.
+/// - `filters` : filtres exacts `col = valeur` (validés contre les colonnes
+///   connues de la table ; les FK à contrat code sont résolues par sous-requête
+///   `col = (SELECT id FROM target WHERE display = ?)` car la colonne est
+///   stockée en `id` mais exposée en `code`).
+fn select_filtered(
+    def: &OwnedTableDef,
+    con: &duckdb::Connection,
+    search: Option<&str>,
+    filters: &HashMap<String, String>,
+    limit: Option<i64>,
+    offset: i64,
+) -> Result<(Vec<JsonValue>, i64), AppError> {
+    let cols = (0..def.columns.len())
+        .map(|i| def.select_expr(i))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut where_parts: Vec<String> = Vec::new();
+    let mut params: Vec<DbValue> = Vec::new();
+
+    // Recherche plein-texte sur `libelle` (no-op si la table n'en dispose pas).
+    let has_libelle = def.columns.iter().any(|c| c == "libelle");
+    if let Some(q) = search {
+        let q = q.trim();
+        if !q.is_empty() && has_libelle {
+            let phys = def.sql_col("libelle");
+            for term in q.split_whitespace() {
+                where_parts.push(format!("{} ILIKE ?", quote_ident(phys)));
+                params.push(DbValue::Text(format!("%{term}%")));
+            }
+        }
+    }
+
+    // Filtres exacts `?{col}=valeur`. Colonnes inconnues → 400 (guide l'agent).
+    for (k, v) in filters {
+        let idx = def
+            .columns
+            .iter()
+            .position(|c| c == k)
+            .ok_or_else(|| {
+                AppError::bad_request(format!(
+                    "colonne de filtre inconnue : '{k}'. Colonnes valides : {}",
+                    def.columns.join(", ")
+                ))
+            })?;
+        let phys = &def.sql_columns[idx];
+        let phys_sql = quote_ident(phys);
+        // FK à contrat code : la colonne stocke un `id`, pas le code entrant →
+        // résolution par sous-requête sur la cible.
+        if let Some((target, display)) = code_contract_fk(con, &def.sql_name, phys) {
+            where_parts.push(format!(
+                "{phys_sql} = (SELECT id FROM {} WHERE {} = ?)",
+                target,
+                quote_ident(&display)
+            ));
+        } else {
+            where_parts.push(format!("{phys_sql} = ?"));
+        }
+        params.push(DbValue::Text(v.clone()));
+    }
+
+    let where_sql = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", where_parts.join(" AND "))
+    };
+
+    // Total (sans pagination).
+    let count_sql = format!("SELECT COUNT(*) FROM {}{}", def.sql_name, where_sql);
+    let total: i64 = con
+        .query_row(&count_sql, params_from_iter(params.clone()), |r| r.get(0))
+        .map_err(db_err)?;
+
+    // Lignes paginées.
+    let mut sql = format!("SELECT {cols} FROM {}{}", def.sql_name, where_sql);
+    let mut row_params = params;
+    if let Some(l) = limit {
+        sql.push_str(" LIMIT ? OFFSET ?");
+        row_params.push(DbValue::BigInt(l));
+        row_params.push(DbValue::BigInt(offset));
+    }
+    let rows = run_query(con, &sql, row_params)?;
+    let rows = translate_rows_out(con, &def.sql_name, rows)?;
+    Ok((rows, total))
+}
+
+/// Enrichit les lignes des libellés des FK à contrat code : pour chaque telle
+/// colonne, ajoute une colonne satellite `{api}_libelle` contenant le libellé
+/// de la cible. Batché par colonne (1 requête par FK, pas de N+1). Opt-in via
+/// `?enrich=true`.
+fn enrich_rows(
+    def: &OwnedTableDef,
+    con: &duckdb::Connection,
+    rows: Vec<JsonValue>,
+) -> Result<Vec<JsonValue>, AppError> {
+    // Pour chaque colonne API qui est une FK à contrat code, on a besoin du
+    // libellé de la cible. On retrouve le triplet (api_col, target, display_col)
+    // via le graphe de références (qui raisonne en colonnes physiques, d'où la
+    // re-mapping). `display_col` est la colonne d'affichage de la cible (en
+    // général `code`, mais `code_iso` pour les devises).
+    let fks: Vec<(String, String, String)> = references::all_references(con)
+        .into_iter()
+        .filter(|r| r.table == def.sql_name && r.target_display_column.is_some())
+        .map(|r| {
+            (
+                def.api_col(r.column.as_str()).to_string(),
+                r.target_table,
+                r.target_display_column.unwrap(),
+            )
+        })
+        .collect();
+    if fks.is_empty() {
+        return Ok(rows);
+    }
+    // Pré-charge les libellés par cible+code (batché).
+    let mut libelle_maps: HashMap<(String, String), HashMap<String, String>> = HashMap::new();
+    for (api_col, target, display) in &fks {
+        let codes: Vec<String> = rows
+            .iter()
+            .filter_map(|r| r.get(api_col).and_then(|v| v.as_str()).map(String::from))
+            .filter(|s| !s.is_empty())
+            .collect();
+        if codes.is_empty() {
+            continue;
+        }
+        let placeholders = codes.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "SELECT {} AS code, libelle FROM {} WHERE {} IN ({placeholders})",
+            quote_ident(display),
+            target,
+            quote_ident(display)
+        );
+        let params: Vec<DbValue> = codes.iter().map(|c| DbValue::Text(c.clone())).collect();
+        let got = run_query(con, &sql, params)?;
+        let map: HashMap<String, String> = got
+            .into_iter()
+            .filter_map(|o| {
+                let c = o.get("code").and_then(|v| v.as_str())?.to_string();
+                let l = o.get("libelle").and_then(|v| v.as_str())?.to_string();
+                Some((c, l))
+            })
+            .collect();
+        libelle_maps.insert((api_col.clone(), target.clone()), map);
+    }
+    // Injecte `{api_col}_libelle` dans chaque ligne.
+    let mut out = Vec::with_capacity(rows.len());
+    for mut row in rows {
+        if let Some(obj) = row.as_object_mut() {
+            for (api_col, target, _display) in &fks {
+                if let Some(code) = obj.get(api_col).and_then(|v| v.as_str()) {
+                    let key = format!("{api_col}_libelle");
+                    let val = libelle_maps
+                        .get(&(api_col.clone(), target.clone()))
+                        .and_then(|m| m.get(code))
+                        .cloned();
+                    obj.insert(
+                        key,
+                        val.map(JsonValue::String).unwrap_or(JsonValue::Null),
+                    );
+                }
+            }
+        }
+        out.push(row);
+    }
+    Ok(out)
 }
 
 fn fetch_one(
@@ -808,14 +984,50 @@ fn pk_from_body(
 async fn list(
     Path(table): Path<String>,
     State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<JsonValue>>, AppError> {
-    let rows = {
+    Query(mut all): Query<HashMap<String, String>>,
+) -> Result<Json<JsonValue>, AppError> {
+    // Réservation des clés de query connues ; le reste = filtres dynamiques
+    // `?{col}=valeur` (validés contre le schéma dans `select_filtered`).
+    let limit = all.remove("limit").and_then(|s| s.parse::<i64>().ok());
+    let offset = all
+        .remove("offset")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let search = all.remove("search");
+    let envelope = all
+        .remove("envelope")
+        .map(|s| s == "true" || s == "1")
+        .unwrap_or(false);
+    let enrich = all
+        .remove("enrich")
+        .map(|s| s == "true" || s == "1")
+        .unwrap_or(false);
+    let paginate = limit.is_some();
+
+    let (rows, total) = {
         let con = lock_con(&state)?;
         let def = resolve_table(&con, &table)?
             .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
-        select_all(&def, &con)?
+        let (mut rows, total) =
+            select_filtered(&def, &con, search.as_deref(), &all, limit, offset)?;
+        if enrich {
+            rows = enrich_rows(&def, &con, rows)?;
+        }
+        (rows, total)
     };
-    Ok(Json(rows))
+
+    // Rétrocompat (D5) : sans paramètre de pagination ni `?envelope=true`, on
+    // renvoie l'array plat (frontend préservé). Sinon l'enveloppe `{total, rows}`.
+    if paginate || envelope {
+        Ok(Json(serde_json::json!({
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "rows": rows,
+        })))
+    } else {
+        Ok(Json(JsonValue::Array(rows)))
+    }
 }
 
 async fn create(
@@ -1025,6 +1237,289 @@ async fn remove(
     };
     let _ = def; // définition déjà consommée pour la PK
     Ok(Json(serde_json::json!({ "deleted": deleted })))
+}
+
+// ─────────────────────── Helpers d'écriture (partagés bulk) ────────────────────
+
+/// INSERT d'une ligne (PK non-auto, code fourni dans le body).
+fn row_insert(
+    def: &OwnedTableDef,
+    con: &duckdb::Connection,
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    let mut cols = Vec::new();
+    let mut vals: Vec<DbValue> = Vec::new();
+    for col in &def.columns {
+        if let Some(v) = obj.get(col.as_str()) {
+            let phys = def.sql_col(col);
+            cols.push(quote_ident(phys));
+            vals.push(write_db_value(con, &def.sql_name, phys, v)?);
+        }
+    }
+    if cols.is_empty() {
+        return Err(AppError::bad_request("aucune colonne fournie"));
+    }
+    let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        def.sql_name,
+        cols.join(", "),
+        placeholders
+    );
+    con.execute(&sql, params_from_iter(vals))
+        .map_err(db_err)?;
+    Ok(())
+}
+
+/// INSERT d'une ligne à PK auto-générée (la colonne PK est omise).
+fn row_insert_auto_pk(
+    def: &OwnedTableDef,
+    con: &duckdb::Connection,
+    obj: &Map<String, JsonValue>,
+) -> Result<(), AppError> {
+    let pk_col = def
+        .pk
+        .first()
+        .ok_or_else(|| AppError::bad_request("auto_pk sans colonne PK définie"))?;
+    let mut cols = Vec::new();
+    let mut vals: Vec<DbValue> = Vec::new();
+    for col in &def.columns {
+        if col == pk_col {
+            continue;
+        }
+        if let Some(v) = obj.get(col.as_str()) {
+            let phys = def.sql_col(col);
+            cols.push(quote_ident(phys));
+            vals.push(write_db_value(con, &def.sql_name, phys, v)?);
+        }
+    }
+    if cols.is_empty() {
+        return Err(AppError::bad_request("aucune colonne fournie"));
+    }
+    let placeholders = cols.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        def.sql_name,
+        cols.join(", "),
+        placeholders
+    );
+    con.execute(&sql, params_from_iter(vals))
+        .map_err(db_err)?;
+    Ok(())
+}
+
+/// UPDATE d'une ligne par sa PK (colonnes non-PK fournies dans le body).
+fn row_update(
+    def: &OwnedTableDef,
+    con: &duckdb::Connection,
+    obj: &Map<String, JsonValue>,
+    pk_vals: &[(String, JsonValue)],
+) -> Result<(), AppError> {
+    let mut sets = Vec::new();
+    let mut vals: Vec<DbValue> = Vec::new();
+    for col in &def.columns {
+        if def.pk.iter().any(|p| p == col) {
+            continue;
+        }
+        if let Some(v) = obj.get(col.as_str()) {
+            let phys = def.sql_col(col);
+            sets.push(format!("{} = ?", quote_ident(phys)));
+            vals.push(write_db_value(con, &def.sql_name, phys, v)?);
+        }
+    }
+    if !sets.is_empty() {
+        let where_clause = def
+            .pk
+            .iter()
+            .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let sql = format!(
+            "UPDATE {} SET {} WHERE {}",
+            def.sql_name,
+            sets.join(", "),
+            where_clause
+        );
+        for (_, v) in pk_vals {
+            vals.push(json_to_db_value(v));
+        }
+        con.execute(&sql, params_from_iter(vals))
+            .map_err(db_err)?;
+    }
+    Ok(())
+}
+
+/// Décide insert-vs-update par existence de la PK, puis exécute. Retourne
+/// `true` si la ligne a été insérée, `false` si mise à jour.
+fn row_upsert(
+    def: &OwnedTableDef,
+    con: &duckdb::Connection,
+    obj: &Map<String, JsonValue>,
+) -> Result<bool, AppError> {
+    if def.auto_pk {
+        let pk_col = def
+            .pk
+            .first()
+            .ok_or_else(|| AppError::bad_request("auto_pk sans colonne PK définie"))?;
+        // Si un id est fourni et existe déjà → update ; sinon insert (auto).
+        if let Some(JsonValue::Number(id)) = obj.get(pk_col.as_str()) {
+            let pk_vals = vec![(pk_col.clone(), JsonValue::Number(id.clone()))];
+            if fetch_one(def, &pk_vals, con)?.is_some() {
+                row_update(def, con, obj, &pk_vals)?;
+                return Ok(false);
+            }
+        }
+        row_insert_auto_pk(def, con, obj)?;
+        Ok(true)
+    } else {
+        let pk_vals = pk_from_body(def, &JsonValue::Object(obj.clone()))?;
+        let exists = fetch_one(def, &pk_vals, con)?.is_some();
+        if exists {
+            row_update(def, con, obj, &pk_vals)?;
+            Ok(false)
+        } else {
+            row_insert(def, con, obj)?;
+            Ok(true)
+        }
+    }
+}
+
+// ───────────────────────── HTTP — Bulk (Q54) ───────────────────────────────────
+
+/// `PUT /api/md/{table}/bulk` — upsert en masse (Q54).
+///
+/// Body : un tableau JSON d'objets (chacun porte ses colonnes, **PK incluse**
+/// pour les tables à PK code ; `id` optionnel pour les tables auto-PK).
+/// Validation **all-or-nothing** : toutes les lignes sont validées (champs
+/// inconnus + intégrité référentielle) avant la moindre écriture. Puis une
+/// transaction `BEGIN`/`COMMIT` englobe les upserts ; toute erreur DB →
+/// `ROLLBACK` et 500.
+///
+/// Réponse : `{ "inserted": N, "updated": M }`.
+async fn bulk_upsert(
+    Path(table): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Vec<JsonValue>>,
+) -> Result<Json<JsonValue>, AppError> {
+    let result = {
+        let con = lock_con(&state)?;
+        let def = resolve_table(&con, &table)?
+            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+        // 1. Validation du batch entier avant écriture.
+        let mut errors: Vec<String> = Vec::new();
+        for (i, row) in body.iter().enumerate() {
+            let obj = match row.as_object() {
+                Some(o) => o,
+                None => {
+                    errors.push(format!("ligne {i} : doit être un objet JSON"));
+                    continue;
+                }
+            };
+            if let Err(e) = reject_unknown_fields(&def, obj) {
+                errors.push(format!("ligne {i} : {}", e.1));
+            } else if let Err(e) = validate_references(&def, obj, &con) {
+                errors.push(format!("ligne {i} : {}", e.1));
+            }
+        }
+        if !errors.is_empty() {
+            return Err(AppError::bad_request(format!(
+                "batch rejeté ({} erreur(s)) : {}",
+                errors.len(),
+                errors.join(" ; ")
+            )));
+        }
+        // 2. Transaction d'écriture.
+        con.execute_batch("BEGIN").map_err(db_err)?;
+        let outcome: Result<(usize, usize), AppError> = (|| {
+            let mut inserted = 0usize;
+            let mut updated = 0usize;
+            for row in &body {
+                let obj = row.as_object().expect("validé plus haut");
+                if row_upsert(&def, &con, obj)? {
+                    inserted += 1;
+                } else {
+                    updated += 1;
+                }
+            }
+            Ok((inserted, updated))
+        })();
+        match outcome {
+            Ok((inserted, updated)) => {
+                con.execute_batch("COMMIT").map_err(db_err)?;
+                (inserted, updated)
+            }
+            Err(e) => {
+                let _ = con.execute_batch("ROLLBACK");
+                return Err(e);
+            }
+        }
+    };
+    Ok(Json(serde_json::json!({
+        "inserted": result.0,
+        "updated": result.1,
+    })))
+}
+
+/// `DELETE /api/md/{table}/bulk` — suppression en masse (Q54).
+///
+/// Body : un tableau JSON d'objets PK (multi-colonnes OK, ex.
+/// `{perimeter_set, entity, period}`). Transactionnel : toute erreur DB →
+/// `ROLLBACK`. Best-effort sur les PK absentes (comptées dans `missing`, non
+/// bloquant).
+///
+/// Réponse : `{ "deleted": N, "missing": M }`.
+async fn bulk_delete(
+    Path(table): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Vec<JsonValue>>,
+) -> Result<Json<JsonValue>, AppError> {
+    let result = {
+        let con = lock_con(&state)?;
+        let def = resolve_table(&con, &table)?
+            .ok_or_else(|| AppError::bad_request(format!("table inconnue : {table}")))?;
+        con.execute_batch("BEGIN").map_err(db_err)?;
+        let outcome: Result<(usize, usize), AppError> = (|| {
+            let mut deleted = 0usize;
+            let mut missing = 0usize;
+            for (i, pk_obj) in body.iter().enumerate() {
+                let pk_vals = pk_from_body(&def, pk_obj).map_err(|e| {
+                    AppError::bad_request(format!("ligne {i} : {}", e.1))
+                })?;
+                if fetch_one(&def, &pk_vals, &con)?.is_none() {
+                    missing += 1;
+                    continue;
+                }
+                let where_clause = def
+                    .pk
+                    .iter()
+                    .map(|c| format!("{} = ?", quote_ident(def.sql_col(c))))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                let sql = format!("DELETE FROM {} WHERE {}", def.sql_name, where_clause);
+                let params: Vec<DbValue> =
+                    pk_vals.iter().map(|(_, v)| json_to_db_value(v)).collect();
+                let n = con
+                    .execute(&sql, params_from_iter(params))
+                    .map_err(db_err)?;
+                deleted += n as usize;
+            }
+            Ok((deleted, missing))
+        })();
+        match outcome {
+            Ok((deleted, missing)) => {
+                con.execute_batch("COMMIT").map_err(db_err)?;
+                (deleted, missing)
+            }
+            Err(e) => {
+                let _ = con.execute_batch("ROLLBACK");
+                return Err(e);
+            }
+        }
+    };
+    Ok(Json(serde_json::json!({
+        "deleted": result.0,
+        "missing": result.1,
+    })))
 }
 
 // ─────────────────────────── Renommage de code (B1, étape 7) ────────────────────
@@ -1653,6 +2148,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/api/md/{table}",
             get(list).post(create).put(update).delete(remove),
+        )
+        .route(
+            "/api/md/{table}/bulk",
+            put(bulk_upsert).delete(bulk_delete),
         )
         .route("/api/md/{table}/rename", post(rename_handler))
         .route("/api/md/{table}/schema", get(table_schema))
@@ -2319,6 +2818,126 @@ mod tests {
         assert!(
             blockers.is_empty(),
             "aucun bloquant JSON pour un coefficient non référencé : {blockers:?}"
+        );
+    }
+
+    // ── Q54 — pagination, recherche, filtres, enrich, upsert ─────────────────
+
+    /// `select_filtered` : pagination (total + limit/offset), recherche ILIKE
+    /// insensible à la casse, filtre exact sur colonne, rejet des colonnes
+    /// inconnues, et no-op de la recherche sur une table sans `libelle`.
+    #[test]
+    fn q54_select_filtered_pagination_recherche_filtre() {
+        let con = setup();
+        for (code, lib, classe) in [
+            ("101", "Capital social", "bilan"),
+            ("120", "Resultat de lexercice", "bilan"),
+            ("700", "Ventes de biens", "resultat"),
+            ("701", "Prestations services", "resultat"),
+            ("601", "Achats stockes", "resultat"),
+        ] {
+            con.execute(
+                format!(
+                    "INSERT INTO dim_account (code, libelle, classe) VALUES ('{code}','{lib}','{classe}')"
+                )
+                .as_str(),
+                [],
+            )
+            .unwrap();
+        }
+        let def = resolve_table(&con, "accounts")
+            .unwrap()
+            .expect("accounts");
+
+        // Pagination : page 1 de 2 lignes, total = 5.
+        let (rows, total) = select_filtered(&def, &con, None, &HashMap::new(), Some(2), 0).unwrap();
+        assert_eq!(total, 5);
+        assert_eq!(rows.len(), 2);
+        let (rows2, _) = select_filtered(&def, &con, None, &HashMap::new(), Some(2), 2).unwrap();
+        assert_eq!(rows2.len(), 2);
+
+        // Recherche sur libellé : "services" → 1.
+        let (r, t) = select_filtered(&def, &con, Some("services"), &HashMap::new(), None, 0).unwrap();
+        assert_eq!(t, 1);
+        assert!(r[0]["libelle"].as_str().unwrap().contains("services"));
+
+        // Recherche insensible à la casse : "VENTES" → 1.
+        let (_, t2) = select_filtered(&def, &con, Some("VENTES"), &HashMap::new(), None, 0).unwrap();
+        assert_eq!(t2, 1);
+
+        // Filtre exact sur classe : "resultat" → 3.
+        let mut f = HashMap::new();
+        f.insert("classe".into(), "resultat".into());
+        let (r3, t3) = select_filtered(&def, &con, None, &f, None, 0).unwrap();
+        assert_eq!(t3, 3);
+        assert!(r3.iter().all(|r| r["classe"].as_str() == Some("resultat")));
+
+        // Colonne de filtre inconnue → 400.
+        let mut bad = HashMap::new();
+        bad.insert("inexistante".into(), "x".into());
+        let err = select_filtered(&def, &con, None, &bad, None, 0).unwrap_err();
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+
+        // Recherche sur table sans libelle (rates) → no-op, pas d'erreur.
+        let def_rates = resolve_table(&con, "rates").unwrap().expect("rates");
+        let (rr, tt) =
+            select_filtered(&def_rates, &con, Some("toto"), &HashMap::new(), None, 0).unwrap();
+        assert_eq!(tt, 0);
+        assert!(rr.is_empty());
+    }
+
+    /// `row_upsert` : premier appel = insert, second appel = update.
+    #[test]
+    fn q54_row_upsert_insert_puis_update() {
+        let con = setup();
+        let def = resolve_table(&con, "accounts")
+            .unwrap()
+            .expect("accounts");
+
+        let mut obj = Map::new();
+        obj.insert("code".into(), JsonValue::String("999".into()));
+        obj.insert("libelle".into(), JsonValue::String("Compte test".into()));
+        obj.insert("classe".into(), JsonValue::String("bilan".into()));
+        let inserted = row_upsert(&def, &con, &obj).unwrap();
+        assert!(inserted, "premier appel = insert");
+
+        // Update du même compte.
+        obj.insert("libelle".into(), JsonValue::String("Compte modifie".into()));
+        let updated = row_upsert(&def, &con, &obj).unwrap();
+        assert!(!updated, "second appel = update");
+
+        let pk = vec![("code".into(), JsonValue::String("999".into()))];
+        let row = fetch_one(&def, &pk, &con).unwrap().unwrap();
+        assert_eq!(row["libelle"].as_str(), Some("Compte modifie"));
+    }
+
+    /// `enrich_rows` : ajoute des colonnes `{fk}_libelle` pour les FK à contrat
+    /// code (test sur `consolidations` dont `variant` est une telle FK).
+    #[test]
+    fn q54_enrich_rows_ajoute_libelle_fk() {
+        let con = setup();
+        crate::seed_all(&con).expect("seed_all");
+        let def = resolve_table(&con, "consolidations")
+            .unwrap()
+            .expect("consolidations");
+        let (rows, _) = select_filtered(&def, &con, None, &HashMap::new(), None, 0).unwrap();
+        assert!(!rows.is_empty(), "seed crée au moins une consolidation");
+        // Avant enrich : aucune colonne *_libelle.
+        assert!(rows[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|k| !k.ends_with("_libelle")));
+        // Après enrich : au moins une colonne *_libelle.
+        let enriched = enrich_rows(&def, &con, rows).unwrap();
+        let has_libelle = enriched[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .any(|k| k.ends_with("_libelle"));
+        assert!(
+            has_libelle,
+            "enrich ajoute des colonnes *_libelle pour les FK code-contrat"
         );
     }
 }
