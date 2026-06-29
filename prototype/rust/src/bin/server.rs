@@ -40,7 +40,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{delete, get, post, put},
+    routing::{any, delete, get, post, put},
     Json, Router,
 };
 use duckdb::params_from_iter;
@@ -1370,6 +1370,10 @@ async fn main() {
         .merge(controls::router())
         .merge(import::router())
         .merge(export::router())
+        // MCP sur HTTP (Q54 D2 révisée) : route /mcp montée sur le même serveur
+        // que l'UI → UI et agent partagent la même base DuckDB, sans verrou ni
+        // duplication. Config opencode : { "type":"remote", "url":"http://localhost:3000/mcp" }.
+        .route("/mcp", any(conso_engine::mcp::http_handler))
         .fallback_service(serve_dir)
         .layer(cors)
         .with_state(state);

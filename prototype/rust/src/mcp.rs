@@ -463,3 +463,54 @@ pub async fn run_stdio(state: Arc<AppState>) -> Result<(), Box<dyn std::error::E
     service.waiting().await?;
     Ok(())
 }
+
+/// Construit le service MCP sur HTTP (transport Streamable HTTP) à monter comme
+/// route `/mcp` sur le serveur Axum existant. Permet à l'UI (`/api/...`) et à
+/// l'agent MCP (`/mcp`) de coexister dans le **même process**, donc sur la
+/// **même base DuckDB** sans verrou ni duplication (Q54 décision D2 révisée).
+///
+/// Mode **stateless + json_response** : chaque requête POST est indépendante
+/// (pas de session à partager entre requêtes), réponse JSON directe (pas de
+/// SSE). C'est le mode le plus simple et robuste pour un agent qui envoie
+/// `initialize` / `tools/list` / `tools/call` comme requêtes HTTP séparées.
+///
+/// opencode le configure en MCP remote :
+/// `{ "type": "remote", "url": "http://localhost:3000/mcp" }`.
+pub fn http_service(
+    state: Arc<AppState>,
+) -> rmcp::transport::StreamableHttpService<
+    ConsoMcp,
+    rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
+> {
+    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+    use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
+    let mut config = StreamableHttpServerConfig::default();
+    config.stateful_mode = false;
+    config.json_response = true;
+    let session_manager = Arc::new(LocalSessionManager::default());
+    StreamableHttpService::new(
+        move || Ok(ConsoMcp { state: state.clone() }),
+        session_manager,
+        config,
+    )
+}
+
+/// Handler Axum pour la route `/mcp` : délègue au `StreamableHttpService` via
+/// `handle()` (approche des tests rmcp — `route_service` ne matchait pas en
+/// Axum 0.8). Le body de réponse (BoxBody) est tamponné en Bytes (stateless +
+/// json_response ⇒ réponse JSON unique, pas de flux SSE à streamer).
+pub async fn http_handler(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    req: axum::extract::Request,
+) -> axum::response::Response {
+    use http_body_util::BodyExt;
+    let svc = http_service(state);
+    let resp = svc.handle(req).await;
+    let (parts, body) = resp.into_parts();
+    let bytes = body
+        .collect()
+        .await
+        .map(|b| b.to_bytes())
+        .unwrap_or_default();
+    axum::response::Response::from_parts(parts, axum::body::Body::from(bytes))
+}

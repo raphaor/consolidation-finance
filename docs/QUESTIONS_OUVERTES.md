@@ -415,9 +415,11 @@ Possibilité de **restreindre l'accès à certains packages** (c'est-à-dire des
    dynamiques (`?{col}=valeur` validés), bulk upsert (`PUT /api/md/{table}/bulk`),
    bulk delete (`DELETE /api/md/{table}/bulk`), enrichissement (`?enrich=true`).
    Rétrocompat préservée (array plat par défaut).
-2. **MCP** — serveur **intégré au binaire** (`conso-server --mcp`, transport
-   stdio via `rmcp`), 10 outils curatés. Pas de binaire séparé, pas de route
-   HTTP `/mcp` dans ce sprint.
+2. **MCP** — serveur **intégré au binaire**, 10 outils curatés, transport `rmcp`.
+   **Deux modes** : stdio (`conso-server --mcp`, process séparé) **et** HTTP
+   (route `/mcp` sur le serveur Axum existant → UI + agent simultanés sur la
+   même base DuckDB, sans verrou). Le mode HTTP lève la contrainte
+   mono-processus du mode stdio.
 3. **SDK** : `rmcp` (officiel Rust).
 4. **Surface** : sous-ensemble curaté (saisie, run conso, contrôles, rapports
    bilan/P&L, indicateurs, lecture/écriture master data, `describe_model`).

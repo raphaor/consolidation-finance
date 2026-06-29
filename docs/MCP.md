@@ -6,26 +6,50 @@
 
 Le moteur de consolidation est pilotable par un agent IA (opencode, Claude,
 Cursor…) via un **serveur MCP** intégré au binaire `conso-server`. L'agent
-découvre des outils nommés et typés (description + JSON Schema des paramètres)
-et les invoque sur stdin/stdout — aucun serveur HTTP à lancer, aucun port à
-gérer.
+découvre des outils nommés et typés (description + JSON Schema des paramètres).
+**Deux modes** coexistent :
+
+- **stdio** (`conso-server --mcp`) : opencode spawn le process sur stdin/stdout,
+  aucun serveur HTTP à lancer — idéal pour une session agent ad-hoc, mais
+  process séparé → base DuckDB séparée (bac à sable) ou exclusive (verrou si
+  même fichier que l'UI).
+- **HTTP** (`/mcp` sur le serveur HTTP en écoute) : l'agent se connecte en MCP
+  remote au serveur qui sert déjà l'UI → **même process, même base que l'UI,
+  accès simultané, sans verrou ni duplication**. C'est le mode recommandé pour
+  travailler sur les données réelles.
 
 ## Principe
+
+### Mode stdio (`conso-server --mcp`)
 
 ```
 Agent IA (opencode…)
     │ MCP (JSON-RPC sur stdio)
     ▼
-conso-server --mcp   ← même binaire que le serveur HTTP, flag --mcp
+conso-server --mcp   ← process séparé, flag --mcp
     │ appelle les fonctions Rust de conso-engine (aucun round-trip HTTP)
     ▼
-conso.duckdb
+conso.duckdb          ← base dédiée (.conso-mcp.duckdb) OU base réelle (mais
+                        alors exclusive avec l'UI : DuckDB mono-processus)
 ```
 
-Le mode `--mcp` partage tout le setup DB (schéma, migrations, seed JSON) avec
-le mode HTTP. Le cœur métier est commun : les outils MCP appellent les mêmes
-fonctions que les handlers REST (`conso_engine::reports`, `masterdata`,
-`import`, `indicators`, `controls`).
+### Mode HTTP (route `/mcp`) — UI + agent simultanés
+
+```
+opencode (MCP remote)        navigateur (UI React)
+    │                             │
+    │  http://localhost:3000/mcp   │  http://localhost:3000/api/...
+    ▼                             ▼
+   conso-server (UN SEUL process, port 3000)
+        │  même Arc<AppState> → même connexion DuckDB
+        ▼
+     conso.duckdb  ← partagée : éditions UI et écritures agent visibles
+                    des deux côtés, en temps réel, sans verrou
+```
+
+Les deux modes partagent le setup DB (schéma, migrations, seed JSON) et le cœur
+métier : les 10 outils MCP appellent les mêmes fonctions Rust que les handlers
+REST (`conso_engine::reports`, `masterdata`, `import`, `indicators`, `controls`).
 
 ## Outils exposés (10)
 
@@ -56,6 +80,33 @@ Le binaire est `prototype/rust/target/release/conso-server` (`.exe` sous
 Windows). La 1ʳᵉ compilation est lourde (DuckDB C++ embarqué + rmcp + schemars).
 
 ## Configuration d'opencode
+
+Deux options selon le mode souhaité.
+
+### Option A — MCP remote (HTTP, `/mcp`) : UI + agent simultanés sur la même base
+
+C'est le mode **recommandé** pour travailler sur vos données réelles. Le
+serveur HTTP doit tourner (celui qui sert déjà l'UI). Aucun chemin de binaire à
+configurer (opencode se connecte par URL) :
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "conso": {
+      "type": "remote",
+      "url": "http://localhost:3000/mcp",
+      "enabled": true,
+      "timeout": 20000
+    }
+  }
+}
+```
+
+Lancez `conso-server` (sans `--mcp`) comme d'habitude ; l'agent s'y branche.
+L'UI et l'agent voient et modifient la même base en temps réel.
+
+### Option B — MCP local (stdio, `--mcp`) : session agent ad-hoc, bac à sable
 
 La config se met dans `.opencode/opencode.jsonc` (workspace). Un template
 `.opencode/opencode.jsonc.example` est fourni (committed) ; la config réelle

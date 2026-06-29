@@ -35,7 +35,9 @@ tower-http = { version = "0.6", features = ["cors", "fs"] }
 # SDK MCP officiel (Q54) — sert le moteur comme outils typés pour les agents IA
 # via le mode `conso-server --mcp` (transport stdio). `transport-io` = stdio
 # serveur, `schemars` = génération du JSON Schema des paramètres d'outils.
-rmcp = { version = "2", features = ["server", "transport-io", "schemars"] }
+rmcp = { version = "2", features = ["server", "transport-io", "transport-streamable-http-server", "schemars"] }
+# http-body-util : utilisé par le handler MCP /mcp (collect du body de réponse).
+http-body-util = "0.1"
 # schemars : génération du JSON Schema des paramètres d'outils MCP (le derive
 # `JsonSchema` référence le crate directement). Version alignée sur rmcp 2.
 schemars = "1"
