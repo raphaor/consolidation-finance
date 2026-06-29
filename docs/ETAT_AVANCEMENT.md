@@ -264,6 +264,30 @@ mesurer aussi le hook règles — flag `--no-rules` pour comparer en natif.
 
 ---
 
+## Backlog technique (TODO)
+
+Tâches techniques identifiées, non bloquantes mais à ne pas perdre. Priorité
+entre `()`.
+
+- **(HAUTE)** Ajouter un test de régression pour la **conversion triangulaire
+  cross-currency** (USD→GBP via la devise pivot EUR). Le comportement est prouvé
+  en runtime (2026-06-29 : `presentation_currency=GBP`, saisie USD 1000 →
+  F20 = 805,08 GBP = 1000 × `taux_moyen(USD) 0,95 / taux_moyen(GBP) 1,18`) mais
+  n'est pas gardé par un test automatisé → risque de régression silencieuse.
+  Cas à couvrir dans `tests/pipeline.rs` (ou un nouveau `tests/convert.rs`) :
+  - construire une consolidation avec `presentation_currency` = une devise
+    **non-pivot** (GBP), pivot = EUR ;
+  - importer une écriture en USD (entité dont la devise fonctionnelle = USD),
+    flux F20 (avg) puis F00 (close) ;
+  - `run_pipeline` puis assert au niveau `converted` :
+    `amount × (taux(USD→EUR) / taux(GBP→EUR))` pour chaque schéma (avg/close) ;
+  - vérifier aussi l'écart F81 = `amount × (cross_report − cross_flux)`.
+  - Réutiliser le seed `tests/fixtures/seed.json` (désormais pourvu de
+    `flow_scheme` + taux USD/GBP vs EUR dans le rate_set `RATES`).
+  - Réf. formule : `prototype/rust/src/pipeline/convert.rs:155-170` (CTE `conv`).
+
+---
+
 ## Reste à trancher (avant 1ʳᵉ implémentation élargie)
 
 Questions `TÔT` encore ouvertes — voir [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) :
