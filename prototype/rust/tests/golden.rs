@@ -124,20 +124,26 @@ fn snapshot_path(name: &str) -> PathBuf {
 
 /// Compare `actual` au snapshot `name`. En mode `UPDATE_SNAPSHOTS`, (ré)écrit le
 /// fichier. Sinon, échoue avec un diff sur la première ligne divergente.
+///
+/// La comparaison normalise les fins de ligne (`\r\n` → `\n`) : sous Windows avec
+/// `core.autocrlf=true`, le snapshot est checké-out en CRLF alors que le run
+/// produit du LF pur — le contenu est identique, seuls les EOL diffèrent.
 fn assert_snapshot(name: &str, actual: &str) {
+    let normalize = |s: &str| s.replace("\r\n", "\n").replace('\r', "\n");
+    let actual = normalize(actual);
     let path = snapshot_path(name);
     if std::env::var("UPDATE_SNAPSHOTS").is_ok() {
         std::fs::create_dir_all(path.parent().unwrap()).expect("create snapshots dir");
-        std::fs::write(&path, actual).expect("write snapshot");
+        std::fs::write(&path, &actual).expect("write snapshot");
         eprintln!("snapshot mis à jour : {}", path.display());
         return;
     }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+    let expected = normalize(&std::fs::read_to_string(&path).unwrap_or_else(|_| {
         panic!(
             "snapshot absent : {}\nGénère-le avec : UPDATE_SNAPSHOTS=1 cargo test --release --test golden",
             path.display()
         )
-    });
+    }));
     if actual == expected {
         return;
     }
