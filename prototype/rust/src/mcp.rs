@@ -5,7 +5,7 @@
 //! cœur métier est partagé avec le serveur HTTP (`conso_engine::reports`,
 //! `masterdata`, `import`, `indicators`, `controls`) : aucun round-trip HTTP.
 //!
-//! Cf. [`docs/PLAN_Q54_API_MCP.md`](../../docs/PLAN_Q54_API_MCP.md) §4.
+//! Cf. `docs/archive/specs-livrees/PLAN_Q54_API_MCP.md` §4.
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -405,6 +405,30 @@ Possibilité de **restreindre l'accès à certains packages** (c'est-à-dire des
 
 ### Q54 — Accessibilité API pour agents IA (MCP & opérations en masse)
 
+**Statut** : **TRANCHÉE** (2026-06-29) — implémenté. Spéc de réalisation dans
+[`archive/specs-livrees/PLAN_Q54_API_MCP.md`](./archive/specs-livrees/PLAN_Q54_API_MCP.md) (livré), guide d'usage dans
+[`MCP.md`](./MCP.md).
+
+**Décision** :
+1. **REST** — 6 améliorations livrées : pagination (`?limit&offset`, enveloppe
+   `{total,rows}` opt-in), recherche (`?search=` ILIKE sur `libelle`), filtres
+   dynamiques (`?{col}=valeur` validés), bulk upsert (`PUT /api/md/{table}/bulk`),
+   bulk delete (`DELETE /api/md/{table}/bulk`), enrichissement (`?enrich=true`).
+   Rétrocompat préservée (array plat par défaut).
+2. **MCP** — serveur **intégré au binaire** (`conso-server --mcp`, transport
+   stdio via `rmcp`), 10 outils curatés. Pas de binaire séparé, pas de route
+   HTTP `/mcp` dans ce sprint.
+3. **SDK** : `rmcp` (officiel Rust).
+4. **Surface** : sous-ensemble curaté (saisie, run conso, contrôles, rapports
+   bilan/P&L, indicateurs, lecture/écriture master data, `describe_model`).
+5. **Auth** : aucune (local, prototype).
+6. **Contrainte** DuckDB mono-processus : UI (`conso-server`) XOR agent
+   (`conso-server --mcp`) sur le même `.duckdb`.
+
+Cœur métier extrait dans `conso_engine::reports` (partagé HTTP ↔ MCP).
+
+---
+
 **Besoin** : rendre l'application facilement pilotable par des agents IA. Deux axes : (1) améliorer l'API REST existante pour les cas d'usage agent (bulk, recherche, pagination), et (2) envisager un **serveur MCP** (Model Context Protocol) qui encapsule l'API en outils nommés et typés pour les LLM.
 
 **Difficulté** : **Moyenne** — l'API REST existe déjà et est fonctionnelle. Les améliorations sont incrémentales.

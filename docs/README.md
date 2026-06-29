@@ -21,8 +21,8 @@ Tenus à jour avec le code. À lire avant d'implémenter.
 | [`CONTROLES_DONNEES.md`](./CONTROLES_DONNEES.md) | Spec et plan d'implémentation des contrôles de données (validation configurable, rapports). |
 | [`CAS_CONSO_TEST.md`](./CAS_CONSO_TEST.md) | Cahier de recette pour l'éditeur de règles (cas représentatifs). |
 | [`TECHNIQUE.md`](./TECHNIQUE.md) | Architecture et justifications de la stack. |
+| [`MCP.md`](./MCP.md) | Serveur MCP (Q54) : pilotage par agents IA via `conso-server --mcp`, config opencode Windows/Linux, contraintes. |
 | [`RECETTE_PYTHON.md`](./RECETTE_PYTHON.md) | Recette boîte noire : lancement et rôle des 3 scripts Python (`smoke` / `rules` / `golden`). |
-| [`PLAN_Q54_API_MCP.md`](./PLAN_Q54_API_MCP.md) | Plan Q54 en cours : améliorations API REST (bulk, pagination, recherche) + serveur MCP intégré (`--mcp`). À archiver une fois livré. |
 
 ### Articulation des specs
 
@@ -63,6 +63,7 @@ de conception, pas de la spec vivante.
 | `FLOW_SCHEME_EXPLICITE.md` | Mini-spec `flow_scheme` sans défaut (Q45, livré 2026-06-26) |
 | `PLAN_MIGRATION_CSV_JSON.md` | Plan de migration seed CSV → JSON (T1–T5, livré) |
 | `PLAN_RENOMMAGE_CODES.md` | Plan de renommage codes → clés techniques B1 (étapes 0–13, livré) |
+| `PLAN_Q54_API_MCP.md` | Plan Q54 : améliorations API REST + serveur MCP intégré `--mcp` (livré 2026-06-29) |
 
 ### `archive/analyses/` — analyses et revues ponctuelles
 
