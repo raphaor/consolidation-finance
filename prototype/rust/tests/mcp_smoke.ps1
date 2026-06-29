@@ -35,7 +35,10 @@ $lines = @(
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"describe_model","arguments":{}}}',
     '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_master_data","arguments":{"table":"accounts","limit":3}}}',
-    '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_master_data","arguments":{"table":"accounts","search":"capital"}}}'
+    '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_master_data","arguments":{"table":"accounts","search":"capital"}}}',
+    '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"run_consolidation","arguments":{"consolidation_id":1}}}',
+    '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_bilan","arguments":{"consolidation_id":1}}}',
+    '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"run_controls","arguments":{}}}'
 )
 $payload = $lines -join "`n"
 
@@ -90,6 +93,18 @@ Check ($lm.total -gt 0 -and $lm.rows.Count -eq 3), "list_master_data(accounts,li
 $sr = $responses["5"].result.content[0].text | ConvertFrom-Json
 $hit = $sr.rows | Where-Object { $_.libelle -match "(?i)capital" }
 Check ($sr.total -ge 1 -and $hit), "list_master_data(search=capital) -> recherche ILIKE"
+
+# 6. run_consolidation : retourne un PipelineResult structuré (consolidation=1)
+$rc = $responses["6"].result.content[0].text | ConvertFrom-Json
+Check ($null -ne $rc.consolidation -and $rc.consolidation -eq 1), "run_consolidation(1) -> consolidation=1 (counts=$($rc.corporate)/$($rc.converted)/$($rc.consolidated))"
+
+# 7. get_bilan : retourne un tableau (vide ici sans écritures, mais l'outil répond)
+$gb = $responses["7"].result.content[0].text | ConvertFrom-Json
+Check ($null -ne $gb), "get_bilan(1) -> répond (tableau, $($gb.Count) lignes)"
+
+# 8. run_controls sans set_code : découverte -> liste des control_sets
+$ctrl = $responses["8"].result.content[0].text | ConvertFrom-Json
+Check ($null -ne $ctrl.control_sets), "run_controls() -> discovery (control_sets présent)"
 
 Write-Host ""
 if ($fail -eq 0) {
