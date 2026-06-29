@@ -21,7 +21,8 @@
 //! ```
 
 use conso_engine::{
-    create_schema, pipeline::run_pipeline, validate::validate_consolidated, ConvertParams,
+    create_schema, pipeline::{run_pipeline, run_pipeline_with_hook}, rules::run_ruleset_at_level,
+    validate::validate_consolidated, ConvertParams,
 };
 use duckdb::Connection;
 use std::time::{Duration, Instant};
@@ -53,11 +54,16 @@ fn main() {
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(1_000_000);
     let db_path = arg_value(&args, "--db").unwrap_or_else(default_db_path);
+    // `--no-rules` désactive le hook règles pour comparer natif vs règles. Par
+    // défaut le ruleset `RS_BENCH_INTERCO` est exécuté (référencé par la
+    // consolidation) — c'est le cas production.
+    let no_rules = args.iter().any(|a| a == "--no-rules");
 
     println!();
     println!("╔══ CONSO-BENCH — Pipeline de consolidation (gros volumes) ══╗");
     println!("║  fichier DuckDB : {:<41}║", truncate(&db_path, 41));
     println!("║  écritures cible : {:<40} ║", format!("{rows} lignes"));
+    println!("║  hook règles    : {:<40} ║", if no_rules { "désactivé (--no-rules)" } else { "activé (RS_BENCH_INTERCO)" });
     println!("╚════════════════════════════════════════════════════════════╝");
 
     // --- Nettoyage du fichier existant (run propre) ---
@@ -71,6 +77,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // PRAGMA d'accélération des INSERT : DuckDB n'a plus à maintenir l'ordre
+    // physique d'insertion (columnar layout). Sans incidence sur les requêtes
+    // triées (PK `id` remain deterministic via la séquence).
+    if let Err(e) = con.execute_batch("PRAGMA preserve_insertion_order=false;") {
+        eprintln!("\n⚠ PRAGMA preserve_insertion_order=false ignoré : {e}");
+    }
 
     if let Err(e) = create_schema(&con) {
         eprintln!("\n✗ ERREUR DDL : {e}");
@@ -120,11 +133,29 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let report = match run_pipeline(&con, &params) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("\n✗ ERREUR pipeline : {e}");
-            std::process::exit(1);
+    let report = if no_rules {
+        match run_pipeline(&con, &params) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("\n✗ ERREUR pipeline : {e}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Hook règles : `run_ruleset_at_level` est appelé après chaque étape du
+        // pipeline. La règle ELI_BENCH cible le niveau `consolidated` — le hook
+        // ne fait rien pour `corporate` et `converted` (la recherche des règles
+        // du niveau est sans retour). Le coût mesuré est donc réaliste.
+        let mut hook = |c: &Connection, level: &str| -> duckdb::Result<()> {
+            let _ = run_ruleset_at_level(c, "RS_BENCH_INTERCO", level, Some(1))?;
+            Ok(())
+        };
+        match run_pipeline_with_hook(&con, &params, &mut hook) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("\n✗ ERREUR pipeline (avec hook règles) : {e}");
+                std::process::exit(1);
+            }
         }
     };
 
@@ -194,6 +225,7 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
         -- dim_consolidation : objet composite (PK technique auto `id`). L'id est
         -- alloué par nextval (déterministe 1 sur base fraîche) — `load_params(&con, 1)`
         -- pointe donc sur cette consolidation. B1 : toutes les FK sont en id.
+        -- Le ruleset `RS_BENCH_INTERCO` est référencé pour mesurer le hook règles.
         INSERT INTO dim_consolidation
             (id, libelle, phase, exercice, perimeter_set, variant, presentation_currency,
              perimeter_period, rate_set, rate_period, ruleset_code, a_nouveau_consolidation_id, statut)
@@ -207,7 +239,8 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
              (SELECT id FROM dim_period WHERE code = '2024'),
              (SELECT id FROM dim_rate_set WHERE code = 'RATES'),
              (SELECT id FROM dim_period WHERE code = '2024'),
-             NULL, NULL, 'ouvert');
+             (SELECT id FROM dim_ruleset WHERE code = 'RS_BENCH_INTERCO'),
+             NULL, 'ouvert');
 
         -- Entités : M (mère) insérée en premier, puis les filiales.
         -- B1 : devise_fonctionnelle → dim_currency.id, entite_parent → dim_entity.id.
@@ -293,9 +326,58 @@ fn gen_dimensions(con: &Connection) -> duckdb::Result<()> {
 
         INSERT INTO dim_nature (code, libelle, rules) VALUES
             ('0LIASS','Liasse',NULL),
-            ('1AJUST','Ajustement',NULL);
+            ('1AJUST','Ajustement',NULL),
+            ('2ELI','Élimination interco',NULL);
         "
     ))?;
+
+    // Règle d'élimination interco (bench) : symétrique à ELI_700 du seed.
+    // Scope globalisé (toutes entités en méthode globale) + opérations sur
+    // `partner IS NOT NULL` au niveau consolidated. 30 % des écritures ont
+    // un partner dans gen_staging → ~750 k lignes matchées sur 2,5 M.
+    // L'objectif est de mesurer le coût du hook règles (snapshot + INSERT).
+    //
+    // Le JSON definition est passé en paramètre (?) plutôt qu'interpolé dans
+    // le batch SQL : ça évite l'échappement des `{}` dans le `format!` et
+    // garantit l'injection-safe.
+    const ELI_BENCH_DEF: &str = r#"{
+        "scope": [
+            {"target": "entity",  "dim": "methode", "op": "=", "val": "globale"},
+            {"target": "partner", "dim": "methode", "op": "=", "val": "globale"}
+        ],
+        "operations": [
+            {
+                "seq": 1, "level": "consolidated",
+                "selection": [{"dim": "partner", "op": "IS NOT NULL"}],
+                "coefficient": {"type": "pct_integration"},
+                "multiplicateur": -1,
+                "destination": {
+                    "nature":  {"mode": "override", "value": "2ELI"},
+                    "partner": {"mode": "inherit"}
+                }
+            },
+            {
+                "seq": 2, "level": "consolidated",
+                "selection": [{"dim": "partner", "op": "IS NOT NULL"}],
+                "coefficient": {"type": "pct_integration"},
+                "multiplicateur": 1,
+                "destination": {
+                    "nature":  {"mode": "override", "value": "2ELI"},
+                    "partner": {"mode": "null"}
+                }
+            }
+        ]
+    }"#;
+    con.execute(
+        "INSERT INTO dim_rule (code, libelle, definition) VALUES (?, ?, ?)",
+        duckdb::params!["ELI_BENCH", "Élimination interco (bench)", ELI_BENCH_DEF],
+    )?;
+    con.execute_batch(
+        "INSERT INTO dim_ruleset (code, libelle) VALUES
+            ('RS_BENCH_INTERCO', 'Élimination interco (bench)');
+         INSERT INTO dim_ruleset_item (ruleset_code, ordre, rule_code)
+         SELECT (SELECT id FROM dim_ruleset WHERE code = 'RS_BENCH_INTERCO'), 1, 'ELI_BENCH';",
+    )?;
     Ok(())
 }
 
@@ -369,6 +451,9 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
     // PostgreSQL). On utilise `//` (division entière floor) pour les index.
     let flow_cycle = N_ENTITIES * N_ACCOUNTS * 2;
     // CTE explicite : on matérialise les index (ent_rn / acc_rn) avant les JOIN.
+    // 30 % des écritures reçoivent un `partner` (= une autre entité du groupe)
+    // pour exercer une règle d'élimination interco réaliste au niveau
+    // consolidated. Sinon le hook règles n'aurait aucune ligne à matcher.
     let sql = format!(
         "
         INSERT INTO stg_entry
@@ -389,11 +474,13 @@ fn gen_staging(con: &Connection, rows: usize) -> duckdb::Result<()> {
             CASE WHEN gen.fl = 0 THEN 'F00' ELSE 'F20' END,
             e.devise_fonctionnelle,
             '0LIASS',
-            NULL, NULL, NULL,
+            CASE WHEN gen.i % 10 < 3 THEN p.code ELSE NULL END,
+            NULL, NULL,
             'BENCH-' || CAST(gen.i AS VARCHAR),
             CAST(((gen.i % 9000) + 1000) AS DECIMAL(18,2))
         FROM gen
         JOIN ent_idx e ON e.rn = gen.ent_rn
+        JOIN ent_idx p ON p.rn = (gen.ent_rn + 1 + (gen.i % 7)) % {N_ENTITIES}
         JOIN acc_idx a ON a.rn = gen.acc_rn;
         "
     );
@@ -558,11 +645,12 @@ périmètre), exécute le pipeline A→B→C→D sur une DuckDB fichier, puis va
 identités de clôture et les invariants F80/F81.
 
 USAGE
-    conso-bench [--rows <N>] [--db <path>]
+    conso-bench [--rows <N>] [--db <path>] [--no-rules]
 
 ARGUMENTS
     --rows <N>     Nombre d'écritures brutes générées dans stg_entry (défaut : 1000000)
     --db <path>    Fichier DuckDB (défaut : $TEMP/conso_bench.duckdb)
+    --no-rules     Désactive le hook règles (compare natif vs avec ruleset)
 
 EXEMPLE
     conso-bench --rows 5000000"
@@ -571,6 +659,7 @@ EXEMPLE
 
 fn validate_args(args: &[String]) -> Result<(), String> {
     let value_flags = ["--rows", "--db"];
+    let bool_flags = ["--no-rules"];
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
@@ -581,6 +670,8 @@ fn validate_args(args: &[String]) -> Result<(), String> {
                 return Err(format!("l'argument '{a}' requiert une valeur"));
             }
             i += 1;
+        } else if bool_flags.contains(&a.as_str()) {
+            // flag sans valeur
         } else {
             return Err(format!("argument inconnu : '{a}'"));
         }

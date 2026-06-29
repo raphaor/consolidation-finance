@@ -155,16 +155,10 @@ GROUP BY\n\
         [level, level],
     )?;
 
-    let n: i64 = con.query_row(
-        "SELECT COUNT(*) FROM fact_entry fe \
-         WHERE fe.level = ? \
-           AND EXISTS ( \
-               SELECT 1 FROM v_flow_behavior cb \
-               WHERE cb.account = fe.account AND cb.flow = fe.flow \
-                 AND cb.flux_de_report_id = fe.flow \
-           )",
-        [level],
-        |row| row.get(0),
-    )?;
-    Ok(n as usize)
+    // COUNT final retiré : la valeur de retour de `materialize_closures` n'est
+    // pas utilisée par `run_steps` ni par le hook règles (uniquement propagée
+    // pour l'erreur). Le COUNT précédent faisait un full scan + EXISTS sur
+    // `v_flow_behavior` à chaque appel (3× par run), pénalisant le timing des
+    // étapes C/D qui l'incluent. On retourne 0 par convention.
+    Ok(0)
 }

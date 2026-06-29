@@ -213,26 +213,48 @@ interco + à-nouveau + UI). Les anciens scripts Python (`golden_test.py` / `rule
 
 ✅ **Mesurée** sur 3 volumétries via `conso-bench` (binaire `src/bin/bench.rs`). Jeu généré :
 60 entités × 200 comptes × 5 devises × F00/F20, périmètre avec méthodes mixtes + entrantes/
-sortantes. Pipeline mesuré sur DuckDB **fichier** (cas réel).
+sortantes. Pipeline mesuré sur DuckDB **fichier** (cas réel). Le bench référence un ruleset
+d'élimination interco (`RS_BENCH_INTERCO`, partenaire rempli sur 30 % des écritures) pour
+mesurer aussi le hook règles — flag `--no-rules` pour comparer en natif.
+
+### Natif (sans règles)
 
 | `stg_entry` | corporate | converted | consolidated | Total | Débit global |
 |---:|---:|---:|---:|---:|---:|
-| 10 k | 0,11 s | 0,17 s | 0,18 s | **0,47 s** | 21 k/s (cold start) |
 | 100 k | 0,49 s | 0,95 s | 1,22 s | **2,66 s** | 38 k/s |
-| 1 M | 3,14 s | 8,89 s | 9,97 s | **22,0 s** | 45 k/s |
-| 5 M | 14,2 s | 42,6 s | 46,3 s | **103 s** | 48 k/s |
+| 1 M | 3,17 s | 10,1 s | 10,2 s | **23,4 s** | 43 k/s |
+| 5 M | 14,7 s | 44,7 s | 52,0 s | **111 s** | 45 k/s |
+
+### Avec ruleset interco (`RS_BENCH_INTERCO`, 2 opérations)
+
+| `stg_entry` | consolidated (lignes) | Total | Surcoût hook |
+|---:|---:|---:|---:|
+| 1 M | 3,51 M (+1,03 M écritures 2ELI) | **27,6 s** | +4,2 s (+18 %) |
+| 5 M | 17,5 M (+5,14 M écritures 2ELI) | **128 s** | +17 s (+15 %) |
 
 **Lecture** :
-- Étape **A (corporate / agrégation)** : la plus rapide — **636–703 k lignes/s** sur gros volumes
-  (DuckDB vectorisé). Tient le facteur d'échelle linéairement.
-- Étapes **C (convert) et D (consolidate)** : ~270 k lignes/s — **les goulots** (×2,5 plus lentes
-  que A). Conversion génère ~24 % de lignes en plus (F80/F81 écarts) ; consolidate fait le × pct.
-- **Débit global stable ~45–48 k lignes/s** sur gros volumes (cold start sur 10 k).
-- 5 M lignes traitées en **< 2 min** sur machine de dev — conforme à l'obligation de moyens
-  ([Q12]). Validation clôtures + invariants F80/F81 tenus à toutes les échelles.
+- Étape **A (corporate / agrégation)** : la plus rapide — **630–700 k lignes/s** (DuckDB vectorisé).
+- Étapes **C (convert) et D (consolidate)** : ~245–280 k lignes/s — **les goulots natifs**
+  (2 branches d'écriture en C, JOINs `v_flow_behavior` + `sat_exchange_rate`, ×2,5 plus de
+  lignes qu'en A). Le coût est structurel, peu optimisable sans casser la sémantique.
+- **Hook règles pas critique** : +15–18 % pour produire 5 M lignes d'élimination au niveau
+  consolidated (snapshot + INSERT par opération). Scale linéairement, ~3 µs/ligne 2ELI.
+- **Débit global stable ~40–45 k lignes stg/s** sur gros volumes. 5 M lignes traitées en
+  ~2 min en natif, ~2 min 8 s avec ruleset — conforme à l'obligation de moyens ([Q12]).
+- Validation clôtures + invariants F80/F81 tenus à toutes les échelles, avec ou sans ruleset.
+
+### Optimisations testées (2026-06-29)
+
+- **Index secondaires** (`fact_entry (consolidation_id, level)`, `(account, flow)`,
+  `stg_entry (phase, entry_period)`) : **rejetés**. Sur DuckDB columnar + écriture massive
+  d'un niveau complet par étape, le coût de maintenance de l'ART dépasse le gain en lecture
+  (1M : 22 s → 53 s, ×2,4 plus lent). Les zone-maps suffisent car `consolidation_id` est
+  physiquement groupé (1 valeur par run, insertion par étape).
+- **`PRAGMA preserve_insertion_order=false`** : adopté dans le bench (neutre, bonne pratique).
+- **Retrait du `COUNT` final dans `materialize_closures`** (valeur non utilisée) : adopté.
 
 → Détails dans `prototype/rust/src/bin/bench.rs` ; recette via
-`cargo run --release --bin conso-bench -- --rows 1000000`.
+`cargo run --release --bin conso-bench -- --rows 1000000` (ajouter `--no-rules` pour le natif).
 
 ## Qualité
 
