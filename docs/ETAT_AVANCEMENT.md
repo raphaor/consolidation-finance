@@ -3,7 +3,7 @@
 > Vue consolidée de **ce qui est implémenté**, de son **comportement**, et de **ce qui reste**.
 > Pour le *pourquoi* d'une décision → [`QUESTIONS_OUVERTES.md`](./QUESTIONS_OUVERTES.md) ;
 > pour le détail fonctionnel → les docs thématiques liées ci-dessous.
-> Dernière mise à jour : **2026-06-29**.
+> Dernière mise à jour : **2026-06-30**.
 
 **Légende** : ✅ implémenté & testé · 🟡 partiel / en cours · ⬜ reporté (post-MVP).
 
@@ -189,6 +189,32 @@ REST dédiés (`prototype/rust/src/entries.rs`) : `POST /api/entries` (batch), `
 
 ⚠️ Le schéma `stg_entry` ayant évolué (`id` PK), un `POST /api/reset` ou `CONSO_FORCE_RESEED=1`
 est nécessaire après rebuild pour reconstruire la base.
+
+## MCP — pilotage par agent IA - [Q54] ✅
+
+✅ **Serveur MCP intégré** au binaire `conso-server` (SDK `rmcp`), exposant **10
+outils typés** pour les agents IA (opencode, Claude…) : `describe_model`,
+`list_master_data`, `upsert_master_data`, `import_entries`, `get_entries`,
+`run_consolidation`, `run_controls`, `get_bilan`, `get_compte_resultat`,
+`get_indicator`. Cœur métier partagé HTTP↔MCP (`conso_engine::reports`).
+
+✅ **Deux modes** de transport :
+- **stdio** (`conso-server --mcp`) : opencode spawn le process, idéal pour une
+  session ad-hoc sans serveur HTTP. Process séparé → base DuckDB dédiée
+  (bac à sable) ou exclusive (verrou si même fichier que l'UI).
+- **HTTP** (route `/mcp` sur le serveur Axum existant) : l'agent se connecte en
+  MCP remote, **même process que l'UI** → même base DuckDB partagée, **UI et
+  agent simultanés sans verrou**. Mode recommandé pour le travail sur données
+  réelles.
+
+✅ **REST bulk/pagination/recherche** (Q54 phase 1) : `PUT/DELETE
+/api/md/{table}/bulk`, `?limit&offset` (enveloppe opt-in), `?search=` (ILIKE
+`libelle`), filtres dynamiques `?{col}=`, `?enrich=true` (FK + libellé).
+
+✅ **Smoke test** stdio automatisé (`tests/mcp_smoke.ps1`, 19 checks) + recette
+via opencode (4 scénarios : lecture, saisie+run, rapports, contrôles).
+
+→ Détail : [`MCP.md`](./MCP.md).
 
 ## Libellés & UX — [Q37], [Q38]
 

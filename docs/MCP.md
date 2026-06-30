@@ -208,21 +208,22 @@ cargo build --release --bin conso-server --target x86_64-unknown-linux-gnu
 ## Contrainte DuckDB mono-processus ⚠️
 
 DuckDB embarqué n'autorise qu'**un seul processus writer** sur un fichier
-`.duckdb`. Le mode `--mcp` ouvre la base directement (via `conso-engine`) :
-**il ne peut pas coexister avec une instance HTTP `conso-server`** (sans
-`--mcp`) sur le même fichier.
+`.duckdb`. La contrainte s'applique selon le mode MCP choisi :
 
-Règle d'usage :
-- **Soit** l'UI (serveur HTTP, `conso-server` sans `--mcp`),
-- **Soit** l'agent (mode `--mcp`), pas les deux à la fois sur la même base.
-
-Pour un usage UI + agent simultané, évolution future = route HTTP `/mcp`
-(Streamable HTTP transport), non couverte par ce sprint
-([Q54](./QUESTIONS_OUVERTES.md) décision D2).
+- **Mode HTTP `/mcp` (recommandé)** — **aucune contrainte** : l'agent et l'UI
+  tournent dans le **même process** (`conso-server`), partagent la même
+  connexion DuckDB. UI et agent sont simultanés sur la même base réelle.
+- **Mode stdio `--mcp`** — process **séparé** qui ouvre la base directement :
+  il ne peut pas coexister avec une instance HTTP `conso-server` sur le **même
+  fichier**. Deux options :
+  - bac à sable : `CONSO_DB_PATH` pointe sur une base **distincte**
+    (`.conso-mcp.duckdb`) → pas de conflit, mais données séparées de l'UI ;
+  - base réelle : `CONSO_DB_PATH` = la base de l'UI → alors **exclusive**
+    (arrêtez l'UI avant de lancer une session MCP stdio, et inversement).
 
 ## Exemples de prompts agent
 
-Une fois le MCP configuré, dans opencode :
+Une fois le MCP configuré (mode HTTP ou stdio), dans opencode :
 
 ```
 use the conso tool to describe_model, then list the entities
@@ -238,7 +239,29 @@ la consolidation 1 et résume les anomalies
 
 ## Tester manuellement (sans opencode)
 
-Le serveur MCP parle JSON-RPC sur stdio. Pour le déboguer :
+### Mode HTTP (`/mcp`) — sans client MCP, via `curl`/Invoke-WebRequest
+
+Lancez `conso-server` (sans `--mcp`), puis :
+
+```bash
+# initialize
+curl -sS -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}'
+
+# tools/list
+curl -sS -X POST http://localhost:3000/mcp \
+  -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+Réponses en JSON direct (mode stateless + `json_response`). L'UI REST
+(`/api/...`) reste disponible en parallèle sur la même base.
+
+### Mode stdio (`--mcp`)
+
+Le serveur MCP parle JSON-RPC sur stdio :
 
 ```bash
 # depuis prototype/rust/
